@@ -1,4 +1,6 @@
 //! Core configuration types and structs.
+//!
+//! See design doc Section 2.6 for field details and defaults.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,7 +9,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 /// Newtype wrapper for Server Identity.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct ServerId(pub String);
 
@@ -30,7 +33,8 @@ impl From<String> for ServerId {
 }
 
 /// Newtype wrapper for Task Type Identity.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct TaskTypeId(pub String);
 
@@ -53,7 +57,8 @@ impl From<String> for TaskTypeId {
 }
 
 /// Newtype wrapper for Task Class Name.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct TaskClassName(pub String);
 
@@ -76,7 +81,8 @@ impl From<String> for TaskClassName {
 }
 
 /// Newtype wrapper for Requestor Identity.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct RequestorId(pub String);
 
@@ -99,6 +105,7 @@ impl From<String> for RequestorId {
 }
 
 /// Structured logging level.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
@@ -111,6 +118,7 @@ pub enum LogLevel {
 }
 
 /// Structured logging format.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
@@ -121,6 +129,7 @@ pub enum LogFormat {
 }
 
 /// Inference backend type.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Backend {
@@ -130,6 +139,7 @@ pub enum Backend {
 }
 
 /// KV cache quantization type.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheType {
@@ -140,6 +150,7 @@ pub enum CacheType {
 }
 
 /// Flash attention mode.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FlashAttnMode {
@@ -150,6 +161,7 @@ pub enum FlashAttnMode {
 }
 
 /// Speculative decoding method.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SpeculativeMethod {
@@ -169,6 +181,7 @@ fn default_lookup_ngram_size() -> u32 {
 }
 
 /// Model architecture classification.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ModelArchitecture {
@@ -178,12 +191,14 @@ pub enum ModelArchitecture {
 }
 
 /// GPU identity (usually index).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(transparent)]
 pub struct GpuId(pub u32);
 
 /// GPU device specification.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DeviceSpec {
     pub gpu_id: GpuId,
     #[serde(default)]
@@ -191,13 +206,15 @@ pub struct DeviceSpec {
 }
 
 /// LoRA adapter configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LoraAdapterConfig {
     pub path: PathBuf,
     pub scale: f32,
 }
 
 /// Top-level configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     #[serde(default)]
@@ -214,6 +231,8 @@ pub struct AppConfig {
     pub priority_rules: PriorityRulesConfig,
 }
 
+/// Global system configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlobalConfig {
     #[serde(default = "default_bind_address")]
@@ -289,6 +308,8 @@ fn default_state_dir() -> PathBuf {
     PathBuf::from("/var/run/llamaforge/")
 }
 
+/// gRPC listener configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GrpcConfig {
     #[serde(default)]
@@ -297,6 +318,8 @@ pub struct GrpcConfig {
     pub tls_key: Option<PathBuf>,
 }
 
+/// Prometheus metrics configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PrometheusConfig {
     #[serde(default = "default_prometheus_port")]
@@ -311,6 +334,8 @@ fn default_prometheus_path() -> String {
     "/metrics".to_string()
 }
 
+/// Web UI configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WebUiConfig {
     #[serde(default = "default_true")]
@@ -320,6 +345,8 @@ fn default_true() -> bool {
     true
 }
 
+/// Single llama-server instance configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub model_path: PathBuf,
@@ -384,6 +411,8 @@ fn default_ctx_size() -> u32 {
     0
 }
 
+/// Priority-aware queuing and scheduling rules.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PriorityRulesConfig {
     #[serde(default)]
@@ -402,6 +431,8 @@ pub struct PriorityRulesConfig {
     pub preemption: PreemptionConfig,
 }
 
+/// Request starvation boost configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StarvationConfig {
     #[serde(default = "default_starvation_threshold")]
@@ -424,12 +455,16 @@ fn default_starvation_boost() -> u32 {
     50
 }
 
+/// Fair share scheduling weights.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FairShareConfig {
     #[serde(default)]
     pub weights: HashMap<RequestorId, u32>,
 }
 
+/// Queue preemption configuration.
+/// See design doc Section 2.6.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PreemptionConfig {
     #[serde(default)]
@@ -442,7 +477,8 @@ fn default_preempt_min_tokens() -> u32 {
 }
 
 /// Paths to all configuration and state files.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// See design doc Section 3.3.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConfigPaths {
     pub main_config: PathBuf,
     pub priority_rules: PathBuf,
@@ -453,24 +489,17 @@ pub struct ConfigPaths {
 impl ConfigPaths {
     pub fn new(main_config: PathBuf, priority_rules: PathBuf, state_dir: PathBuf) -> Self {
         let lock_file = state_dir.join("config.lock");
-        Self {
-            main_config,
-            priority_rules,
-            state_dir,
-            lock_file,
-        }
+        Self { main_config, priority_rules, state_dir, lock_file }
     }
 }
 
 /// Mutations that can be applied to the configuration at runtime.
+/// See design doc Section 2.6.
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigMutation {
     /// Replace the LoRA adapter list for a specific server.
-    SetLoraAdapters {
-        server_id: ServerId,
-        adapters: Vec<LoraAdapterConfig>,
-    },
+    SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> },
 }
 
 #[cfg(test)]
@@ -492,6 +521,75 @@ mod tests {
         let toml = toml::to_string(&config).unwrap();
         let parsed: AppConfig = toml::from_str(&toml).unwrap();
         assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn test_app_config_full_roundtrip() {
+        let mut config = AppConfig {
+            global: GlobalConfig {
+                bind_address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                grpc_port: 9000,
+                http_port: 9001,
+                log_level: LogLevel::Debug,
+                log_format: LogFormat::Json,
+                metrics_db_path: PathBuf::from("test.db"),
+                metrics_retention_days: 7,
+                queue_max_depth: 50,
+                queue_default_timeout_secs: 60,
+                restart_stagger_secs: 1,
+                api_key: Some("secret".to_string()),
+                state_dir: PathBuf::from("/tmp/test"),
+            },
+            grpc: GrpcConfig {
+                tls_cert: Some(PathBuf::from("cert.pem")),
+                tls_key: Some(PathBuf::from("key.pem")),
+            },
+            prometheus: PrometheusConfig { port: 9999, path: "/metrics_test".to_string() },
+            web_ui: WebUiConfig { enabled: false },
+            servers: HashMap::new(),
+            priority_rules: PriorityRulesConfig {
+                task_types: HashMap::from([(TaskTypeId::from("chat"), 500)]),
+                custom_task_types: HashMap::from([(TaskTypeId::from("ext"), 150)]),
+                task_type_classes: HashMap::from([(
+                    TaskTypeId::from("chat"),
+                    TaskClassName::from("ui"),
+                )]),
+                requestor_bonuses: HashMap::from([(RequestorId::from("vip"), 100)]),
+                starvation: StarvationConfig { threshold_secs: 10, boost_per_interval: 5 },
+                fair_share: FairShareConfig {
+                    weights: HashMap::from([(RequestorId::from("default"), 100)]),
+                },
+                preemption: PreemptionConfig { enabled: true, min_tokens_before_preempt: 5 },
+            },
+        };
+
+        config.servers.insert(
+            ServerId::from("s1"),
+            ServerConfig {
+                model_path: PathBuf::from("model.gguf"),
+                alias: Some("alias".to_string()),
+                port: 1234,
+                backend: Backend::Custom,
+                devices: vec![DeviceSpec { gpu_id: GpuId(0), layer_range: Some(0..10) }],
+                gpu_layers: 32,
+                parallel_slots: 2,
+                ctx_size: 4096,
+                cache_type_k: CacheType::Q8_0,
+                cache_type_v: CacheType::Q4_0,
+                flash_attn: FlashAttnMode::Enabled,
+                lora_adapters: vec![LoraAdapterConfig {
+                    path: PathBuf::from("lora.gguf"),
+                    scale: 0.5,
+                }],
+                estimated_vram_mb: Some(1024),
+                speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
+                model_architecture: ModelArchitecture::Recurrent,
+            },
+        );
+
+        let toml_str = toml::to_string(&config).expect("failed to serialize full config");
+        let parsed: AppConfig = toml::from_str(&toml_str).expect("failed to parse full config");
+        assert_eq!(config, parsed, "roundtrip failed for fully populated config");
     }
 
     #[test]
