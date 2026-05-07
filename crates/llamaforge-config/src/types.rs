@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 /// Newtype wrapper for Server Identity.
@@ -262,7 +262,7 @@ impl Default for GlobalConfig {
 }
 
 fn default_bind_address() -> IpAddr {
-    "0.0.0.0".parse().unwrap()
+    IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
 }
 fn default_grpc_port() -> u16 {
     50051
@@ -498,9 +498,19 @@ mod tests {
     fn test_global_config_defaults() {
         let toml = "[global]\n";
         let config: AppConfig = toml::from_str(toml).unwrap();
-        assert_eq!(config.global.grpc_port, 50051);
-        assert_eq!(config.global.http_port, 8000);
-        assert_eq!(config.global.bind_address, "0.0.0.0".parse::<IpAddr>().unwrap());
+        let g = config.global;
+        assert_eq!(g.bind_address, IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
+        assert_eq!(g.grpc_port, 50051);
+        assert_eq!(g.http_port, 8000);
+        assert_eq!(g.log_level, LogLevel::Info);
+        assert_eq!(g.log_format, LogFormat::Pretty);
+        assert_eq!(g.metrics_db_path, PathBuf::from("llamaforge.db"));
+        assert_eq!(g.metrics_retention_days, 30);
+        assert_eq!(g.queue_max_depth, 1000);
+        assert_eq!(g.queue_default_timeout_secs, 300);
+        assert_eq!(g.restart_stagger_secs, 5);
+        assert_eq!(g.api_key, None);
+        assert_eq!(g.state_dir, PathBuf::from("/var/run/llamaforge/"));
     }
 
     #[test]
@@ -510,4 +520,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-

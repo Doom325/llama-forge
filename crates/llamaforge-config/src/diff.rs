@@ -206,7 +206,7 @@ fn compute_server_diff(old: &ServerConfig, new: &ServerConfig) -> ServerConfigDi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AppConfig, ServerConfig};
+    use crate::types::{AppConfig, LoraAdapterConfig, ServerConfig};
     use std::path::PathBuf;
 
     #[test]
@@ -291,12 +291,18 @@ mod tests {
             ServerId::from("s1"),
             ServerConfig {
                 model_path: PathBuf::from("m1.gguf"),
-                alias: Some("old".to_string()),
+                lora_adapters: vec![LoraAdapterConfig {
+                    path: PathBuf::from("l1.gguf"),
+                    scale: 0.5,
+                }],
                 ..Default::default()
             },
         );
         let mut new = old.clone();
-        new.servers.get_mut(&ServerId::from("s1")).unwrap().alias = Some("new".to_string());
+        new.servers.get_mut(&ServerId::from("s1")).unwrap().lora_adapters = vec![LoraAdapterConfig {
+            path: PathBuf::from("l1.gguf"),
+            scale: 0.8,
+        }];
 
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);
@@ -305,7 +311,7 @@ mod tests {
                 assert_eq!(id.0, "s1");
                 assert!(!diff.requires_restart());
                 assert!(diff.hot_reloadable());
-                assert!(diff.fields_changed.contains(&ServerConfigField::Alias));
+                assert!(diff.fields_changed.contains(&ServerConfigField::LoraAdapters));
             }
             _ => panic!("expected ServerChanged"),
         }
@@ -323,5 +329,54 @@ mod tests {
             ConfigChange::GlobalChanged => {}
             _ => panic!("expected GlobalChanged"),
         }
+    }
+
+    #[test]
+    fn test_compute_diff_priority_rules_changed() {
+        let old = AppConfig::default();
+        let mut new = AppConfig::default();
+        new.priority_rules.starvation.threshold_secs = 60;
+
+        let diff = compute_diff(&old, &new);
+        assert_eq!(diff.changes.len(), 1);
+        match &diff.changes[0] {
+            ConfigChange::PriorityRulesChanged => {}
+            _ => panic!("expected PriorityRulesChanged"),
+        }
+    }
+
+    #[test]
+    fn test_compute_diff_multi_change() {
+        let mut old = AppConfig::default();
+        old.servers.insert(
+            ServerId::from("s1"),
+            ServerConfig {
+                model_path: PathBuf::from("m1.gguf"),
+                port: 8080,
+                ..Default::default()
+            },
+        );
+
+        let mut new = old.clone();
+        new.global.http_port = 9000;
+        new.servers.remove(&ServerId::from("s1"));
+        new.servers.insert(
+            ServerId::from("s2"),
+            ServerConfig {
+                model_path: PathBuf::from("m2.gguf"),
+                port: 8081,
+                ..Default::default()
+            },
+        );
+
+        let diff = compute_diff(&old, &new);
+        assert_eq!(diff.changes.len(), 3);
+        let has_global = diff.changes.iter().any(|c| matches!(c, ConfigChange::GlobalChanged));
+        let has_s1_removed = diff.changes.iter().any(|c| matches!(c, ConfigChange::ServerRemoved { id } if id.0 == "s1"));
+        let has_s2_added = diff.changes.iter().any(|c| matches!(c, ConfigChange::ServerAdded { id } if id.0 == "s2"));
+
+        assert!(has_global);
+        assert!(has_s1_removed);
+        assert!(has_s2_added);
     }
 }
