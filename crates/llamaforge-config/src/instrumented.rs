@@ -1,0 +1,1 @@
+//! Observability decorator for ConfigHandle.
