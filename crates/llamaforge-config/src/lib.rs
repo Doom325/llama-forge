@@ -5,5 +5,8 @@ pub mod diff;
 pub mod error;
 pub(crate) mod handle;
 pub(crate) mod instrumented;
-pub(crate) mod source;
+pub mod source;
 pub mod types;
+
+pub use source::toml_file::TomlFileConfigSource;
+pub use source::{ConfigSource, InMemoryConfigSource};
