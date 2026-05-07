@@ -12,3 +12,4 @@ name = "llamaforge"
 path = "src/main.rs"
 
 [dependencies]
+llamaforge-config = { path = "../llamaforge-config" }
