@@ -170,28 +170,28 @@ Implement the persistence layer: the `ConfigSource` port trait (design doc Secti
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 3.1 | Define `ConfigSource` trait | Exactly as design doc Section 2.1: `load()`, `persist()`, `export()`. All return `Result`. `Send + Sync` bounds. | `src/source.rs` |
-| 3.2 | Implement `InMemoryConfigSource` | Holds `Mutex<AppConfig>`. `load()` clones the inner config. `persist()` applies the mutation and stores. `export()` serializes to TOML string. Used exclusively in tests. | `src/source.rs` |
-| 3.3 | Implement `TomlFileConfigSource` | Constructor takes `ConfigPaths`. `load()`: reads main TOML + priority rules TOML, merges into `AppConfig`. `persist()`: crash-safe writeback (atomic rename with truncation fallback). `export()`: serializes current config to TOML via `toml_edit` (preserves formatting). | `src/source/toml_file.rs` |
-| 3.4 | Implement validation in `load()` | After parsing, run validation rules from design doc Section 6.1: unique server ports, non-empty `model_path`, `ctx_size > 0`, `parallel_slots > 0`, `queue_default_timeout_secs > 0`. `fair_share` weights normalization (auto-correct + warn). Return `ConfigLoadError::ValidationError` on hard errors. | `src/source/toml_file.rs` |
-| 3.5 | Implement flock with timeout | `acquire_flock_with_timeout()`: `LOCK_NB` retry loop per design doc cross-cutting concerns. 100ms sleep between attempts, 30s deadline. Runs inside `spawn_blocking`. | `src/source/toml_file.rs` |
-| 3.6 | Implement atomic writeback | Phase 1: write to temp file (`state_dir/config.tmp`) → `fsync` → `rename` over original. Phase 2 (fallback on EXDEV/EACCES): truncate original → write → `fsync`. Use `toml_edit` to preserve comments/formatting: parse existing file, apply mutation to the document tree, serialize back. | `src/source/toml_file.rs` |
-| 3.7 | Implement mutation application | `fn apply_mutation(config: &mut AppConfig, mutation: &ConfigMutation)` — matches on `ConfigMutation` variants. For `SetLoraAdapters`: find server by ID, replace `lora_adapters` vec. Return error if server ID not found. | `src/source/toml_file.rs` |
-| 3.8 | Unit tests: InMemoryConfigSource | Load → modify → persist → load again → verify mutation applied. Test export produces valid TOML. | `src/source.rs` (tests) |
-| 3.9 | Integration tests: TomlFileConfigSource | Using `tempfile::TempDir`: (a) create valid TOML → `load()` → verify parsed config. (b) `persist()` with `SetLoraAdapters` → read file back → verify LoRA section updated. (c) `persist()` preserves TOML comments (write a TOML with `# this is a comment`, persist a mutation, verify comment survives). (d) Empty file → `load()` returns `EmptyFile` error. (e) Invalid TOML → `load()` returns `ParseError`. (f) Missing file → `load()` returns `NotFound`. | `tests/toml_file_source.rs` |
-| 3.10 | Integration tests: validation | (a) Duplicate server ports → `ValidationError`. (b) Empty `model_path` → `ValidationError`. (c) `ctx_size = 0` → `ValidationError`. (d) `fair_share` weights summing to 50 → auto-normalized to 100 + warning logged. | `tests/validation.rs` |
-| 3.11 | Integration tests: flock contention | Spawn two tasks that both try to `persist()` concurrently with flock. Verify both succeed (serialized) and final file contains both mutations. | `tests/flock.rs` |
+| 3.1 | Define `ConfigSource` trait | Exactly as design doc Section 2.1: `load()`, `persist()`, `export()`. All return `Result`. `Send + Sync` bounds. | [x] `src/source.rs` |
+| 3.2 | Implement `InMemoryConfigSource` | Holds `Mutex<AppConfig>`. `load()` clones the inner config. `persist()` applies the mutation and stores. `export()` serializes to TOML string. Used exclusively in tests. | [x] `src/source.rs` |
+| 3.3 | Implement `TomlFileConfigSource` | Constructor takes `ConfigPaths`. `load()`: reads main TOML + priority rules TOML, merges into `AppConfig`. `persist()`: crash-safe writeback (atomic rename with truncation fallback). `export()`: serializes current config to TOML via `toml_edit` (preserves formatting). | [x] `src/source/toml_file.rs` |
+| 3.4 | Implement validation in `load()` | After parsing, run validation rules from design doc Section 6.1: unique server ports, non-empty `model_path`, `ctx_size > 0`, `parallel_slots > 0`, `queue_default_timeout_secs > 0`. `fair_share` weights normalization (auto-correct + warn). Return `ConfigLoadError::ValidationError` on hard errors. | [x] `src/source/toml_file.rs` |
+| 3.5 | Implement flock with timeout | `acquire_flock_with_timeout()`: `LOCK_NB` retry loop per design doc cross-cutting concerns. 100ms sleep between attempts, 30s deadline. Runs inside `spawn_blocking`. | [x] `src/source/toml_file.rs` |
+| 3.6 | Implement atomic writeback | Phase 1: write to temp file (`state_dir/config.tmp`) → `fsync` → `rename` over original. Phase 2 (fallback on EXDEV/EACCES): truncate original → write → `fsync`. Use `toml_edit` to preserve comments/formatting: parse existing file, apply mutation to the document tree, serialize back. | [x] `src/source/toml_file.rs` |
+| 3.7 | Implement mutation application | `fn apply_mutation(config: &mut AppConfig, mutation: &ConfigMutation)` — matches on `ConfigMutation` variants. For `SetLoraAdapters`: find server by ID, replace `lora_adapters` vec. Return error if server ID not found. | [x] `src/source/toml_file.rs` |
+| 3.8 | Unit tests: InMemoryConfigSource | Load → modify → persist → load again → verify mutation applied. Test export produces valid TOML. | [x] `src/source.rs` (tests) |
+| 3.9 | Integration tests: TomlFileConfigSource | Using `tempfile::TempDir`: (a) create valid TOML → `load()` → verify parsed config. (b) `persist()` with `SetLoraAdapters` → read file back → verify LoRA section updated. (c) `persist()` preserves TOML comments (write a TOML with `# this is a comment`, persist a mutation, verify comment survives). (d) Empty file → `load()` returns `EmptyFile` error. (e) Invalid TOML → `load()` returns `ParseError`. (f) Missing file → `load()` returns `NotFound`. | [x] `tests/toml_file_source.rs` |
+| 3.10 | Integration tests: validation | (a) Duplicate server ports → `ValidationError`. (b) Empty `model_path` → `ValidationError`. (c) `ctx_size = 0` → `ValidationError`. (d) `fair_share` weights summing to 50 → auto-normalized to 100 + warning logged. | [x] `tests/validation.rs` |
+| 3.11 | Integration tests: flock contention | Spawn two tasks that both try to `persist()` concurrently with flock. Verify both succeed (serialized) and final file contains both mutations. | [x] `tests/flock.rs` |
 
 ### PR3 Acceptance Criteria
 
-- [ ] `ConfigSource` trait compiles and is object-safe (`Arc<dyn ConfigSource>` works)
-- [ ] `InMemoryConfigSource` passes all unit tests
-- [ ] `TomlFileConfigSource` reads real TOML files, validates, and returns correct `AppConfig`
-- [ ] Writeback preserves TOML comments and formatting
-- [ ] Empty/missing/invalid files produce the correct `ConfigLoadError` variant
-- [ ] All 8 validation rules from design doc Section 6.1 are enforced
-- [ ] flock contention test passes without deadlock
-- [ ] No `unwrap()` or `expect()` in production code
+- [x] `ConfigSource` trait compiles and is object-safe (`Arc<dyn ConfigSource>` works)
+- [x] `InMemoryConfigSource` passes all unit tests
+- [x] `TomlFileConfigSource` reads real TOML files, validates, and returns correct `AppConfig`
+- [x] Writeback preserves TOML comments and formatting
+- [x] Empty/missing/invalid files produce the correct `ConfigLoadError` variant
+- [x] All 8 validation rules from design doc Section 6.1 are enforced
+- [x] flock contention test passes without deadlock
+- [x] No `unwrap()` or `expect()` in production code
 
 ### PR3 Creation Steps
 
