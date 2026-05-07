@@ -1,0 +1,13 @@
+[package]
+name = "llamaforge-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Generated protobuf and tonic bindings for LlamaForge gRPC services."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

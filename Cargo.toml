@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/llamaforge",
+    "crates/llamaforge-proto",
+]
+
+[workspace.package]
+version = "0.1.0-draft"
+edition = "2021"
+rust-version = "1.75"
+license = "Apache-2.0"
+repository = "https://github.com/Doom325/llama-forge"
+
+[workspace.dependencies]
+# Wired in as components land. Versions are pinned conservatively;
+# bump deliberately, not opportunistically.
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
