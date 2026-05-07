@@ -102,29 +102,29 @@ Define every data type from the design doc Sections 2.6, 2.7, and 2.8. This is t
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 2.1 | Create module structure | `lib.rs` declares modules: `pub mod types;`, `pub mod error;`, `pub mod diff;`, `pub mod source;`, `pub mod handle;`, `pub mod instrumented;`, `pub mod cached;`. Stub each module file. | `src/lib.rs`, `src/*.rs` |
-| 2.2 | Implement newtype wrappers | `ServerId`, `TaskTypeId`, `TaskClassName`, `RequestorId` — all with `#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]`, `#[serde(transparent)]`. Implement `Display` for each. Add `impl From<&str>` and `impl From<String>` convenience constructors. | `src/types.rs` |
-| 2.3 | Implement enums | `LogLevel`, `LogFormat`, `Backend`, `CacheType`, `FlashAttnMode`, `SpeculativeMethod`, `ModelArchitecture` — all with `Default`, `Serialize`, `Deserialize`, `PartialEq`, `Clone`, `Debug`. Match design doc defaults exactly. | `src/types.rs` |
-| 2.4 | Implement config structs | `AppConfig`, `GlobalConfig`, `ServerConfig`, `GrpcConfig`, `PrometheusConfig`, `WebUiConfig`, `PriorityRulesConfig`, `StarvationConfig`, `FairShareConfig`, `PreemptionConfig`, `LoraAdapterConfig`, `DeviceSpec`, `GpuId`. Every field gets `#[serde(default)]` or `#[serde(default = "...")]` with a named default function. All structs derive `Default`. | `src/types.rs` |
-| 2.5 | Implement `ConfigPaths` | `main_config: PathBuf`, `priority_rules: PathBuf`, `state_dir: PathBuf`, `lock_file: PathBuf`. Constructor that computes `lock_file` from `state_dir`. | `src/types.rs` |
-| 2.6 | Implement `ConfigMutation` | `#[non_exhaustive] pub enum ConfigMutation` with `SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> }`. | `src/types.rs` |
-| 2.7 | Implement error types | `ConfigLoadError`, `ConfigReloadError`, `WritebackError` — exactly as specified in design doc Section 2.7. Use `thiserror`. Source fields use `Box<dyn Error + Send + Sync>` for `ParseError` and `SerializeError`. | `src/error.rs` |
-| 2.8 | Implement diff types | `ConfigDiff`, `ConfigChange` (`#[non_exhaustive]`), `ServerConfigDiff`, `ServerConfigField`. Implement `ConfigDiff::servers_added()`, `servers_removed()`, `servers_changed()` iterator methods. Implement `ServerConfigField::requires_restart()` and `hot_reloadable()`. Implement `ServerConfigDiff::requires_restart()` and `hot_reloadable()`. | `src/diff.rs` |
-| 2.9 | Implement diff computation | `pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff`. Compare `global`, `priority_rules`, server maps (added/removed/changed). For changed servers, field-by-field comparison producing `Vec<ServerConfigField>`. | `src/diff.rs` |
-| 2.10 | Unit tests: serde roundtrip | Test that `AppConfig` serializes to TOML and parses back identically. Test that every default value is populated when parsing an empty `[global]` section. Test that unknown keys are silently ignored (serde default behavior). | `src/types.rs` (tests module) |
-| 2.11 | Unit tests: diff computation | Test cases: (a) identical configs → empty diff, (b) server added → `ServerAdded`, (c) server removed → `ServerRemoved`, (d) server port changed → `ServerChanged` with `requires_restart() == true`, (e) LoRA adapters changed → `ServerChanged` with `hot_reloadable() == true`, (f) multiple changes simultaneously, (g) global config changed → `GlobalChanged`, (h) priority rules changed → `PriorityRulesChanged`. | `src/diff.rs` (tests module) |
-| 2.12 | Unit tests: example config parsing | Parse `examples/llamaforge.toml` and `examples/priority_rules.toml` → assert they produce a valid `AppConfig` with expected values. This is a regression test that the example configs stay valid. | `tests/parse_examples.rs` |
+| 2.1 | Create module structure | `lib.rs` declares modules: `pub mod types;`, `pub mod error;`, `pub mod diff;`, `pub mod source;`, `pub mod handle;`, `pub mod instrumented;`, `pub mod cached;`. Stub each module file. | [x] `src/lib.rs`, `src/*.rs` |
+| 2.2 | Implement newtype wrappers | `ServerId`, `TaskTypeId`, `TaskClassName`, `RequestorId` — all with `#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]`, `#[serde(transparent)]`. Implement `Display` for each. Add `impl From<&str>` and `impl From<String>` convenience constructors. | [x] `src/types.rs` |
+| 2.3 | Implement enums | `LogLevel`, `LogFormat`, `Backend`, `CacheType`, `FlashAttnMode`, `SpeculativeMethod`, `ModelArchitecture` — all with `Default`, `Serialize`, `Deserialize`, `PartialEq`, `Clone`, `Debug`. Match design doc defaults exactly. | [x] `src/types.rs` |
+| 2.4 | Implement config structs | `AppConfig`, `GlobalConfig`, `ServerConfig`, `GrpcConfig`, `PrometheusConfig`, `WebUiConfig`, `PriorityRulesConfig`, `StarvationConfig`, `FairShareConfig`, `PreemptionConfig`, `LoraAdapterConfig`, `DeviceSpec`, `GpuId`. Every field gets `#[serde(default)]` or `#[serde(default = "...")]` with a named default function. All structs derive `Default`. | [x] `src/types.rs` |
+| 2.5 | Implement `ConfigPaths` | `main_config: PathBuf`, `priority_rules: PathBuf`, `state_dir: PathBuf`, `lock_file: PathBuf`. Constructor that computes `lock_file` from `state_dir`. | [x] `src/types.rs` |
+| 2.6 | Implement `ConfigMutation` | `#[non_exhaustive] pub enum ConfigMutation` with `SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> }`. | [x] `src/types.rs` |
+| 2.7 | Implement error types | `ConfigLoadError`, `ConfigReloadError`, `WritebackError` — exactly as specified in design doc Section 2.7. Use `thiserror`. Source fields use `Box<dyn Error + Send + Sync>` for `ParseError` and `SerializeError`. | [x] `src/error.rs` |
+| 2.8 | Implement diff types | `ConfigDiff`, `ConfigChange` (`#[non_exhaustive]`), `ServerConfigDiff`, `ServerConfigField`. Implement `ConfigDiff::servers_added()`, `servers_removed()`, `servers_changed()` iterator methods. Implement `ServerConfigField::requires_restart()` and `hot_reloadable()`. Implement `ServerConfigDiff::requires_restart()` and `hot_reloadable()`. | [x] `src/diff.rs` |
+| 2.9 | Implement diff computation | `pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff`. Compare `global`, `priority_rules`, server maps (added/removed/changed). For changed servers, field-by-field comparison producing `Vec<ServerConfigField>`. | [x] `src/diff.rs` |
+| 2.10 | Unit tests: serde roundtrip | Test that `AppConfig` serializes to TOML and parses back identically. Test that every default value is populated when parsing an empty `[global]` section. Test that unknown keys are silently ignored (serde default behavior). | [x] `src/types.rs` (tests module) |
+| 2.11 | Unit tests: diff computation | Test cases: (a) identical configs → empty diff, (b) server added → `ServerAdded`, (c) server removed → `ServerRemoved`, (d) server port changed → `ServerChanged` with `requires_restart() == true`, (e) LoRA adapters changed → `ServerChanged` with `hot_reloadable() == true`, (f) multiple changes simultaneously, (g) global config changed → `GlobalChanged`, (h) priority rules changed → `PriorityRulesChanged`. | [x] `src/diff.rs` (tests module) |
+| 2.12 | Unit tests: example config parsing | Parse `examples/llamaforge.toml` and `examples/priority_rules.toml` → assert they produce a valid `AppConfig` with expected values. This is a regression test that the example configs stay valid. | [x] `tests/parse_examples.rs` |
 
 ### PR2 Acceptance Criteria
 
-- [ ] All types compile and derive the required traits
-- [ ] `cargo test --workspace` passes with all unit tests green
-- [ ] `examples/llamaforge.toml` parses into a valid `AppConfig`
-- [ ] Diff computation correctly identifies added, removed, and changed servers
-- [ ] `ServerConfigField::requires_restart()` returns `true` for all restart-requiring fields per design doc
-- [ ] `ServerConfigField::hot_reloadable()` returns `true` only for `LoraAdapters`, `Alias`, `EstimatedVramMb`
-- [ ] Serde roundtrip: `parse(serialize(config)) == config` for a fully populated config
-- [ ] Unknown TOML keys don't cause parse errors (verify with a TOML string containing `bogus_key = 42`)
+- [x] All types compile and derive the required traits
+- [x] `cargo test --workspace` passes with all unit tests green
+- [x] `examples/llamaforge.toml` parses into a valid `AppConfig`
+- [x] Diff computation correctly identifies added, removed, and changed servers
+- [x] `ServerConfigField::requires_restart()` returns `true` for all restart-requiring fields per design doc
+- [x] `ServerConfigField::hot_reloadable()` returns `true` only for `LoraAdapters`, `Alias`, `EstimatedVramMb`
+- [x] Serde roundtrip: `parse(serialize(config)) == config` for a fully populated config
+- [x] Unknown TOML keys don't cause parse errors (verify with a TOML string containing `bogus_key = 42`)
 
 ### PR2 Creation Steps
 
