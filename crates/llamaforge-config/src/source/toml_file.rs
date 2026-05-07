@@ -28,14 +28,38 @@ impl TomlFileConfigSource {
         let mut ports = HashSet::new();
 
         // 1. Fair share weights normalization (Soft validation)
+        // See design doc Section 6.1.
         if !config.priority_rules.fair_share.weights.is_empty() {
             let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
             if sum != 100 && sum > 0 {
                 tracing::warn!("fair_share weights sum to {}, auto-normalizing to 100", sum);
+                // Proportional normalization
+                for weight in config.priority_rules.fair_share.weights.values_mut() {
+                    *weight = ((*weight as f64 / sum as f64) * 100.0).round() as u32;
+                }
+
+                // Fix rounding errors to ensure exact 100 sum
+                let new_sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+                if new_sum != 100 && !config.priority_rules.fair_share.weights.is_empty() {
+                    if let Some(first_id) =
+                        config.priority_rules.fair_share.weights.keys().next().cloned()
+                    {
+                        if let Some(w) = config.priority_rules.fair_share.weights.get_mut(&first_id)
+                        {
+                            if new_sum < 100 {
+                                *w += 100 - new_sum;
+                            } else {
+                                *w = w.saturating_sub(new_sum - 100);
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // 2-5, 8. Server rules
+        // 2-6, 8. Server rules
+        // Rule 8: No duplicate server IDs is structurally enforced by HashMap during parsing,
+        // but we ensure all servers pass validation.
         for (id, server) in &config.servers {
             // Rule 2: Unique server ports
             if !ports.insert(server.port) {
@@ -63,6 +87,16 @@ impl TomlFileConfigSource {
                 return Err(ConfigLoadError::ValidationError {
                     message: format!("parallel_slots must be > 0 for server '{}'", id),
                 });
+            }
+
+            // Rule 6: Device specs reference valid GPU IDs (Structural check)
+            let mut gpus = HashSet::new();
+            for dev in &server.devices {
+                if !gpus.insert(dev.gpu_id.0) {
+                    return Err(ConfigLoadError::ValidationError {
+                        message: format!("duplicate gpu_id {} for server '{}'", dev.gpu_id.0, id),
+                    });
+                }
             }
         }
 
@@ -154,7 +188,7 @@ impl ConfigSource for TomlFileConfigSource {
             })?;
 
         // Merge priority rules if the file exists
-        if self.paths.priority_rules.exists() {
+        if self.paths.priority_rules.exists() && self.paths.priority_rules.as_os_str() != "" {
             let rules_content = fs::read_to_string(&self.paths.priority_rules).map_err(|e| {
                 ConfigLoadError::IoError { path: self.paths.priority_rules.clone(), source: e }
             })?;
@@ -165,6 +199,9 @@ impl ConfigSource for TomlFileConfigSource {
                         path: self.paths.priority_rules.clone(),
                         source: Box::new(e),
                     })?;
+
+                // Rule 8: If priority_rules.toml also contains servers, they would overwrite.
+                // AppConfig as defined only has priority_rules in the rules file usually.
                 config.priority_rules = rules;
             }
         }
@@ -231,7 +268,7 @@ impl ConfigSource for TomlFileConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{LoraAdapterConfig, ServerId};
+    use crate::types::{LoraAdapterConfig, RequestorId, ServerId};
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -274,36 +311,92 @@ threshold_secs = 60
     }
 
     #[test]
-    fn test_toml_file_source_validation() {
+    fn test_toml_file_source_load_errors() {
         let dir = tempdir().unwrap();
-        let main_path = dir.path().join("llamaforge.toml");
+        let state_dir = dir.path().to_path_buf();
+
+        // 1. NotFound
         let paths =
-            ConfigPaths::new(main_path.clone(), PathBuf::from(""), dir.path().to_path_buf());
-
-        fs::write(
-            &main_path,
-            r#"
-[servers.s1]
-model_path = "m1.gguf"
-port = 8080
-ctx_size = 2048
-[servers.s2]
-model_path = "m2.gguf"
-port = 8080
-ctx_size = 2048
-"#,
-        )
-        .unwrap();
-
+            ConfigPaths::new(dir.path().join("missing.toml"), PathBuf::new(), state_dir.clone());
         let source = TomlFileConfigSource::new(paths);
-        let result = source.load();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            ConfigLoadError::ValidationError { message } => {
-                assert!(message.contains("duplicate server port"))
+        assert!(matches!(source.load().unwrap_err(), ConfigLoadError::NotFound { .. }));
+
+        // 2. EmptyFile
+        let empty_path = dir.path().join("empty.toml");
+        fs::write(&empty_path, "   \n").unwrap();
+        let paths = ConfigPaths::new(empty_path, PathBuf::new(), state_dir.clone());
+        let source = TomlFileConfigSource::new(paths);
+        assert!(matches!(source.load().unwrap_err(), ConfigLoadError::EmptyFile { .. }));
+
+        // 3. ParseError
+        let junk_path = dir.path().join("junk.toml");
+        fs::write(&junk_path, "this is not toml").unwrap();
+        let paths = ConfigPaths::new(junk_path, PathBuf::new(), state_dir.clone());
+        let source = TomlFileConfigSource::new(paths);
+        assert!(matches!(source.load().unwrap_err(), ConfigLoadError::ParseError { .. }));
+    }
+
+    #[test]
+    fn test_toml_file_source_validation_rules() {
+        let dir = tempdir().unwrap();
+        let state_dir = dir.path().to_path_buf();
+        let main_path = dir.path().join("llamaforge.toml");
+
+        let check_val = |content: &str, expected: &str| {
+            fs::write(&main_path, content).unwrap();
+            let paths = ConfigPaths::new(main_path.clone(), PathBuf::new(), state_dir.clone());
+            let source = TomlFileConfigSource::new(paths);
+            let err = source.load().unwrap_err();
+            if let ConfigLoadError::ValidationError { message } = err {
+                assert!(message.contains(expected), "expected '{}' in '{}'", expected, message);
+            } else {
+                panic!("expected ValidationError, got {:?}", err);
             }
-            _ => panic!("expected ValidationError"),
-        }
+        };
+
+        // Rule 2: Duplicate port
+        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+
+        // Rule 3: Empty model_path
+        check_val("[servers.s1]\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
+
+        // Rule 4: ctx_size 0
+        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
+
+        // Rule 5: parallel_slots 0
+        check_val(
+            "[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
+            "parallel_slots must be > 0",
+        );
+
+        // Rule 6: Duplicate GPU ID
+        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
+
+        // Rule 7: queue_default_timeout_secs 0
+        check_val(
+            "[global]\nqueue_default_timeout_secs=0",
+            "queue_default_timeout_secs must be > 0",
+        );
+    }
+
+    #[test]
+    fn test_fair_share_normalization() {
+        let mut config = AppConfig::default();
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("a"), 10);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("b"), 10);
+
+        TomlFileConfigSource::validate(&mut config).unwrap();
+
+        let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+        assert_eq!(sum, 100);
+        assert_eq!(
+            *config.priority_rules.fair_share.weights.get(&RequestorId::from("a")).unwrap(),
+            50
+        );
+        assert_eq!(
+            *config.priority_rules.fair_share.weights.get(&RequestorId::from("b")).unwrap(),
+            50
+        );
     }
 
     #[test]
@@ -324,7 +417,7 @@ ctx_size = 2048
         )
         .unwrap();
 
-        let paths = ConfigPaths::new(main_path.clone(), PathBuf::from(""), state_dir);
+        let paths = ConfigPaths::new(main_path.clone(), PathBuf::new(), state_dir);
         let source = TomlFileConfigSource::new(paths);
         let config = source.load().unwrap();
 
@@ -345,5 +438,24 @@ ctx_size = 2048
         let s1 = updated_config.servers.get(&ServerId::from("s1")).unwrap();
         assert_eq!(s1.lora_adapters.len(), 1);
         assert_eq!(s1.lora_adapters[0].path, PathBuf::from("lora.gguf"));
+    }
+
+    #[tokio::test]
+    async fn test_flock_contention_timeout() {
+        let dir = tempdir().unwrap();
+        let lock_path = dir.path().join("config.lock");
+
+        // 1. Manually acquire an exclusive lock
+        let f = File::create(&lock_path).unwrap();
+        #[allow(deprecated)]
+        nix::fcntl::flock(f.as_raw_fd(), nix::fcntl::FlockArg::LockExclusive).unwrap();
+        // 2. Try to acquire it via acquire_flock_with_timeout in another thread
+        let handle = std::thread::spawn(move || {
+            let f2 = File::open(&lock_path).unwrap();
+            TomlFileConfigSource::acquire_flock_with_timeout(&f2, Duration::from_millis(500))
+        });
+
+        let result = handle.join().unwrap();
+        assert!(matches!(result.unwrap_err(), WritebackError::LockTimeout { .. }));
     }
 }
