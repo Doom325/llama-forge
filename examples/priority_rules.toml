@@ -1,0 +1,43 @@
+# LlamaForge Priority Rules Example
+# See docs/component-designs/01_CONFIG_MANAGER.md for field details.
+
+[task_types]
+# Base priority for well-known task types.
+# Lower value = lower priority.
+default = 100
+chat = 200
+code_completion = 300
+emergency = 1000
+
+[custom_task_types]
+# User-defined task types.
+classification = 150
+
+[task_type_classes]
+# Mapping of task types to broader classes for observability.
+chat = "conversational"
+code_completion = "utility"
+emergency = "system"
+
+[requestor_bonuses]
+# Priority bonuses for specific requestors (e.g., VIP users or internal apps).
+"admin-dashboard" = 500
+"batch-job-service" = -50
+
+[starvation]
+# Time a request must wait in queue before receiving a priority boost.
+threshold_secs = 30
+# Amount of priority boost applied per interval.
+boost_per_interval = 50
+
+[fair_share]
+# Weights for Deficit Round Robin (DRR) scheduling between requestors.
+# Sum of weights should be 100 (auto-normalized if not).
+"default" = 80
+"internal-testing" = 20
+
+[preemption]
+# Enable preemption of lower-priority requests if slots are full.
+enabled = false
+# Minimum tokens a request must generate before it can be preempted.
+min_tokens_before_preempt = 10

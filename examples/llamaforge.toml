@@ -1,0 +1,89 @@
+# LlamaForge Main Configuration Example
+# See docs/component-designs/01_CONFIG_MANAGER.md for field details.
+
+[global]
+# Address to bind the HTTP and gRPC listeners to.
+bind_address = "0.0.0.0"
+
+# Port for the gRPC InferenceService (canonical API).
+grpc_port = 50051
+
+# Port for the HTTP/OpenAI shim and Web UI.
+http_port = 8000
+
+# Structured logging configuration.
+# Levels: trace, debug, info, warn, error
+log_level = "info"
+# Formats: json, pretty, compact
+log_format = "pretty"
+
+# Path to the SQLite metrics database.
+metrics_db_path = "llamaforge.db"
+
+# How many days to retain historical request metrics.
+metrics_retention_days = 30
+
+# Maximum number of requests allowed in the priority queue.
+queue_max_depth = 1000
+
+# Default timeout for requests in the queue if not specified by the client.
+queue_default_timeout_secs = 300
+
+# Seconds to wait between concurrent server restarts to avoid VRAM contention.
+restart_stagger_secs = 5
+
+# Optional API key for authentication.
+# api_key = "your-secret-key-here"
+
+# Directory for lock files and temporary state.
+state_dir = "/tmp/llamaforge"
+
+[grpc]
+# gRPC-specific settings (Phase 5)
+# tls_cert = "cert.pem"
+# tls_key = "key.pem"
+
+[prometheus]
+# Prometheus metrics endpoint settings
+# port = 9090
+# path = "/metrics"
+
+[web_ui]
+# Web management dashboard settings (Phase 5)
+# enabled = true
+
+[servers.llama-3-8b]
+# Path to the GGUF model file.
+model_path = "models/llama-3-8b.gguf"
+# Human-readable alias used in logs and UI.
+alias = "Llama-3-8B-Instruct"
+# Port for the downstream llama-server instance.
+port = 8080
+# Inference backend: llama_server or custom.
+backend = "llama_server"
+# GPU layers to offload (-1 for all).
+gpu_layers = -1
+# Number of parallel sequence slots.
+parallel_slots = 4
+# Context size (0 for model default).
+ctx_size = 8192
+# KV cache quantization.
+cache_type_k = "f16"
+cache_type_v = "f16"
+# Flash attention mode: auto, enabled, disabled.
+flash_attn = "auto"
+# Estimated VRAM usage in MB (optional override).
+estimated_vram_mb = 6000
+# Model architecture: Transformer or Recurrent.
+model_architecture = "Transformer"
+
+[[servers.llama-3-8b.lora_adapters]]
+path = "loras/math-lora.gguf"
+scale = 0.8
+
+[servers.tinyllama]
+model_path = "models/tinyllama-1.1b.gguf"
+port = 8081
+gpu_layers = -1
+parallel_slots = 1
+ctx_size = 2048
