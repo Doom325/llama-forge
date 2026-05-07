@@ -2,15 +2,19 @@
 //!
 //! See design doc Section 2.1 for the port trait definition.
 
+pub(crate) mod memory;
 pub mod toml_file;
 
 use crate::error::{ConfigLoadError, WritebackError};
 use crate::types::{AppConfig, ConfigMutation};
-use parking_lot::Mutex;
 
 /// Port abstraction for config persistence — separates domain logic from I/O.
+///
 /// See design doc Section 2.1.
-pub trait ConfigSource: Send + Sync {
+///
+/// R5: This trait is Sealed to ensure all implementations are maintained
+/// within the crate boundaries for stable v1.0.
+pub trait ConfigSource: Send + Sync + private::Sealed {
     /// Load the full config from the backing store.
     fn load(&self) -> Result<AppConfig, ConfigLoadError>;
 
@@ -21,52 +25,17 @@ pub trait ConfigSource: Send + Sync {
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError>;
 }
 
-/// In-memory implementation of ConfigSource for unit testing.
-/// Holds a Mutex-protected AppConfig.
-pub struct InMemoryConfigSource {
-    config: Mutex<AppConfig>,
+/// Sealed trait pattern to prevent external implementations.
+pub(crate) mod private {
+    pub trait Sealed {}
 }
 
-impl InMemoryConfigSource {
-    /// Create a new InMemoryConfigSource with the given config.
-    pub fn new(config: AppConfig) -> Self {
-        Self { config: Mutex::new(config) }
-    }
-}
-
-impl ConfigSource for InMemoryConfigSource {
-    fn load(&self) -> Result<AppConfig, ConfigLoadError> {
-        Ok(self.config.lock().clone())
-    }
-
-    fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError> {
-        let mut inner = self.config.lock();
-        let mut new_config = config.clone();
-
-        // Basic mutation application for testing.
-        // Real implementation in PR5 handles the full SetLoraAdapters logic.
-        match mutation {
-            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
-                if let Some(server) = new_config.servers.get_mut(server_id) {
-                    server.lora_adapters = adapters.clone();
-                } else {
-                    // For InMemory we just ignore if not found.
-                }
-            }
-        }
-
-        *inner = new_config;
-        Ok(())
-    }
-
-    fn export(&self, config: &AppConfig) -> Result<String, WritebackError> {
-        toml::to_string(config).map_err(|e| WritebackError::SerializeError { source: Box::new(e) })
-    }
-}
+impl private::Sealed for toml_file::TomlFileConfigSource {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::memory::InMemoryConfigSource;
     use crate::types::ServerId;
 
     #[test]

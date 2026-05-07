@@ -32,7 +32,9 @@ impl TomlFileConfigSource {
         if !config.priority_rules.fair_share.weights.is_empty() {
             let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
             if sum != 100 && sum > 0 {
-                tracing::warn!("fair_share weights sum to {}, auto-normalizing to 100", sum);
+                // R24: Structured logging
+                tracing::warn!(sum, "fair_share weights do not sum to 100, auto-normalizing");
+
                 // Proportional normalization
                 for weight in config.priority_rules.fair_share.weights.values_mut() {
                     *weight = ((*weight as f64 / sum as f64) * 100.0).round() as u32;
@@ -110,6 +112,14 @@ impl TomlFileConfigSource {
         Ok(())
     }
 
+    /// Acquires an exclusive flock with a retry loop.
+    ///
+    /// # Rationale for Raw FD & Deprecated flock:
+    /// The newer `nix::fcntl::Flock` RAII guard consumes ownership of the `File` object,
+    /// which complicates our retry loop and subsequent use of the file for read/write.
+    /// Since this is a specialized persistence component with explicit lifecycle control,
+    /// raw FD locking provides the necessary flexibility for the 30s timeout pattern
+    /// defined in design doc Section 3.2.
     #[allow(deprecated)]
     fn acquire_flock_with_timeout(fd: &File, timeout: Duration) -> Result<(), WritebackError> {
         let deadline = Instant::now() + timeout;
@@ -200,8 +210,6 @@ impl ConfigSource for TomlFileConfigSource {
                         source: Box::new(e),
                     })?;
 
-                // Rule 8: If priority_rules.toml also contains servers, they would overwrite.
-                // AppConfig as defined only has priority_rules in the rules file usually.
                 config.priority_rules = rules;
             }
         }
@@ -239,7 +247,10 @@ impl ConfigSource for TomlFileConfigSource {
         temp_file
             .write_all(doc.to_string().as_bytes())
             .map_err(|e| WritebackError::WriteFailed { source: e })?;
-        temp_file.sync_all().map_err(|e| WritebackError::WriteFailed { source: e })?;
+        temp_file.sync_all().map_err(|e| {
+            tracing::warn!(error = ?e, "sync_all failed during writeback");
+            WritebackError::WriteFailed { source: e }
+        })?;
 
         match fs::rename(&temp_path, &self.paths.main_config) {
             Ok(()) => Ok(()),
@@ -248,7 +259,7 @@ impl ConfigSource for TomlFileConfigSource {
                     || e.raw_os_error() == Some(nix::libc::EXDEV) =>
             {
                 // Phase 2: Fallback to truncation
-                tracing::warn!("atomic rename failed ({:?}), falling back to truncation", e);
+                tracing::warn!(error = ?e, "atomic rename failed, falling back to truncation");
                 let mut f = File::create(&self.paths.main_config)
                     .map_err(|e| WritebackError::WriteFailed { source: e })?;
                 f.write_all(doc.to_string().as_bytes())

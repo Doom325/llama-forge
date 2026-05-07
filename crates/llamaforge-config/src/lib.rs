@@ -9,4 +9,4 @@ pub mod source;
 pub mod types;
 
 pub use source::toml_file::TomlFileConfigSource;
-pub use source::{ConfigSource, InMemoryConfigSource};
+pub use source::ConfigSource;
