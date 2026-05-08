@@ -155,9 +155,7 @@ impl TomlFileConfigSource {
                 let server = servers
                     .get_mut(&server_id.0)
                     .and_then(|v| v.as_table_like_mut())
-                    .ok_or_else(|| WritebackError::SerializeError {
-                        source: format!("server '{}' not found in config", server_id).into(),
-                    })?;
+                    .ok_or_else(|| WritebackError::ServerNotFound)?;
 
                 let mut lora_array = toml_edit::Array::new();
                 for adapter in adapters {
@@ -267,6 +265,11 @@ impl ConfigSource for TomlFileConfigSource {
             {
                 // Phase 2: Fallback to truncation
                 tracing::warn!(error = ?e, "atomic rename failed, falling back to truncation");
+
+                // TODO(PR5/Design §3.2): In the full protocol, we should first attempt to apply
+                // the hot-reload via the `llama-server` API before doing this disk writeback.
+                // For now, this just persists the configuration.
+
                 let mut f = File::create(&self.paths.main_config)
                     .map_err(|e| WritebackError::WriteFailed { source: e })?;
                 f.write_all(doc.to_string().as_bytes())

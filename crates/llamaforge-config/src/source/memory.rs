@@ -37,15 +37,15 @@ impl ConfigSource for InMemoryConfigSource {
     fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError> {
         let mut inner = self.config.lock();
         let mut new_config = config.clone();
-
         match mutation {
             ConfigMutation::SetLoraAdapters { server_id, adapters } => {
                 if let Some(server) = new_config.servers.get_mut(server_id) {
                     server.lora_adapters = adapters.clone();
+                } else {
+                    return Err(WritebackError::ServerNotFound);
                 }
             }
         }
-
         *inner = new_config;
         Ok(())
     }

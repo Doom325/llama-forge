@@ -310,7 +310,7 @@ mod tests {
         };
 
         let err = handle.writeback(mutation).await.unwrap_err();
-        assert!(matches!(err, WritebackError::SerializeError { .. }));
+        assert!(matches!(err, WritebackError::ServerNotFound));
 
         let snap = handle.snapshot();
         assert_eq!(**snap, config); // Unchanged
