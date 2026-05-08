@@ -182,15 +182,12 @@ mod tests {
     use super::*;
     use crate::source::memory::InMemoryConfigSource;
     use crate::types::ServerId;
-    use tracing_subscriber::EnvFilter;
 
     // A simple test to ensure it compiles and executes without panic.
     // Real tracing assertions are tricky in unit tests without a specific capture setup,
     // but we can verify the behavior delegates correctly.
     #[tokio::test]
     async fn test_instrumented_handle_delegates() {
-        let _ = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).try_init();
-
         let config = AppConfig::default();
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
         let handle = ConfigHandle::load(source).unwrap();
