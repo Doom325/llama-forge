@@ -33,23 +33,17 @@ impl ConfigSource for InMemoryConfigSource {
     fn load(&self) -> Result<AppConfig, ConfigLoadError> {
         Ok(self.config.lock().clone())
     }
-
     fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError> {
         let mut inner = self.config.lock();
         let mut new_config = config.clone();
-        match mutation {
-            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
-                if let Some(server) = new_config.servers.get_mut(server_id) {
-                    server.lora_adapters = adapters.clone();
-                } else {
-                    return Err(WritebackError::ServerNotFound);
-                }
-            }
+
+        if mutation.apply(&mut new_config) == crate::types::MutationOutcome::TargetMissing {
+            return Err(WritebackError::ServerNotFound);
         }
+
         *inner = new_config;
         Ok(())
     }
-
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError> {
         toml::to_string(config).map_err(|e| WritebackError::SerializeError { source: Box::new(e) })
     }

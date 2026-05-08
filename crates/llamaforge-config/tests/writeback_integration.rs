@@ -104,10 +104,7 @@ ctx_size = 2048
     };
 
     let err = handle.writeback(mutation).await.unwrap_err();
-    assert!(
-        matches!(err, WritebackError::WriteFailed { .. })
-            || matches!(err, WritebackError::ReadOnly { .. })
-    );
+    assert!(matches!(err, WritebackError::ReadOnly { .. }));
 
     // Cleanup: In a real test environment we might need to chmod to delete the dir,
     // but tempfile usually handles it, or we can just use libc directly if needed.

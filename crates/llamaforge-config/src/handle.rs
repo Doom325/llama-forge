@@ -78,30 +78,26 @@ impl ConfigWriter for ConfigHandle {
     async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
         let _guard = self.reload_mutex.lock().await;
 
-        let current_config = (**self.inner.load()).clone();
+        let current_guard = self.inner.load();
+        let mut new_config = (**current_guard).clone();
 
-        let source = self.source.clone();
-        let mutation_clone = mutation.clone();
-        let config_clone = current_config.clone();
-
-        tokio::task::spawn_blocking(move || source.persist(&config_clone, &mutation_clone))
-            .await
-            .map_err(|e| WritebackError::SerializeError { source: Box::new(e) })??;
-
-        let mut new_config = current_config.clone();
-        match mutation {
-            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
-                if let Some(server) = new_config.servers.get_mut(&server_id) {
-                    server.lora_adapters = adapters;
-                } else {
-                    return Err(WritebackError::SerializeError {
-                        source: format!("server '{}' not found", server_id).into(),
-                    });
-                }
+        match mutation.apply(&mut new_config) {
+            crate::types::MutationOutcome::TargetMissing => {
+                return Err(WritebackError::ServerNotFound)
             }
+            crate::types::MutationOutcome::Unchanged => return Ok(ConfigDiff::new(vec![])),
+            crate::types::MutationOutcome::Applied => {}
         }
 
-        let diff = compute_diff(&current_config, &new_config);
+        let source = self.source.clone();
+        let current_config_arc = current_guard.clone();
+        let mutation_clone = mutation.clone();
+
+        tokio::task::spawn_blocking(move || source.persist(&current_config_arc, &mutation_clone))
+            .await
+            .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
+
+        let diff = compute_diff(&current_guard, &new_config);
 
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));

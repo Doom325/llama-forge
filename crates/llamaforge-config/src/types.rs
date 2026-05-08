@@ -501,19 +501,29 @@ pub enum ConfigMutation {
     SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> },
 }
 
+/// The result of applying a `ConfigMutation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutationOutcome {
+    Applied,
+    Unchanged,
+    TargetMissing,
+}
+
 impl ConfigMutation {
     /// Applies the mutation in-place to an AppConfig.
-    /// Returns true if the configuration was actually modified.
-    pub fn apply(&self, config: &mut AppConfig) -> bool {
+    pub fn apply(&self, config: &mut AppConfig) -> MutationOutcome {
         match self {
             ConfigMutation::SetLoraAdapters { server_id, adapters } => {
                 if let Some(server) = config.servers.get_mut(server_id) {
                     if server.lora_adapters != *adapters {
                         server.lora_adapters = adapters.clone();
-                        return true;
+                        MutationOutcome::Applied
+                    } else {
+                        MutationOutcome::Unchanged
                     }
+                } else {
+                    MutationOutcome::TargetMissing
                 }
-                false
             }
         }
     }
