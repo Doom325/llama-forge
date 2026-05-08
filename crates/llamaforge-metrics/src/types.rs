@@ -167,6 +167,7 @@ pub struct ConfigSnapshot {
 }
 
 /// WAL checkpoint mode.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckpointMode {
     Passive,
