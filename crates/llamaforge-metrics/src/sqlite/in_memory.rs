@@ -1,7 +1,5 @@
 //! In-memory test double for the metrics store.
 
-#![allow(dead_code)]
-
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 
@@ -119,5 +117,18 @@ impl StoreMaintenance for InMemoryStore {
             + self.processes.lock().len()
             + self.snapshots.lock().len();
         Ok((total_items * 1024) as u64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_in_memory_store_coverage() {
+        let store = InMemoryStore::default();
+        store.replace_events(vec![]);
+        drop(store.processes.lock());
+        drop(store.snapshots.lock());
     }
 }

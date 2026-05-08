@@ -2,8 +2,6 @@
 //!
 //! See design doc Section 2.7 for metrics definitions.
 
-#![allow(dead_code)]
-
 use llamaforge_config::ServerId;
 
 /// Port trait for recording request-level and server-level business metrics.
@@ -66,3 +64,13 @@ impl StoreHealthRecorder for NoopMetrics {
 }
 
 impl AppMetrics for NoopMetrics {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_noop_metrics() {
+        let _ = NoopMetrics;
+    }
+}

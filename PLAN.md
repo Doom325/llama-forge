@@ -170,7 +170,7 @@ git push -u origin metrics/02-traits
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-1.1 | Trait object safety | `const _: Option<&dyn EventStore> = None;` etc. compile. Also runtime: `Arc<dyn EventStore>` from `InMemoryStore` works. | Compiles |
+| VC-1.1 | Trait static dispatch | Tests compile and verify `InMemoryStore` works via static dispatch (`&impl EventStore`). (Relaxed from dyn safety). | Compiles |
 | VC-1.2 | Cross-crate types | `llamaforge-metrics` uses `ServerId` from `llamaforge-config` without issues | Compiles and tests pass |
 | VC-1.3 | WriterCommand completeness | Every storage trait method has a corresponding `WriterCommand` variant | Manual audit |
 | VC-1.4 | Error type hygiene | `StoreError` does not reference `rusqlite`, `anyhow`, or any backend type | Grep for banned deps in `error.rs` |

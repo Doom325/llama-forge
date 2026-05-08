@@ -127,10 +127,22 @@ mod tests {
         assert!(metrics.is_empty());
     }
 
+    async fn test_process_store(store: &impl ProcessStore) {
+        let procs = store.list_managed_processes().await.unwrap();
+        assert!(procs.is_empty());
+    }
+
+    async fn test_store_maintenance(store: &impl StoreMaintenance) {
+        let size = store.estimated_size_bytes().await.unwrap();
+        assert_eq!(size, 0);
+    }
+
     #[tokio::test]
     async fn test_traits_static_dispatch() {
         let store = InMemoryStore::default();
         test_event_store(&store).await;
         test_request_metrics_store(&store).await;
+        test_process_store(&store).await;
+        test_store_maintenance(&store).await;
     }
 }

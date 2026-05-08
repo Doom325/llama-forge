@@ -15,6 +15,7 @@ use crate::types::{
 };
 
 /// Command protocol for the SQLite writer thread.
+#[cfg_attr(not(test), allow(dead_code))]
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum WriterCommand {
