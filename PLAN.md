@@ -225,31 +225,31 @@ Implement the central `ConfigHandle` struct (design doc Section 2.3) with its co
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 4.1 | Implement `ConfigHandle` struct | Fields: `source: Arc<dyn ConfigSource>`, `inner: ArcSwap<AppConfig>`, `reload_mutex: tokio::sync::Mutex<()>`, `change_tx: broadcast::Sender<Arc<ConfigDiff>>`. Broadcast channel capacity: 16. | `src/handle.rs` |
-| 4.2 | Implement `ConfigHandle::load()` | Constructor. Calls `source.load()`, wraps result in `ArcSwap::new(Arc::new(config))`. Creates broadcast channel. Returns `Result<Self, ConfigLoadError>`. This is the typestate enforcement — you can't have a `ConfigHandle` without a valid config. | `src/handle.rs` |
-| 4.3 | Implement `ConfigHandle::snapshot()` | Returns `arc_swap::Guard<Arc<AppConfig>>`. Single atomic load. | `src/handle.rs` |
-| 4.4 | Implement `ConfigHandle::subscribe()` | Returns `broadcast::Receiver<Arc<ConfigDiff>>`. Calls `self.change_tx.subscribe()`. | `src/handle.rs` |
-| 4.5 | Implement `ConfigHandle::reload()` | Acquire `reload_mutex`. Call `source.load()` inside `spawn_blocking` (delegate to source). Compute `diff(old, new)`. If diff is non-empty: `ArcSwap::store(new)`, broadcast `Arc<ConfigDiff>`. Return `ConfigDiff`. If source returns error: return `ConfigReloadError`, do NOT update ArcSwap, do NOT broadcast. | `src/handle.rs` |
-| 4.6 | Implement `ConfigHandle::export_toml()` | Delegates to `source.export(&current_snapshot)`. Returns `Result<String, WritebackError>`. | `src/handle.rs` |
-| 4.7 | Implement `ConfigReader` trait for `ConfigHandle` | Delegate `snapshot()` and `subscribe()`. | `src/handle.rs` |
-| 4.8 | Define `ConfigReader` and `ConfigWriter` traits | In a `traits.rs` module. `ConfigReader: Send + Sync` with `snapshot()` and `subscribe()`. `ConfigWriter: Send + Sync` with `async fn reload()` and `async fn writeback()`. | `src/traits.rs` |
-| 4.9 | Unit tests: load + snapshot | Using `InMemoryConfigSource`: load a config, `snapshot()` returns the loaded config. Verify snapshot is cheap (call 1000 times, should be < 1ms total). | `src/handle.rs` (tests) |
-| 4.10 | Unit tests: reload with diff broadcast | Load config A. Modify source to return config B (add a server). Call `reload()`. Verify: (a) `snapshot()` returns config B, (b) subscriber received `ConfigDiff` with `ServerAdded`, (c) `reload()` return value matches the broadcast diff. | `src/handle.rs` (tests) |
-| 4.11 | Unit tests: reload with no changes | Load config. Call `reload()` without changing source. Verify diff has empty `changes` vec. Subscriber still receives the diff (even if empty — design choice for simplicity). | `src/handle.rs` (tests) |
-| 4.12 | Unit tests: reload with parse error | Load config. Make source return `ParseError` on next `load()`. Call `reload()`. Verify: (a) returns `ConfigReloadError`, (b) `snapshot()` still returns the OLD valid config, (c) no diff broadcast. | `src/handle.rs` (tests) |
-| 4.13 | Unit tests: concurrent reloads serialized | Spawn 10 concurrent `reload()` tasks. Source has a 50ms delay. Verify all complete without panic. Verify final snapshot is consistent (last-writer-wins, but no mixed state). | `src/handle.rs` (tests) |
-| 4.14 | Unit tests: broadcast lagged subscriber | Create subscriber. Send 20 rapid reloads without consuming from receiver. Verify subscriber gets `RecvError::Lagged`. | `src/handle.rs` (tests) |
+| 4.1 | Implement `ConfigHandle` struct | Fields: `source: Arc<dyn ConfigSource>`, `inner: ArcSwap<AppConfig>`, `reload_mutex: tokio::sync::Mutex<()>`, `change_tx: broadcast::Sender<Arc<ConfigDiff>>`. Broadcast channel capacity: 16. | [x] `src/handle.rs` |
+| 4.2 | Implement `ConfigHandle::load()` | Constructor. Calls `source.load()`, wraps result in `ArcSwap::new(Arc::new(config))`. Creates broadcast channel. Returns `Result<Self, ConfigLoadError>`. This is the typestate enforcement — you can't have a `ConfigHandle` without a valid config. | [x] `src/handle.rs` |
+| 4.3 | Implement `ConfigHandle::snapshot()` | Returns `arc_swap::Guard<Arc<AppConfig>>`. Single atomic load. | [x] `src/handle.rs` |
+| 4.4 | Implement `ConfigHandle::subscribe()` | Returns `broadcast::Receiver<Arc<ConfigDiff>>`. Calls `self.change_tx.subscribe()`. | [x] `src/handle.rs` |
+| 4.5 | Implement `ConfigHandle::reload()` | Acquire `reload_mutex`. Call `source.load()` inside `spawn_blocking` (delegate to source). Compute `diff(old, new)`. If diff is non-empty: `ArcSwap::store(new)`, broadcast `Arc<ConfigDiff>`. Return `ConfigDiff`. If source returns error: return `ConfigReloadError`, do NOT update ArcSwap, do NOT broadcast. | [x] `src/handle.rs` |
+| 4.6 | Implement `ConfigHandle::export_toml()` | Delegates to `source.export(&current_snapshot)`. Returns `Result<String, WritebackError>`. | [x] `src/handle.rs` |
+| 4.7 | Implement `ConfigReader` trait for `ConfigHandle` | Delegate `snapshot()` and `subscribe()`. | [x] `src/handle.rs` |
+| 4.8 | Define `ConfigReader` and `ConfigWriter` traits | In a `traits.rs` module. `ConfigReader: Send + Sync` with `snapshot()` and `subscribe()`. `ConfigWriter: Send + Sync` with `async fn reload()` and `async fn writeback()`. | [x] `src/traits.rs` |
+| 4.9 | Unit tests: load + snapshot | Using `InMemoryConfigSource`: load a config, `snapshot()` returns the loaded config. Verify snapshot is cheap (call 1000 times, should be < 1ms total). | [x] `src/handle.rs` (tests) |
+| 4.10 | Unit tests: reload with diff broadcast | Load config A. Modify source to return config B (add a server). Call `reload()`. Verify: (a) `snapshot()` returns config B, (b) subscriber received `ConfigDiff` with `ServerAdded`, (c) `reload()` return value matches the broadcast diff. | [x] `src/handle.rs` (tests) |
+| 4.11 | Unit tests: reload with no changes | Load config. Call `reload()` without changing source. Verify diff has empty `changes` vec. Subscriber still receives the diff (even if empty — design choice for simplicity). | [x] `src/handle.rs` (tests) |
+| 4.12 | Unit tests: reload with parse error | Load config. Make source return `ParseError` on next `load()`. Call `reload()`. Verify: (a) returns `ConfigReloadError`, (b) `snapshot()` still returns the OLD valid config, (c) no diff broadcast. | [x] `src/handle.rs` (tests) |
+| 4.13 | Unit tests: concurrent reloads serialized | Spawn 10 concurrent `reload()` tasks. Source has a 50ms delay. Verify all complete without panic. Verify final snapshot is consistent (last-writer-wins, but no mixed state). | [x] `src/handle.rs` (tests) |
+| 4.14 | Unit tests: broadcast lagged subscriber | Create subscriber. Send 20 rapid reloads without consuming from receiver. Verify subscriber gets `RecvError::Lagged`. | [x] `src/handle.rs` (tests) |
 
 ### PR4 Acceptance Criteria
 
-- [ ] `ConfigHandle::load()` constructs successfully from `InMemoryConfigSource`
-- [ ] `snapshot()` returns the current config without blocking
-- [ ] `reload()` atomically swaps the config and broadcasts the diff
-- [ ] Failed reloads leave the old config intact and don't broadcast
-- [ ] Concurrent reloads are serialized (no mixed state, no panics)
-- [ ] Lagged subscribers get `RecvError::Lagged` (not a panic or deadlock)
-- [ ] `ConfigReader` and `ConfigWriter` traits compile and are object-safe
-- [ ] All 6 unit test cases pass
+- [x] `ConfigHandle::load()` constructs successfully from `InMemoryConfigSource`
+- [x] `snapshot()` returns the current config without blocking
+- [x] `reload()` atomically swaps the config and broadcasts the diff
+- [x] Failed reloads leave the old config intact and don't broadcast
+- [x] Concurrent reloads are serialized (no mixed state, no panics)
+- [x] Lagged subscribers get `RecvError::Lagged` (not a panic or deadlock)
+- [x] `ConfigReader` and `ConfigWriter` traits compile and are object-safe
+- [x] All 6 unit test cases pass
 
 ### PR4 Creation Steps
 

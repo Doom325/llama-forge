@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 /// R17/R20: This is pub(crate) to keep the stable API focused on production sources.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct InMemoryConfigSource {
-    config: Mutex<AppConfig>,
+    pub(crate) config: Mutex<AppConfig>,
 }
 
 impl InMemoryConfigSource {
