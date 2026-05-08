@@ -221,7 +221,7 @@ impl ConfigSource for TomlFileConfigSource {
         &self,
         _config: &AppConfig,
         mutation: &ConfigMutation,
-    ) -> Result<(), WritebackError> {
+    ) -> Result<crate::source::WriteStrategy, WritebackError> {
         // 1. Open and lock
         let lock_file = match File::create(&self.paths.lock_file) {
             Ok(f) => f,
@@ -267,7 +267,7 @@ impl ConfigSource for TomlFileConfigSource {
         })?;
 
         match fs::rename(&temp_path, &self.paths.main_config) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok(crate::source::WriteStrategy::AtomicRename),
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
                     || e.raw_os_error() == Some(nix::libc::EROFS) =>
@@ -293,7 +293,7 @@ impl ConfigSource for TomlFileConfigSource {
                 f.write_all(doc.to_string().as_bytes())
                     .map_err(|e| WritebackError::WriteFailed { source: e })?;
                 f.sync_all().map_err(|e| WritebackError::WriteFailed { source: e })?;
-                Ok(())
+                Ok(crate::source::WriteStrategy::TruncateFallback)
             }
             Err(e) => Err(WritebackError::WriteFailed { source: e }),
         }

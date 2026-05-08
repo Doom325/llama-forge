@@ -1,13 +1,13 @@
 //! Config Manager — see component-designs/01_CONFIG_MANAGER.md
 
 pub(crate) mod cached;
-pub mod diff;
-pub mod error;
+pub(crate) mod diff;
+pub(crate) mod error;
 pub(crate) mod handle;
 pub(crate) mod instrumented;
 pub(crate) mod source;
 pub(crate) mod traits;
-pub mod types;
+pub(crate) mod types;
 
 pub use cached::CachedConfigReader;
 pub use diff::*;

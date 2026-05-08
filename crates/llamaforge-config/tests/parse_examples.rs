@@ -1,4 +1,4 @@
-use llamaforge_config::types::AppConfig;
+use llamaforge_config::{AppConfig, PriorityRulesConfig};
 use std::fs;
 use std::path::PathBuf;
 
@@ -27,7 +27,6 @@ fn test_parse_example_priority_rules_toml() {
     // For this test, we can just parse it into AppConfig if we wrap it or
     // parse it directly into PriorityRulesConfig if it's public.
 
-    use llamaforge_config::types::PriorityRulesConfig;
     let config: PriorityRulesConfig =
         toml::from_str(&content).expect("failed to parse example priority_rules.toml");
 

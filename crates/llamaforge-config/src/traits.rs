@@ -18,6 +18,9 @@ pub trait ConfigReader: Send + Sync + private::Sealed {
 
     /// Subscribe to configuration changes.
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>>;
+
+    /// Access the underlying ArcSwap for cached readers.
+    fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>>;
 }
 
 /// Write access for reloading or mutating configuration.
@@ -27,7 +30,10 @@ pub trait ConfigWriter: Send + Sync + private::Sealed {
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError>;
 
     /// Apply and persist a runtime mutation.
-    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError>;
+    async fn writeback(
+        &self,
+        mutation: ConfigMutation,
+    ) -> Result<(ConfigDiff, crate::source::WriteStrategy), WritebackError>;
 }
 
 pub(crate) mod private {

@@ -23,19 +23,19 @@ impl InstrumentedConfigHandle {
     /// Wrap a ConfigHandle with observability features.
     pub fn new(inner: ConfigHandle) -> Self {
         describe_counter!(
-            "config_reloads_total",
+            "llamaforge_config_reloads_total",
             "Total number of configuration reloads attempted"
         );
         describe_histogram!(
-            "config_reload_duration_seconds",
+            "llamaforge_config_reload_duration_seconds",
             "Time taken to reload the configuration"
         );
         describe_counter!(
-            "config_writebacks_total",
+            "llamaforge_config_writebacks_total",
             "Total number of configuration writebacks attempted"
         );
         describe_histogram!(
-            "config_writeback_duration_seconds",
+            "llamaforge_config_writeback_duration_seconds",
             "Time taken to persist configuration mutations"
         );
 
@@ -54,40 +54,55 @@ impl ConfigReader for InstrumentedConfigHandle {
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>> {
         self.inner.subscribe()
     }
+
+    fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>> {
+        self.inner.arc_swap()
+    }
 }
 
 impl ConfigWriter for InstrumentedConfigHandle {
     #[instrument(
         name = "config.reload",
         skip(self),
-        fields(config.server_count = tracing::field::Empty)
+        fields(
+            config.server_count = tracing::field::Empty,
+            config.diff.servers_added = tracing::field::Empty,
+            config.diff.servers_removed = tracing::field::Empty,
+            config.diff.servers_changed = tracing::field::Empty
+        )
     )]
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError> {
         let start = std::time::Instant::now();
         let result = self.inner.reload().await;
         let duration = start.elapsed();
 
-        histogram!("config_reload_duration_seconds").record(duration.as_secs_f64());
+        histogram!("llamaforge_config_reload_duration_seconds").record(duration.as_secs_f64());
 
         match &result {
             Ok(diff) => {
                 let snap = self.inner.snapshot();
-                tracing::Span::current().record("config.server_count", snap.servers.len());
+                let span = tracing::Span::current();
+                span.record("config.server_count", snap.servers.len());
+                span.record("config.diff.servers_added", diff.servers_added().count());
+                span.record("config.diff.servers_removed", diff.servers_removed().count());
+                span.record("config.diff.servers_changed", diff.servers_changed().count());
 
                 info!(
-                    diff.changes_count = diff.changes.len(),
-                    duration_ms = duration.as_millis(),
+                    config.diff.servers_added = diff.servers_added().count(),
+                    config.diff.servers_removed = diff.servers_removed().count(),
+                    config.diff.servers_changed = diff.servers_changed().count(),
+                    config.reload_duration_ms = duration.as_millis(),
                     "config.reloaded"
                 );
-                counter!("config_reloads_total", "result" => "success").increment(1);
+                counter!("llamaforge_config_reloads_total", "result" => "success").increment(1);
             }
             Err(e) => {
                 warn!(
                     error = ?e,
-                    duration_ms = duration.as_millis(),
+                    config.reload_duration_ms = duration.as_millis(),
                     "config.reload_failed"
                 );
-                counter!("config_reloads_total", "result" => "error").increment(1);
+                counter!("llamaforge_config_reloads_total", "result" => "error").increment(1);
             }
         }
 
@@ -99,41 +114,67 @@ impl ConfigWriter for InstrumentedConfigHandle {
         skip(self, mutation),
         fields(
             config.mutation_type = tracing::field::Empty,
-            config.server_id = tracing::field::Empty
+            config.server_id = tracing::field::Empty,
+            config.write_strategy = tracing::field::Empty,
+            config.diff.servers_added = tracing::field::Empty,
+            config.diff.servers_removed = tracing::field::Empty,
+            config.diff.servers_changed = tracing::field::Empty
         )
     )]
-    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
+    async fn writeback(
+        &self,
+        mutation: ConfigMutation,
+    ) -> Result<(ConfigDiff, crate::source::WriteStrategy), WritebackError> {
         let start = std::time::Instant::now();
 
         let span = tracing::Span::current();
-        match &mutation {
-            ConfigMutation::SetLoraAdapters { server_id, .. } => {
-                span.record("config.mutation_type", "SetLoraAdapters");
-                span.record("config.server_id", server_id.0.as_str());
-            }
-        }
+        let server_id_string = match &mutation {
+            ConfigMutation::SetLoraAdapters { server_id, .. } => server_id.0.clone(),
+        };
+        span.record("config.mutation_type", "SetLoraAdapters");
+        span.record("config.server_id", server_id_string.as_str());
 
         let result = self.inner.writeback(mutation).await;
         let duration = start.elapsed();
 
-        histogram!("config_writeback_duration_seconds").record(duration.as_secs_f64());
+        histogram!("llamaforge_config_writeback_duration_seconds").record(duration.as_secs_f64());
 
         match &result {
-            Ok(diff) => {
+            Ok((diff, strategy)) => {
+                span.record("config.write_strategy", format!("{:?}", strategy));
+                span.record("config.diff.servers_added", diff.servers_added().count());
+                span.record("config.diff.servers_removed", diff.servers_removed().count());
+                span.record("config.diff.servers_changed", diff.servers_changed().count());
+
                 info!(
-                    diff.changes_count = diff.changes.len(),
-                    duration_ms = duration.as_millis(),
+                    config.server_id = server_id_string.as_str(),
+                    config.write_strategy = ?strategy,
+                    config.diff.servers_added = diff.servers_added().count(),
+                    config.diff.servers_removed = diff.servers_removed().count(),
+                    config.diff.servers_changed = diff.servers_changed().count(),
+                    config.writeback_duration_ms = duration.as_millis(),
                     "config.writeback"
                 );
-                counter!("config_writebacks_total", "result" => "success").increment(1);
+                counter!("llamaforge_config_writebacks_total", "result" => "success").increment(1);
+            }
+            Err(WritebackError::ReadOnly { .. }) => {
+                warn!(
+                    error = ?result.as_ref().unwrap_err(),
+                    config.server_id = server_id_string.as_str(),
+                    config.writeback_duration_ms = duration.as_millis(),
+                    "config.writeback_failed_readonly"
+                );
+                counter!("llamaforge_config_writebacks_total", "result" => "error_readonly")
+                    .increment(1);
             }
             Err(e) => {
                 warn!(
                     error = ?e,
-                    duration_ms = duration.as_millis(),
+                    config.server_id = server_id_string.as_str(),
+                    config.writeback_duration_ms = duration.as_millis(),
                     "config.writeback_failed"
                 );
-                counter!("config_writebacks_total", "result" => "error").increment(1);
+                counter!("llamaforge_config_writebacks_total", "result" => "error").increment(1);
             }
         }
 

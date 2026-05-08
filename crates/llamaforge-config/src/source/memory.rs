@@ -33,7 +33,11 @@ impl ConfigSource for InMemoryConfigSource {
     fn load(&self) -> Result<AppConfig, ConfigLoadError> {
         Ok(self.config.lock().clone())
     }
-    fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError> {
+    fn persist(
+        &self,
+        config: &AppConfig,
+        mutation: &ConfigMutation,
+    ) -> Result<crate::source::WriteStrategy, WritebackError> {
         let mut inner = self.config.lock();
         let mut new_config = config.clone();
 
@@ -42,7 +46,7 @@ impl ConfigSource for InMemoryConfigSource {
         }
 
         *inner = new_config;
-        Ok(())
+        Ok(crate::source::WriteStrategy::Memory)
     }
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError> {
         toml::to_string(config).map_err(|e| WritebackError::SerializeError { source: Box::new(e) })
