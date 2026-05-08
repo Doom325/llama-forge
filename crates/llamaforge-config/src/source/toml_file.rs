@@ -224,6 +224,13 @@ impl ConfigSource for TomlFileConfigSource {
         _config: &AppConfig,
         mutation: &ConfigMutation,
     ) -> Result<(), WritebackError> {
+        // 0. Check for read-only filesystem
+        if let Ok(metadata) = fs::metadata(&self.paths.main_config) {
+            if metadata.permissions().readonly() {
+                return Err(WritebackError::ReadOnly { path: self.paths.main_config.clone() });
+            }
+        }
+
         // 1. Open and lock
         let lock_file = File::create(&self.paths.lock_file)
             .map_err(|e| WritebackError::WriteFailed { source: e })?;

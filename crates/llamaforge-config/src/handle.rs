@@ -75,9 +75,40 @@ impl ConfigWriter for ConfigHandle {
         Ok(diff)
     }
 
-    async fn writeback(&self, _mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
-        // Implemented in PR5 (Writeback Protocol). Stubbed for now to satisfy the trait.
-        Err(WritebackError::NotImplemented)
+    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
+        let _guard = self.reload_mutex.lock().await;
+
+        let current_config = (**self.inner.load()).clone();
+
+        let source = self.source.clone();
+        let mutation_clone = mutation.clone();
+        let config_clone = current_config.clone();
+
+        tokio::task::spawn_blocking(move || source.persist(&config_clone, &mutation_clone))
+            .await
+            .map_err(|e| WritebackError::SerializeError { source: Box::new(e) })??;
+
+        let mut new_config = current_config.clone();
+        match mutation {
+            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
+                if let Some(server) = new_config.servers.get_mut(&server_id) {
+                    server.lora_adapters = adapters;
+                } else {
+                    return Err(WritebackError::SerializeError {
+                        source: format!("server '{}' not found", server_id).into(),
+                    });
+                }
+            }
+        }
+
+        let diff = compute_diff(&current_config, &new_config);
+
+        if !diff.changes.is_empty() {
+            self.inner.store(Arc::new(new_config));
+            let _ = self.change_tx.send(Arc::new(diff.clone()));
+        }
+
+        Ok(diff)
     }
 }
 
@@ -230,5 +261,106 @@ mod tests {
 
         let result = rx.try_recv();
         assert!(matches!(result.unwrap_err(), broadcast::error::TryRecvError::Lagged(_)));
+    }
+
+    #[tokio::test]
+    async fn test_config_handle_writeback_happy_path() {
+        let mut config = AppConfig::default();
+        config.servers.insert(ServerId::from("s1"), ServerConfig::default());
+        let source = Arc::new(InMemoryConfigSource::new(config.clone()));
+        let handle = ConfigHandle::load(source).unwrap();
+        let mut rx = handle.subscribe();
+
+        let mutation = ConfigMutation::SetLoraAdapters {
+            server_id: ServerId::from("s1"),
+            adapters: vec![crate::types::LoraAdapterConfig {
+                path: std::path::PathBuf::from("lora.gguf"),
+                scale: 1.0,
+            }],
+        };
+
+        let diff = handle.writeback(mutation).await.unwrap();
+        assert_eq!(diff.changes.len(), 1);
+
+        match &diff.changes[0] {
+            ConfigChange::ServerChanged { id, diff } => {
+                assert_eq!(id.0, "s1");
+                assert!(diff.hot_reloadable());
+            }
+            _ => panic!("Expected ServerChanged"),
+        }
+
+        let snap = handle.snapshot();
+        assert_eq!(snap.servers.get(&ServerId::from("s1")).unwrap().lora_adapters.len(), 1);
+
+        let broadcast_diff = rx.recv().await.unwrap();
+        assert_eq!(broadcast_diff.changes.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_config_handle_writeback_invalid_server_id() {
+        let config = AppConfig::default();
+        let source = Arc::new(InMemoryConfigSource::new(config.clone()));
+        let handle = ConfigHandle::load(source).unwrap();
+        let mut rx = handle.subscribe();
+
+        let mutation = ConfigMutation::SetLoraAdapters {
+            server_id: ServerId::from("invalid"),
+            adapters: vec![],
+        };
+
+        let err = handle.writeback(mutation).await.unwrap_err();
+        assert!(matches!(err, WritebackError::SerializeError { .. }));
+
+        let snap = handle.snapshot();
+        assert_eq!(**snap, config); // Unchanged
+
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_config_handle_writeback_reload_serialized() {
+        // Implement a source with a slow reload
+        let config = AppConfig::default();
+        struct SlowSource {
+            config: AppConfig,
+        }
+        impl crate::source::private::Sealed for SlowSource {}
+        impl ConfigSource for SlowSource {
+            fn load(&self) -> Result<AppConfig, ConfigLoadError> {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                Ok(self.config.clone())
+            }
+            fn persist(&self, _: &AppConfig, _: &ConfigMutation) -> Result<(), WritebackError> {
+                Ok(())
+            }
+            fn export(&self, _: &AppConfig) -> Result<String, WritebackError> {
+                Ok("".into())
+            }
+        }
+
+        let source = Arc::new(SlowSource { config });
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+        let h1 = handle.clone();
+        let task1 = tokio::spawn(async move {
+            h1.reload().await.unwrap();
+        });
+
+        // Let task1 start
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let h2 = handle.clone();
+        let task2 = tokio::spawn(async move {
+            let mutation = ConfigMutation::SetLoraAdapters {
+                server_id: ServerId::from("invalid"), // will fail fast if not serialized
+                adapters: vec![],
+            };
+            let start = std::time::Instant::now();
+            let _ = h2.writeback(mutation).await;
+            assert!(start.elapsed().as_millis() >= 80, "Writeback didn't wait for reload");
+        });
+
+        let _ = tokio::join!(task1, task2);
     }
 }

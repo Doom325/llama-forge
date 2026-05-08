@@ -300,24 +300,24 @@ Implement `ConfigHandle::writeback()` — the crash-safe mutation path used by t
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `ConfigHandle::writeback()` | Acquire `reload_mutex`. Delegate to `source.persist(current_config, mutation)`. If persist succeeds: apply mutation to in-memory config, `ArcSwap::store(new)`, compute diff, broadcast `Arc<ConfigDiff>`. If persist fails: return `WritebackError`, in-memory config unchanged. | `src/handle.rs` |
-| 5.2 | Implement `ConfigWriter` trait for `ConfigHandle` | Delegate `reload()` and `writeback()`. | `src/handle.rs` |
-| 5.3 | Handle read-only filesystem gracefully | In `TomlFileConfigSource::persist()`: detect read-only FS (check `fs::metadata().permissions().readonly()` before attempting write). Return `WritebackError::ReadOnly` with the path. | `src/source/toml_file.rs` |
-| 5.4 | Handle EXDEV fallback in persist | When `rename()` fails with `EXDEV` (cross-device) or `EACCES`: fall back to truncation path. Log warning about reduced crash safety. | `src/source/toml_file.rs` |
-| 5.5 | Unit tests: writeback happy path | `InMemoryConfigSource`: writeback `SetLoraAdapters` → verify snapshot updated, diff broadcast with `ServerChanged { fields: [LoraAdapters] }`, `hot_reloadable() == true`. | `src/handle.rs` (tests) |
-| 5.6 | Unit tests: writeback invalid server ID | Writeback with a non-existent `ServerId` → verify error returned, snapshot unchanged, no broadcast. | `src/handle.rs` (tests) |
-| 5.7 | Unit tests: writeback + reload serialized | Start a long-running reload (source has 100ms delay). Immediately call `writeback()`. Verify writeback waits for reload to complete (both succeed, no interleaving). | `src/handle.rs` (tests) |
-| 5.8 | Integration tests: filesystem writeback | Using `tempfile::TempDir`: (a) write TOML → writeback LoRA change → read file → verify LoRA section updated AND other config sections untouched. (b) Verify TOML comments preserved after writeback. (c) Read-only file → `WritebackError::ReadOnly`. | `tests/writeback_integration.rs` |
-| 5.9 | Integration tests: atomic rename verification | Write TOML, start writeback, verify temp file created in state_dir during write, verify temp file cleaned up after successful rename. | `tests/writeback_integration.rs` |
+| 5.1 | Implement `ConfigHandle::writeback()` | Acquire `reload_mutex`. Delegate to `source.persist(current_config, mutation)`. If persist succeeds: apply mutation to in-memory config, `ArcSwap::store(new)`, compute diff, broadcast `Arc<ConfigDiff>`. If persist fails: return `WritebackError`, in-memory config unchanged. | [x] `src/handle.rs` |
+| 5.2 | Implement `ConfigWriter` trait for `ConfigHandle` | Delegate `reload()` and `writeback()`. | [x] `src/handle.rs` |
+| 5.3 | Handle read-only filesystem gracefully | In `TomlFileConfigSource::persist()`: detect read-only FS (check `fs::metadata().permissions().readonly()` before attempting write). Return `WritebackError::ReadOnly` with the path. | [x] `src/source/toml_file.rs` |
+| 5.4 | Handle EXDEV fallback in persist | When `rename()` fails with `EXDEV` (cross-device) or `EACCES`: fall back to truncation path. Log warning about reduced crash safety. | [x] `src/source/toml_file.rs` |
+| 5.5 | Unit tests: writeback happy path | `InMemoryConfigSource`: writeback `SetLoraAdapters` → verify snapshot updated, diff broadcast with `ServerChanged { fields: [LoraAdapters] }`, `hot_reloadable() == true`. | [x] `src/handle.rs` (tests) |
+| 5.6 | Unit tests: writeback invalid server ID | Writeback with a non-existent `ServerId` → verify error returned, snapshot unchanged, no broadcast. | [x] `src/handle.rs` (tests) |
+| 5.7 | Unit tests: writeback + reload serialized | Start a long-running reload (source has 100ms delay). Immediately call `writeback()`. Verify writeback waits for reload to complete (both succeed, no interleaving). | [x] `src/handle.rs` (tests) |
+| 5.8 | Integration tests: filesystem writeback | Using `tempfile::TempDir`: (a) write TOML → writeback LoRA change → read file → verify LoRA section updated AND other config sections untouched. (b) Verify TOML comments preserved after writeback. (c) Read-only file → `WritebackError::ReadOnly`. | [x] `tests/writeback_integration.rs` |
+| 5.9 | Integration tests: atomic rename verification | Write TOML, start writeback, verify temp file created in state_dir during write, verify temp file cleaned up after successful rename. | [x] `tests/writeback_integration.rs` |
 
 ### PR5 Acceptance Criteria
 
-- [ ] `writeback()` updates both disk and in-memory config atomically
-- [ ] Failed writeback leaves in-memory config unchanged
-- [ ] Writeback and reload are serialized by the shared mutex
-- [ ] Read-only filesystem returns `WritebackError::ReadOnly` (not a panic)
-- [ ] TOML comments survive writeback
-- [ ] All 5 unit + 3 integration tests pass
+- [x] `writeback()` updates both disk and in-memory config atomically
+- [x] Failed writeback leaves in-memory config unchanged
+- [x] Writeback and reload are serialized by the shared mutex
+- [x] Read-only filesystem returns `WritebackError::ReadOnly` (not a panic)
+- [x] TOML comments survive writeback
+- [x] All 5 unit + 3 integration tests pass
 
 ### PR5 Creation Steps
 
