@@ -31,7 +31,6 @@ tempfile = "3"
 proptest = "1"
 typed-builder = "0.20"
 parking_lot = "0.12"
-async-trait = "0.1"
 
 [profile.release]
 lto = "thin"

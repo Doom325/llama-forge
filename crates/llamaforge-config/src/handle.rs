@@ -77,7 +77,7 @@ impl ConfigWriter for ConfigHandle {
 
     async fn writeback(&self, _mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
         // Implemented in PR5 (Writeback Protocol). Stubbed for now to satisfy the trait.
-        Ok(ConfigDiff::new(vec![]))
+        Err(WritebackError::NotImplemented)
     }
 }
 
