@@ -260,17 +260,17 @@ Implement the core write path: the synchronous writer thread that owns the singl
 
 ### PR4 Acceptance Criteria
 
-- [ ] Writer thread processes all 8 `WriterCommand` variants correctly
-- [ ] Batch INSERT uses a transaction (BEGIN/INSERT.../COMMIT) for atomicity
-- [ ] Prepared statements are cached (not re-prepared per batch)
-- [ ] WAL checkpoint fires every 60s during active writing
-- [ ] Writer enters `Degraded` mode after 10 consecutive failures
-- [ ] Batch collector drains audit before telemetry (priority ordering)
-- [ ] Batch size capped at 100 events
-- [ ] Command channel backpressure: batch dropped (not queued unboundedly)
-- [ ] Tracing spans are entered from carried `Span` on each command
-- [ ] `WriterTestHandle` sends Shutdown and joins thread on Drop (no zombie threads in tests)
-- [ ] All 13 tests pass
+- [x] Writer thread processes all 8 `WriterCommand` variants correctly
+- [x] Batch INSERT uses a transaction (BEGIN/INSERT.../COMMIT) for atomicity
+- [x] Prepared statements are cached (not re-prepared per batch)
+- [x] WAL checkpoint fires every 60s during active writing
+- [x] Writer enters `Degraded` mode after 10 consecutive failures
+- [x] Batch collector drains audit before telemetry (priority ordering)
+- [x] Batch size capped at 100 events
+- [x] Command channel backpressure: batch dropped (not queued unboundedly)
+- [x] Tracing spans are entered from carried `Span` on each command
+- [x] `WriterTestHandle` sends Shutdown and joins thread on Drop (no zombie threads in tests)
+- [x] All 13 tests pass
 
 ### PR4 Creation Steps
 

@@ -173,10 +173,15 @@ impl From<RequestMetrics> for RequestMetricsRow {
             prompt_tps: m.prompt_tps,
             generation_tps: m.generation_tps,
 
-            status: serde_json::to_string(&m.status)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_string(),
+            status: match m.status {
+                RequestStatus::Queued => "queued".to_string(),
+                RequestStatus::Processing => "processing".to_string(),
+                RequestStatus::Completed => "completed".to_string(),
+                RequestStatus::Failed => "failed".to_string(),
+                RequestStatus::Evicted => "evicted".to_string(),
+                RequestStatus::Cancelled => "cancelled".to_string(),
+                RequestStatus::Timeout => "timeout".to_string(),
+            },
             finish_reason: m.finish_reason,
             was_evicted: if m.was_evicted { 1 } else { 0 },
             eviction_count: m.eviction_count as i64,

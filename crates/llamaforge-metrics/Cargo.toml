@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+test-utils = []
+
 [dependencies]
 llamaforge-config = { workspace = true }
 serde = { workspace = true }
@@ -22,8 +25,10 @@ rusqlite_migration = { workspace = true }
 deadpool-sqlite = { workspace = true }
 deadpool-sync = { workspace = true }
 deadpool = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
+llamaforge-metrics = { path = ".", version = "0.1.0-draft", features = ["test-utils"] }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 typed-builder = { workspace = true }
