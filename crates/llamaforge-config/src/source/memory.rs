@@ -44,6 +44,7 @@ impl ConfigSource for InMemoryConfigSource {
         }
 
         *inner = new_config;
+        tracing::Span::current().record("config.write_strategy", "Memory");
         Ok(())
     }
 

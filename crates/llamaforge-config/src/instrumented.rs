@@ -115,6 +115,7 @@ impl ConfigWriter for InstrumentedConfigHandle {
         fields(
             config.mutation_type = tracing::field::Empty,
             config.server_id = tracing::field::Empty,
+            config.write_strategy = tracing::field::Empty,
             config.diff.servers_added = tracing::field::Empty,
             config.diff.servers_removed = tracing::field::Empty,
             config.diff.servers_changed = tracing::field::Empty
@@ -209,5 +210,66 @@ mod tests {
         };
         let err = instrumented.writeback(mutation).await.unwrap_err();
         assert!(matches!(err, WritebackError::ServerNotFound));
+    }
+
+    #[tokio::test]
+    async fn test_instrumented_handle_tracing_fields() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tracing::field::{Field, Visit};
+        use tracing::span::{Id, Record};
+        use tracing_subscriber::layer::{Context, SubscriberExt};
+        use tracing_subscriber::Layer;
+
+        static RECORDED: AtomicBool = AtomicBool::new(false);
+
+        struct TestLayer;
+
+        impl<S: tracing::Subscriber> Layer<S> for TestLayer {
+            fn on_record(&self, _span: &Id, values: &Record<'_>, _ctx: Context<'_, S>) {
+                struct FieldVisitor;
+                impl Visit for FieldVisitor {
+                    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+                        if field.name() == "config.write_strategy" {
+                            let s = format!("{:?}", value);
+                            if s.contains("Memory") || s.contains("AtomicRename") {
+                                RECORDED.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                    fn record_str(&mut self, field: &Field, value: &str) {
+                        if field.name() == "config.write_strategy" {
+                            if value.contains("Memory") || value.contains("AtomicRename") {
+                                RECORDED.store(true, Ordering::SeqCst);
+                            }
+                        }
+                    }
+                }
+                values.record(&mut FieldVisitor);
+            }
+        }
+
+        // Initialize global subscriber if not already done
+        let _ =
+            tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TestLayer));
+
+        RECORDED.store(false, Ordering::SeqCst);
+
+        let mut config = AppConfig::default();
+        config.servers.insert(ServerId::from("s1"), crate::types::ServerConfig::default());
+        let source = Arc::new(InMemoryConfigSource::new(config.clone()));
+        let handle = ConfigHandle::load(source).unwrap();
+        let instrumented = InstrumentedConfigHandle::new(handle);
+
+        let mutation = ConfigMutation::SetLoraAdapters {
+            server_id: ServerId::from("s1"),
+            adapters: vec![crate::types::LoraAdapterConfig {
+                path: std::path::PathBuf::from("lora.gguf"),
+                scale: 1.0,
+            }],
+        };
+
+        let _ = instrumented.writeback(mutation).await.unwrap();
+
+        assert!(RECORDED.load(Ordering::SeqCst), "config.write_strategy was not recorded");
     }
 }

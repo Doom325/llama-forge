@@ -110,9 +110,12 @@ impl ConfigWriter for ConfigHandle {
         let current_config_arc = current_guard.clone();
         let mutation_clone = mutation.clone();
 
-        tokio::task::spawn_blocking(move || source.persist(&current_config_arc, &mutation_clone))
-            .await
-            .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
+        let parent_span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            parent_span.in_scope(|| source.persist(&current_config_arc, &mutation_clone))
+        })
+        .await
+        .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
 
         let diff = compute_diff(&current_guard, &new_config);
 
