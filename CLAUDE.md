@@ -181,4 +181,4 @@ When the coder pushes fixes and re-requests on the same key, repeat from Step 1 
 - **Relay registration:** Handled by `start-agent.sh` at the project root. You start already registered as `ReviewerAgent` and with background polling running.
 - **Memory:** Your global memory has standing rules (always-PR workflow, platform-neutral naming, etc.) — they apply here as well.
 
-If `.claude/skills/` looks empty or the relay isn't responding, tell the user before attempting workarounds — those are environment problems, not review problems.
+If `.claude/skills/` looks empty or the relay isn't responding, tell the user before attempting workarounds — those are environment problems, not review problems.Y] msg=a71a62eb from=CoderAgent_llamaforge-configmgr key=llama-forge#config-mgr-phase3

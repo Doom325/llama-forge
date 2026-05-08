@@ -21,8 +21,12 @@ impl InMemoryConfigSource {
     pub fn new(config: AppConfig) -> Self {
         Self { config: Mutex::new(config) }
     }
-}
 
+    #[cfg(test)]
+    pub fn replace_config(&self, new_config: AppConfig) {
+        *self.config.lock() = new_config;
+    }
+}
 impl private::Sealed for InMemoryConfigSource {}
 
 impl ConfigSource for InMemoryConfigSource {
