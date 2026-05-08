@@ -41,6 +41,7 @@ deadpool-sqlite = "0.8"
 deadpool-sync = "0.1.4"
 deadpool = "0.12"
 uuid = { version = "1", features = ["v4", "v7"] }
+metrics-exporter-prometheus = "0.15"
 
 [profile.release]
 lto = "thin"

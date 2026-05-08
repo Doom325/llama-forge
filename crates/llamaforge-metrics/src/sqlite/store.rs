@@ -496,20 +496,28 @@ impl StoreMaintenance for SqliteMetricsStore {
         })?
     }
 
-    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
+    fn prune_events_older_than(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
         let (reply_tx, reply_rx) = oneshot::channel();
         let cmd = WriterCommand::Prune { cutoff, reply: reply_tx, span: Span::current() };
 
-        self.cmd_tx
+        let cmd_tx_res = self
+            .cmd_tx
             .send(cmd)
-            .map_err(|_| StoreError::Unavailable { message: "Writer thread is dead".into() })?;
+            .map_err(|_| StoreError::Unavailable { message: "Writer thread is dead".into() });
 
-        reply_rx.await.map_err(|_| StoreError::Unavailable {
-            message: "Writer thread dropped the request".into(),
-        })?
+        async move {
+            cmd_tx_res?;
+            reply_rx.await.map_err(|_| StoreError::Unavailable {
+                message: "Writer thread dropped the request".into(),
+            })?
+        }
     }
-
-    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
+    fn estimated_size_bytes(
+        &self,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
         self.interact_with_timeout(move |conn| {
             let page_count: i64 = conn
                 .query_row("PRAGMA page_count", [], |r| r.get(0))
@@ -520,7 +528,6 @@ impl StoreMaintenance for SqliteMetricsStore {
 
             Ok((page_count * page_size) as u64)
         })
-        .await
     }
 }
 

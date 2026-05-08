@@ -10,15 +10,22 @@ pub(crate) mod types;
 pub use error::{AuditSendError, StoreError};
 pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 pub use ingest::{audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest};
-pub use metrics_recording::{AppMetrics, RequestMetricsRecorder, StoreHealthRecorder};
+pub use instrumented::InstrumentedMetricsStore;
+#[cfg(test)]
+pub use metrics_recording::MetricsFacadeRecorder;
+pub use metrics_recording::{
+    install_metrics_recorder, AppMetrics, NoopMetrics, RequestMetricsRecorder, StoreHealthRecorder,
+};
 pub use sqlite::open_and_migrate;
 pub use sqlite::pipeline::{create_metrics_pipeline, MetricsPipeline};
 pub use sqlite::writer::writer_thread_main;
 pub use sqlite::{
     batch_collector::batch_collector_main,
     commands::WriterCommand,
+    liveness::{start_liveness_monitor, LivenessState},
     migrations::get_migrations,
     pool::create_read_pool,
+    prune::start_prune_task,
     rows::{
         AuditEventRow, ConfigOverlayRow, ConfigSnapshotRow, ManagedProcessRow, RequestMetricsRow,
     },
