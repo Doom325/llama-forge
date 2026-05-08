@@ -84,10 +84,7 @@ impl ConfigWriter for ConfigHandle {
         Ok(diff)
     }
 
-    async fn writeback(
-        &self,
-        mutation: ConfigMutation,
-    ) -> Result<(ConfigDiff, crate::source::WriteStrategy), WritebackError> {
+    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
         let _guard = self.reload_mutex.lock().await;
 
         let current_guard = self.inner.load();
@@ -100,7 +97,7 @@ impl ConfigWriter for ConfigHandle {
             crate::types::MutationOutcome::Unchanged => {
                 let diff = ConfigDiff::new(vec![]);
                 let _ = self.change_tx.send(Arc::new(diff.clone()));
-                return Ok((diff, crate::source::WriteStrategy::Memory));
+                return Ok(diff);
             }
             crate::types::MutationOutcome::Applied => {}
         }
@@ -113,11 +110,9 @@ impl ConfigWriter for ConfigHandle {
         let current_config_arc = current_guard.clone();
         let mutation_clone = mutation.clone();
 
-        let strategy = tokio::task::spawn_blocking(move || {
-            source.persist(&current_config_arc, &mutation_clone)
-        })
-        .await
-        .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
+        tokio::task::spawn_blocking(move || source.persist(&current_config_arc, &mutation_clone))
+            .await
+            .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
 
         let diff = compute_diff(&current_guard, &new_config);
 
@@ -126,7 +121,7 @@ impl ConfigWriter for ConfigHandle {
         }
         let _ = self.change_tx.send(Arc::new(diff.clone()));
 
-        Ok((diff, strategy))
+        Ok(diff)
     }
 }
 
@@ -218,12 +213,8 @@ mod tests {
                     Ok(self.config.clone())
                 }
             }
-            fn persist(
-                &self,
-                _: &AppConfig,
-                _: &ConfigMutation,
-            ) -> Result<crate::source::WriteStrategy, WritebackError> {
-                Ok(crate::source::WriteStrategy::Memory)
+            fn persist(&self, _: &AppConfig, _: &ConfigMutation) -> Result<(), WritebackError> {
+                Ok(())
             }
             fn export(&self, _: &AppConfig) -> Result<String, WritebackError> {
                 Ok("".into())
@@ -302,9 +293,9 @@ mod tests {
         };
 
         let diff = handle.writeback(mutation).await.unwrap();
-        assert_eq!(diff.0.changes.len(), 1);
+        assert_eq!(diff.changes.len(), 1);
 
-        match &diff.0.changes[0] {
+        match &diff.changes[0] {
             ConfigChange::ServerChanged { id, diff } => {
                 assert_eq!(id.0, "s1");
                 assert!(diff.hot_reloadable());
@@ -353,12 +344,8 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 Ok(self.config.clone())
             }
-            fn persist(
-                &self,
-                _: &AppConfig,
-                _: &ConfigMutation,
-            ) -> Result<crate::source::WriteStrategy, WritebackError> {
-                Ok(crate::source::WriteStrategy::Memory)
+            fn persist(&self, _: &AppConfig, _: &ConfigMutation) -> Result<(), WritebackError> {
+                Ok(())
             }
             fn export(&self, _: &AppConfig) -> Result<String, WritebackError> {
                 Ok("".into())

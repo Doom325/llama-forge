@@ -1,7 +1,8 @@
-use llamaforge_config::{
-    ConfigChange, ConfigHandle, ConfigMutation, ConfigPaths, ConfigReader, ConfigWriter,
-    LoraAdapterConfig, ServerConfigField, ServerId, TomlFileConfigSource, WritebackError,
-};
+use llamaforge_config::diff::{ConfigChange, ServerConfigField};
+use llamaforge_config::error::WritebackError;
+use llamaforge_config::traits::{ConfigReader, ConfigWriter};
+use llamaforge_config::types::{ConfigMutation, ConfigPaths, LoraAdapterConfig, ServerId};
+use llamaforge_config::{ConfigHandle, TomlFileConfigSource};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,8 +42,8 @@ ctx_size = 2048
     let diff = handle.writeback(mutation).await.unwrap();
 
     // Verify diff
-    assert_eq!(diff.0.changes.len(), 1);
-    match &diff.0.changes[0] {
+    assert_eq!(diff.changes.len(), 1);
+    match &diff.changes[0] {
         ConfigChange::ServerChanged { id, diff } => {
             assert_eq!(id.0, "s1");
             assert!(diff.hot_reloadable());

@@ -1,4 +1,4 @@
-use llamaforge_config::{AppConfig, PriorityRulesConfig};
+use llamaforge_config::types::{AppConfig, PriorityRulesConfig};
 use std::fs;
 use std::path::PathBuf;
 

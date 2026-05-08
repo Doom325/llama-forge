@@ -115,16 +115,12 @@ impl ConfigWriter for InstrumentedConfigHandle {
         fields(
             config.mutation_type = tracing::field::Empty,
             config.server_id = tracing::field::Empty,
-            config.write_strategy = tracing::field::Empty,
             config.diff.servers_added = tracing::field::Empty,
             config.diff.servers_removed = tracing::field::Empty,
             config.diff.servers_changed = tracing::field::Empty
         )
     )]
-    async fn writeback(
-        &self,
-        mutation: ConfigMutation,
-    ) -> Result<(ConfigDiff, crate::source::WriteStrategy), WritebackError> {
+    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
         let start = std::time::Instant::now();
 
         let span = tracing::Span::current();
@@ -140,15 +136,13 @@ impl ConfigWriter for InstrumentedConfigHandle {
         histogram!("llamaforge_config_writeback_duration_seconds").record(duration.as_secs_f64());
 
         match &result {
-            Ok((diff, strategy)) => {
-                span.record("config.write_strategy", format!("{:?}", strategy));
+            Ok(diff) => {
                 span.record("config.diff.servers_added", diff.servers_added().count());
                 span.record("config.diff.servers_removed", diff.servers_removed().count());
                 span.record("config.diff.servers_changed", diff.servers_changed().count());
 
                 info!(
                     config.server_id = server_id_string.as_str(),
-                    config.write_strategy = ?strategy,
                     config.diff.servers_added = diff.servers_added().count(),
                     config.diff.servers_removed = diff.servers_removed().count(),
                     config.diff.servers_changed = diff.servers_changed().count(),
@@ -157,9 +151,9 @@ impl ConfigWriter for InstrumentedConfigHandle {
                 );
                 counter!("llamaforge_config_writebacks_total", "result" => "success").increment(1);
             }
-            Err(WritebackError::ReadOnly { .. }) => {
+            Err(e @ WritebackError::ReadOnly { .. }) => {
                 warn!(
-                    error = ?result.as_ref().unwrap_err(),
+                    error = ?e,
                     config.server_id = server_id_string.as_str(),
                     config.writeback_duration_ms = duration.as_millis(),
                     "config.writeback_failed_readonly"

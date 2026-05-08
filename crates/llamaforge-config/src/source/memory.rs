@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 /// R17/R20: This is pub(crate) to keep the stable API focused on production sources.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct InMemoryConfigSource {
-    config: Mutex<AppConfig>,
+    pub(crate) config: Mutex<AppConfig>,
 }
 
 impl InMemoryConfigSource {
@@ -27,17 +27,15 @@ impl InMemoryConfigSource {
         *self.config.lock() = new_config;
     }
 }
+
 impl private::Sealed for InMemoryConfigSource {}
 
 impl ConfigSource for InMemoryConfigSource {
     fn load(&self) -> Result<AppConfig, ConfigLoadError> {
         Ok(self.config.lock().clone())
     }
-    fn persist(
-        &self,
-        config: &AppConfig,
-        mutation: &ConfigMutation,
-    ) -> Result<crate::source::WriteStrategy, WritebackError> {
+
+    fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError> {
         let mut inner = self.config.lock();
         let mut new_config = config.clone();
 
@@ -46,8 +44,9 @@ impl ConfigSource for InMemoryConfigSource {
         }
 
         *inner = new_config;
-        Ok(crate::source::WriteStrategy::Memory)
+        Ok(())
     }
+
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError> {
         toml::to_string(config).map_err(|e| WritebackError::SerializeError { source: Box::new(e) })
     }

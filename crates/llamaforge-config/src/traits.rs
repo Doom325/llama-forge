@@ -30,10 +30,7 @@ pub trait ConfigWriter: Send + Sync + private::Sealed {
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError>;
 
     /// Apply and persist a runtime mutation.
-    async fn writeback(
-        &self,
-        mutation: ConfigMutation,
-    ) -> Result<(ConfigDiff, crate::source::WriteStrategy), WritebackError>;
+    async fn writeback(&self, mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError>;
 }
 
 pub(crate) mod private {

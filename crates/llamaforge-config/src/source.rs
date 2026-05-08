@@ -7,18 +7,6 @@ pub mod toml_file;
 
 use crate::error::{ConfigLoadError, WritebackError};
 use crate::types::{AppConfig, ConfigMutation};
-
-/// The strategy used to persist configuration changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WriteStrategy {
-    /// Safely persisted using a temporary file and atomic rename.
-    AtomicRename,
-    /// Persisted using direct file truncation (less crash-safe).
-    TruncateFallback,
-    /// In-memory only (testing).
-    Memory,
-}
-
 /// Port abstraction for config persistence — separates domain logic from I/O.
 ///
 /// See design doc Section 2.1.
@@ -30,11 +18,7 @@ pub trait ConfigSource: Send + Sync + private::Sealed {
     fn load(&self) -> Result<AppConfig, ConfigLoadError>;
 
     /// Persist a mutation to the backing store (crash-safe).
-    fn persist(
-        &self,
-        config: &AppConfig,
-        mutation: &ConfigMutation,
-    ) -> Result<WriteStrategy, WritebackError>;
+    fn persist(&self, config: &AppConfig, mutation: &ConfigMutation) -> Result<(), WritebackError>;
 
     /// Export the config as a serialized string (TOML for file-backed).
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError>;
