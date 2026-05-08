@@ -2,8 +2,7 @@
 //!
 //! See design doc Section 3.3.
 
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
-use std::thread::JoinHandle;
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
@@ -432,11 +431,13 @@ fn execute_insert_metrics(
 
 /// A test-only struct that owns `SyncSender<WriterCommand>` + `JoinHandle<()>`.
 /// `impl Drop`: sends `WriterCommand::Shutdown` and `join()`s the thread.
+#[cfg(any(test, feature = "test-utils"))]
 pub struct WriterTestHandle {
-    pub tx: SyncSender<WriterCommand>,
-    pub handle: Option<JoinHandle<()>>,
+    pub tx: std::sync::mpsc::SyncSender<WriterCommand>,
+    pub handle: Option<std::thread::JoinHandle<()>>,
 }
 
+#[cfg(any(test, feature = "test-utils"))]
 impl Drop for WriterTestHandle {
     fn drop(&mut self) {
         let _ = self.tx.send(WriterCommand::Shutdown);

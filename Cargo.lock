@@ -446,6 +446,7 @@ dependencies = [
  "deadpool-sqlite",
  "deadpool-sync",
  "llamaforge-config",
+ "llamaforge-metrics",
  "metrics",
  "nix",
  "parking_lot",
