@@ -350,25 +350,25 @@ Add the observability decorator (design doc Section 2.5) and the hot-path cached
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 6.1 | Implement `InstrumentedConfigHandle` | Wraps `ConfigHandle`. Implements `ConfigReader` (delegates directly — NO instrumentation on hot path). Implements `ConfigWriter` with tracing spans and structured log events. | `src/instrumented.rs` |
-| 6.2 | Add reload instrumentation | `reload()`: parent span `config.reload` with fields `config.server_count`. Child spans for flock, parse, diff, store (emitted by structured events, not actual child spans — ConfigHandle doesn't expose internal stages). Record duration. Emit `config.reloaded` on success, `config.reload_failed` on error. Increment `config_reloads_total{result}` counter. Record `config_reload_duration_seconds` histogram. | `src/instrumented.rs` |
-| 6.3 | Add writeback instrumentation | `writeback()`: parent span `config.writeback` with fields `config.mutation_type`, `config.server_id`. Record duration. Emit `config.writeback` on success, `config.writeback_failed` on error. Increment `config_writebacks_total{result}` counter. Record `config_writeback_duration_seconds` histogram. | `src/instrumented.rs` |
-| 6.4 | Define Prometheus metrics | Use `prometheus` or `metrics` crate. Define: `config_reloads_total`, `config_reload_duration_seconds`, `config_writebacks_total`, `config_writeback_duration_seconds`, `config_flock_wait_seconds`, `config_broadcast_lagged_total`. All with bounded label sets per design doc Section 7.2. | `src/instrumented.rs` |
-| 6.5 | Implement `CachedConfigReader` | Wraps `arc_swap::cache::Cache<Arc<ArcSwap<AppConfig>>, Arc<AppConfig>>`. `new()` takes `&ConfigHandle` (accesses inner ArcSwap via a public accessor). `load()` returns `&Arc<AppConfig>` with thread-local caching. | `src/cached.rs` |
-| 6.6 | Add public accessor on ConfigHandle | `pub fn arc_swap(&self) -> &Arc<ArcSwap<AppConfig>>` — needed by `CachedConfigReader` to construct the cache. Alternatively, `impl ConfigHandle { pub fn cached_reader(&self) -> CachedConfigReader }`. | `src/handle.rs` |
-| 6.7 | Unit tests: InstrumentedConfigHandle | Use `tracing_subscriber::fmt::TestWriter` or `tracing::subscriber::with_default` to capture spans. Verify: (a) `reload()` emits `config.reload` span, (b) failed reload emits `config.reload_failed` event, (c) `snapshot()` does NOT emit any span (hot path). | `src/instrumented.rs` (tests) |
-| 6.8 | Unit tests: CachedConfigReader | Load config, create `CachedConfigReader`. Call `load()` 1000 times → verify all return same pointer (no ArcSwap atomic op per call when config unchanged). Reload config → call `load()` → verify returns new config. | `src/cached.rs` (tests) |
-| 6.9 | Re-export public API from lib.rs | `pub use handle::ConfigHandle;`, `pub use traits::{ConfigReader, ConfigWriter};`, `pub use instrumented::InstrumentedConfigHandle;`, `pub use cached::CachedConfigReader;`, `pub use types::*;`, `pub use error::*;`, `pub use diff::*;`, `pub use source::ConfigSource;`. | `src/lib.rs` |
+| 6.1 | Implement `InstrumentedConfigHandle` | Wraps `ConfigHandle`. Implements `ConfigReader` (delegates directly — NO instrumentation on hot path). Implements `ConfigWriter` with tracing spans and structured log events. | [x] `src/instrumented.rs` |
+| 6.2 | Add reload instrumentation | `reload()`: parent span `config.reload` with fields `config.server_count`. Child spans for flock, parse, diff, store (emitted by structured events, not actual child spans — ConfigHandle doesn't expose internal stages). Record duration. Emit `config.reloaded` on success, `config.reload_failed` on error. Increment `config_reloads_total{result}` counter. Record `config_reload_duration_seconds` histogram. | [x] `src/instrumented.rs` |
+| 6.3 | Add writeback instrumentation | `writeback()`: parent span `config.writeback` with fields `config.mutation_type`, `config.server_id`. Record duration. Emit `config.writeback` on success, `config.writeback_failed` on error. Increment `config_writebacks_total{result}` counter. Record `config_writeback_duration_seconds` histogram. | [x] `src/instrumented.rs` |
+| 6.4 | Define Prometheus metrics | Use `prometheus` or `metrics` crate. Define: `config_reloads_total`, `config_reload_duration_seconds`, `config_writebacks_total`, `config_writeback_duration_seconds`, `config_flock_wait_seconds`, `config_broadcast_lagged_total`. All with bounded label sets per design doc Section 7.2. | [x] `src/instrumented.rs` |
+| 6.5 | Implement `CachedConfigReader` | Wraps `arc_swap::cache::Cache<Arc<ArcSwap<AppConfig>>, Arc<AppConfig>>`. `new()` takes `&ConfigHandle` (accesses inner ArcSwap via a public accessor). `load()` returns `&Arc<AppConfig>` with thread-local caching. | [x] `src/cached.rs` |
+| 6.6 | Add public accessor on ConfigHandle | `pub fn arc_swap(&self) -> &Arc<ArcSwap<AppConfig>>` — needed by `CachedConfigReader` to construct the cache. Alternatively, `impl ConfigHandle { pub fn cached_reader(&self) -> CachedConfigReader }`. | [x] `src/handle.rs` |
+| 6.7 | Unit tests: InstrumentedConfigHandle | Use `tracing_subscriber::fmt::TestWriter` or `tracing::subscriber::with_default` to capture spans. Verify: (a) `reload()` emits `config.reload` span, (b) failed reload emits `config.reload_failed` event, (c) `snapshot()` does NOT emit any span (hot path). | [x] `src/instrumented.rs` (tests) |
+| 6.8 | Unit tests: CachedConfigReader | Load config, create `CachedConfigReader`. Call `load()` 1000 times → verify all return same pointer (no ArcSwap atomic op per call when config unchanged). Reload config → call `load()` → verify returns new config. | [x] `src/cached.rs` (tests) |
+| 6.9 | Re-export public API from lib.rs | `pub use handle::ConfigHandle;`, `pub use traits::{ConfigReader, ConfigWriter};`, `pub use instrumented::InstrumentedConfigHandle;`, `pub use cached::CachedConfigReader;`, `pub use types::*;`, `pub use error::*;`, `pub use diff::*;`, `pub use source::ConfigSource;`. | [x] `src/lib.rs` |
 
 ### PR6 Acceptance Criteria
 
-- [ ] `InstrumentedConfigHandle` implements both `ConfigReader` and `ConfigWriter`
-- [ ] `snapshot()` on `InstrumentedConfigHandle` has zero instrumentation overhead
-- [ ] `reload()` emits tracing spans and structured events
-- [ ] `CachedConfigReader::load()` avoids ArcSwap atomic ops when config hasn't changed
-- [ ] All Prometheus metrics defined with bounded label cardinality
-- [ ] Public API is cleanly re-exported from `lib.rs`
-- [ ] All unit tests pass
+- [x] `InstrumentedConfigHandle` implements both `ConfigReader` and `ConfigWriter`
+- [x] `snapshot()` on `InstrumentedConfigHandle` has zero instrumentation overhead
+- [x] `reload()` emits tracing spans and structured events
+- [x] `CachedConfigReader::load()` avoids ArcSwap atomic ops when config hasn't changed
+- [x] All Prometheus metrics defined with bounded label cardinality
+- [x] Public API is cleanly re-exported from `lib.rs`
+- [x] All unit tests pass
 
 ### PR6 Creation Steps
 

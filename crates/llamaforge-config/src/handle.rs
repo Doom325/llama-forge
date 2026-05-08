@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 /// See design doc Section 2.3.
 pub struct ConfigHandle {
     source: Arc<dyn ConfigSource>,
-    inner: ArcSwap<AppConfig>,
+    inner: Arc<ArcSwap<AppConfig>>,
     reload_mutex: tokio::sync::Mutex<()>,
     change_tx: broadcast::Sender<Arc<ConfigDiff>>,
 }
@@ -28,7 +28,7 @@ impl ConfigHandle {
 
         Ok(Self {
             source,
-            inner: ArcSwap::from_pointee(config),
+            inner: Arc::new(ArcSwap::from_pointee(config)),
             reload_mutex: tokio::sync::Mutex::new(()),
             change_tx,
         })
@@ -38,6 +38,11 @@ impl ConfigHandle {
     pub fn export_toml(&self) -> Result<String, WritebackError> {
         let snapshot = self.inner.load();
         self.source.export(&snapshot)
+    }
+
+    /// Access the underlying ArcSwap for cached readers.
+    pub(crate) fn arc_swap(&self) -> Arc<ArcSwap<AppConfig>> {
+        self.inner.clone()
     }
 }
 
