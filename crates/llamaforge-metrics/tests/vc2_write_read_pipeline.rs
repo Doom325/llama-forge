@@ -421,6 +421,9 @@ async fn test_vc2_8_concurrent_read_write() {
 
     read_task.await.unwrap();
 
+    drop(telemetry_tx);
+    sleep(Duration::from_millis(300)).await;
+
     let events = store.query_events(&EventFilter::default(), None, None).await.unwrap();
     assert_eq!(events.len(), 50);
 }
