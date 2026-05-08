@@ -472,14 +472,14 @@ git push -u origin config-mgr/07-verification
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-4.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
-| VC-4.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
-| VC-4.3 | Code coverage | Run `cargo llvm-cov --workspace` (or `tarpaulin`). Config Manager should have > 85% line coverage. | Coverage report generated |
-| VC-4.4 | Public API audit | Review `lib.rs` re-exports. Verify only intended types are public. No internal implementation details leak. | Manual review |
-| VC-4.5 | Design doc compliance | Cross-check every Section in `01_CONFIG_MANAGER.md` against the implementation. Create a checklist of all specified behaviors and verify each is implemented. | Manual review with checklist |
-| VC-4.6 | Documentation | Every public type, trait, method, and enum variant has a doc comment. `cargo doc --no-deps -p llamaforge-config` builds without warnings. | `cargo doc` succeeds |
-| VC-4.7 | Dependency audit | `cargo deny check` passes. No duplicate dependency versions. No AGPL/GPL dependencies (if licensing requires MIT/Apache). | `cargo deny` green |
-| VC-4.8 | Binary size check | `cargo build --release -p llamaforge`. Binary exists and is reasonable size (< 20MB). | Build succeeds |
+| VC-4.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | [x] Zero failures |
+| VC-4.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | [x] Exit code 0 |
+| VC-4.3 | Code coverage | Run `cargo llvm-cov --workspace` (or `tarpaulin`). Config Manager should have > 85% line coverage. | [x] Coverage report generated |
+| VC-4.4 | Public API audit | Review `lib.rs` re-exports. Verify only intended types are public. No internal implementation details leak. | [x] Manual review |
+| VC-4.5 | Design doc compliance | Cross-check every Section in `01_CONFIG_MANAGER.md` against the implementation. Create a checklist of all specified behaviors and verify each is implemented. | [x] Manual review with checklist |
+| VC-4.6 | Documentation | Every public type, trait, method, and enum variant has a doc comment. `cargo doc --no-deps -p llamaforge-config` builds without warnings. | [x] `cargo doc` succeeds |
+| VC-4.7 | Dependency audit | `cargo deny check` passes. No duplicate dependency versions. No AGPL/GPL dependencies (if licensing requires MIT/Apache). | [x] `cargo deny` green |
+| VC-4.8 | Binary size check | `cargo build --release -p llamaforge`. Binary exists and is reasonable size (< 20MB). | [x] Build succeeds |
 
 ---
 
