@@ -50,10 +50,10 @@ impl From<AuditEvent> for AuditEventRow {
     fn from(event: AuditEvent) -> Self {
         Self {
             event_id: event.event_id,
-            event_type: serde_json::to_string(&event.event_type)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_string(),
+            event_type: match event.event_type {
+                EventType::Audit => "audit".to_string(),
+                EventType::Telemetry => "telemetry".to_string(),
+            },
             event_kind: event.event_kind,
             server_id: event.server_id.map(|s| s.0),
             request_id: event.request_id.map(|r| r.0),

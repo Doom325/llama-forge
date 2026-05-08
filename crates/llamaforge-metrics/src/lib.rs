@@ -19,9 +19,11 @@ pub use sqlite::{
     commands::WriterCommand,
     migrations::get_migrations,
     pool::create_read_pool,
+    query_builder::{build_event_where, build_group_by, build_metrics_where},
     rows::{
         AuditEventRow, ConfigOverlayRow, ConfigSnapshotRow, ManagedProcessRow, RequestMetricsRow,
     },
+    store::SqliteMetricsStore,
 };
 pub use traits::{
     ConfigOverlay, ConfigOverlayStore, EventStore, ProcessStore, RequestMetricsStore,
