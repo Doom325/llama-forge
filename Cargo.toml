@@ -17,7 +17,7 @@ repository = "https://github.com/Doom325/llama-forge"
 [workspace.dependencies]
 # Wired in as components land. Versions are pinned conservatively;
 # bump deliberately, not opportunistically.
-llamaforge-config = { path = "crates/llamaforge-config" }
+llamaforge-config = { path = "crates/llamaforge-config", version = "0.1.0-draft" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
