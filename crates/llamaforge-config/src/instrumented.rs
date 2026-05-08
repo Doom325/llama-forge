@@ -229,18 +229,18 @@ mod tests {
                 struct FieldVisitor;
                 impl Visit for FieldVisitor {
                     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                        if field.name() == "config.write_strategy" {
-                            let s = format!("{:?}", value);
-                            if s.contains("Memory") || s.contains("AtomicRename") {
-                                RECORDED.store(true, Ordering::SeqCst);
-                            }
+                        let s = format!("{:?}", value);
+                        if field.name() == "config.write_strategy"
+                            && (s.contains("Memory") || s.contains("AtomicRename"))
+                        {
+                            RECORDED.store(true, Ordering::SeqCst);
                         }
                     }
                     fn record_str(&mut self, field: &Field, value: &str) {
-                        if field.name() == "config.write_strategy" {
-                            if value.contains("Memory") || value.contains("AtomicRename") {
-                                RECORDED.store(true, Ordering::SeqCst);
-                            }
+                        if field.name() == "config.write_strategy"
+                            && (value.contains("Memory") || value.contains("AtomicRename"))
+                        {
+                            RECORDED.store(true, Ordering::SeqCst);
                         }
                     }
                 }
