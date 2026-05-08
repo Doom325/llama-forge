@@ -89,12 +89,12 @@ ctx_size = 2048
     )
     .unwrap();
 
-    // Make file read-only
-    let mut perms = fs::metadata(&main_path).unwrap().permissions();
+    // Make state_dir read-only so lock_file and temp_file creation fail
+    let mut perms = fs::metadata(&state_dir).unwrap().permissions();
     perms.set_readonly(true);
-    fs::set_permissions(&main_path, perms).unwrap();
+    fs::set_permissions(&state_dir, perms).unwrap();
 
-    let paths = ConfigPaths::new(main_path.clone(), PathBuf::new(), state_dir);
+    let paths = ConfigPaths::new(main_path.clone(), PathBuf::new(), state_dir.clone());
     let source = Arc::new(TomlFileConfigSource::new(paths));
     let handle = ConfigHandle::load(source).unwrap();
 
@@ -106,14 +106,11 @@ ctx_size = 2048
     let err = handle.writeback(mutation).await.unwrap_err();
     assert!(matches!(err, WritebackError::ReadOnly { .. }));
 
-    // Cleanup: In a real test environment we might need to chmod to delete the dir,
-    // but tempfile usually handles it, or we can just use libc directly if needed.
-    // For this test, standard rust fs::remove_dir_all might fail, but that's a test harness issue.
-    // Let's explicitly allow the clippy warning for the test harness cleanup.
+    // Cleanup
     #[allow(clippy::permissions_set_readonly_false)]
     {
-        let mut perms = fs::metadata(&main_path).unwrap().permissions();
+        let mut perms = fs::metadata(&state_dir).unwrap().permissions();
         perms.set_readonly(false);
-        fs::set_permissions(&main_path, perms).unwrap();
+        fs::set_permissions(&state_dir, perms).unwrap();
     }
 }

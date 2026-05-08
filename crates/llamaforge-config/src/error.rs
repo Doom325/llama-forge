@@ -9,6 +9,7 @@ use thiserror::Error;
 /// Error during initial configuration load.
 /// See design doc Section 2.7.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConfigLoadError {
     /// Config file was not found.
     #[error("config file not found: {path}")]

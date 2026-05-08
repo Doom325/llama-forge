@@ -23,7 +23,7 @@ allow = [
 confidence-threshold = 0.8
 
 [sources]
-unknown-registry = "warn"
+unknown-registry = "deny"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []

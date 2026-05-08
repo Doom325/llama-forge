@@ -85,7 +85,11 @@ impl ConfigWriter for ConfigHandle {
             crate::types::MutationOutcome::TargetMissing => {
                 return Err(WritebackError::ServerNotFound)
             }
-            crate::types::MutationOutcome::Unchanged => return Ok(ConfigDiff::new(vec![])),
+            crate::types::MutationOutcome::Unchanged => {
+                let diff = ConfigDiff::new(vec![]);
+                let _ = self.change_tx.send(Arc::new(diff.clone()));
+                return Ok(diff);
+            }
             crate::types::MutationOutcome::Applied => {}
         }
 
@@ -101,8 +105,8 @@ impl ConfigWriter for ConfigHandle {
 
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));
-            let _ = self.change_tx.send(Arc::new(diff.clone()));
         }
+        let _ = self.change_tx.send(Arc::new(diff.clone()));
 
         Ok(diff)
     }

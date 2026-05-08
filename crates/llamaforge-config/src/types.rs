@@ -503,6 +503,7 @@ pub enum ConfigMutation {
 
 /// The result of applying a `ConfigMutation`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MutationOutcome {
     Applied,
     Unchanged,
