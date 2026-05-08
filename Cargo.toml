@@ -38,6 +38,8 @@ chrono = { version = "0.4", features = ["serde"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 rusqlite_migration = "1"
 deadpool-sqlite = "0.8"
+deadpool-sync = "0.1.4"
+deadpool = "0.12"
 
 [profile.release]
 lto = "thin"

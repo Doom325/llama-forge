@@ -30,3 +30,14 @@ pub enum AuditSendError {
     #[error("audit semaphore exhausted")]
     SemaphoreExhausted,
 }
+
+/// Error converting between SQLite rows and domain types.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum RowConversionError {
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(#[from] serde_json::Error),
+
+    #[error("failed to parse datetime: {0}")]
+    ParseDate(#[from] chrono::ParseError),
+}

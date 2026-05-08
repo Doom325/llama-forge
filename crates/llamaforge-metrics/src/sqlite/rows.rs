@@ -24,7 +24,7 @@ pub struct AuditEventRow {
 }
 
 impl TryFrom<AuditEventRow> for AuditEvent {
-    type Error = anyhow::Error;
+    type Error = crate::error::RowConversionError;
 
     fn try_from(row: AuditEventRow) -> Result<Self, Self::Error> {
         let event_type: EventType =
@@ -98,18 +98,19 @@ pub struct RequestMetricsRow {
 }
 
 impl TryFrom<RequestMetricsRow> for RequestMetrics {
-    type Error = anyhow::Error;
+    type Error = crate::error::RowConversionError;
 
     fn try_from(row: RequestMetricsRow) -> Result<Self, Self::Error> {
         let status: RequestStatus = serde_json::from_value(serde_json::Value::String(row.status))?;
 
-        let parse_time = |s: Option<String>| -> Result<Option<DateTime<Utc>>, anyhow::Error> {
-            if let Some(st) = s {
-                Ok(Some(DateTime::parse_from_rfc3339(&st)?.with_timezone(&Utc)))
-            } else {
-                Ok(None)
-            }
-        };
+        let parse_time =
+            |s: Option<String>| -> Result<Option<DateTime<Utc>>, crate::error::RowConversionError> {
+                if let Some(st) = s {
+                    Ok(Some(DateTime::parse_from_rfc3339(&st)?.with_timezone(&Utc)))
+                } else {
+                    Ok(None)
+                }
+            };
 
         Ok(Self {
             request_id: RequestId(row.request_id),
@@ -194,7 +195,7 @@ pub struct ManagedProcessRow {
 }
 
 impl TryFrom<ManagedProcessRow> for ManagedProcess {
-    type Error = anyhow::Error;
+    type Error = crate::error::RowConversionError;
 
     fn try_from(row: ManagedProcessRow) -> Result<Self, Self::Error> {
         Ok(Self {
@@ -227,7 +228,7 @@ pub struct ConfigSnapshotRow {
 }
 
 impl TryFrom<ConfigSnapshotRow> for ConfigSnapshot {
-    type Error = anyhow::Error;
+    type Error = crate::error::RowConversionError;
 
     fn try_from(row: ConfigSnapshotRow) -> Result<Self, Self::Error> {
         let trigger: ConfigSnapshotTrigger =
@@ -246,10 +247,11 @@ impl From<ConfigSnapshot> for ConfigSnapshotRow {
     fn from(c: ConfigSnapshot) -> Self {
         Self {
             id: c.id,
-            trigger: serde_json::to_string(&c.trigger)
-                .unwrap_or_default()
-                .trim_matches('"')
-                .to_string(),
+            trigger: match c.trigger {
+                ConfigSnapshotTrigger::Startup => "startup".to_string(),
+                ConfigSnapshotTrigger::Reload => "reload".to_string(),
+                ConfigSnapshotTrigger::Writeback => "writeback".to_string(),
+            },
             created_at: c.created_at.to_rfc3339(),
             config_json: c.config_json,
         }
@@ -266,7 +268,7 @@ pub struct ConfigOverlayRow {
 }
 
 impl TryFrom<ConfigOverlayRow> for ConfigOverlay {
-    type Error = anyhow::Error;
+    type Error = crate::error::RowConversionError;
 
     fn try_from(row: ConfigOverlayRow) -> Result<Self, Self::Error> {
         Ok(Self {

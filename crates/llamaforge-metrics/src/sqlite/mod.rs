@@ -20,7 +20,9 @@ use crate::error::StoreError;
 /// Open a SQLite connection, run WAL pragmas, run migrations, and acquire an advisory lock.
 pub fn open_and_migrate(db_path: &Path) -> Result<Connection, StoreError> {
     // 1. Acquire advisory lock on {db_path}.lock
-    let lock_path = db_path.with_extension("lock");
+    let mut lock_path = db_path.to_path_buf().into_os_string();
+    lock_path.push(".lock");
+    let lock_path = std::path::PathBuf::from(lock_path);
     let lock_file =
         File::create(&lock_path).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
 

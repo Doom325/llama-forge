@@ -52,7 +52,9 @@ async fn test_advisory_lock() {
     let db_path = temp_dir.path().join("llamaforge.db");
 
     // 1. Acquire lock manually to simulate another instance
-    let lock_path = db_path.with_extension("lock");
+    let mut lock_path = db_path.to_path_buf().into_os_string();
+    lock_path.push(".lock");
+    let lock_path = std::path::PathBuf::from(lock_path);
     let lock_file = File::create(&lock_path).unwrap();
     #[allow(deprecated)]
     flock(lock_file.as_raw_fd(), FlockArg::LockExclusiveNonblock).unwrap();
