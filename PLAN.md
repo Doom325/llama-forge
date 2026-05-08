@@ -83,14 +83,14 @@ Create the `llamaforge-metrics` library crate, define all domain types from desi
 
 ### PR1 Acceptance Criteria
 
-- [ ] `cargo build --workspace` succeeds with zero warnings
-- [ ] All domain types compile with required derives
-- [ ] `llamaforge-metrics` depends on `llamaforge-config` and uses its newtypes
-- [ ] `StoreError` uses `Box<dyn Error>` (not `anyhow::Error`) per design doc
-- [ ] All public enums have `#[non_exhaustive]`
-- [ ] `lib.rs` uses `pub(crate) mod` + explicit `pub use` pattern (matching `llamaforge-config`)
-- [ ] All unit tests pass
-- [ ] `EventFilter::default()` and `MetricsFilter::default()` produce empty filters
+- [x] `cargo build --workspace` succeeds with zero warnings
+- [x] All domain types compile with required derives
+- [x] `llamaforge-metrics` depends on `llamaforge-config` and uses its newtypes
+- [x] `StoreError` uses `Box<dyn Error>` (not `anyhow::Error`) per design doc
+- [x] All public enums have `#[non_exhaustive]`
+- [x] `lib.rs` uses `pub(crate) mod` + explicit `pub use` pattern (matching `llamaforge-config`)
+- [x] All unit tests pass
+- [x] `EventFilter::default()` and `MetricsFilter::default()` produce empty filters
 
 ### PR1 Creation Steps
 
