@@ -28,7 +28,7 @@ deadpool = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
-llamaforge-metrics = { path = ".", features = ["test-utils"] }
+llamaforge-metrics = { path = ".", version = "0.1.0-draft", features = ["test-utils"] }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 typed-builder = { workspace = true }
