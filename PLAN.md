@@ -431,24 +431,24 @@ The final PR adds the property-based tests (design doc Section 8.3), implements 
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 7.1 | Property test: serde roundtrip | `proptest! { fn roundtrip(config in arb_app_config()) { assert_eq!(parse(serialize(config)), config) } }`. Requires implementing `Arbitrary` for `AppConfig` (derive or manual strategy). | `tests/proptest_config.rs` |
-| 7.2 | Property test: backward compat | Generate full TOML via `toml::to_string`, then randomly delete keys before re-parsing. Verify parse succeeds with defaults for all deleted fields. | `tests/proptest_config.rs` |
-| 7.3 | Property test: diff correctness | `proptest! { fn diff_correct(old in arb_app_config(), new in arb_app_config()) { let diff = compute_diff(&old, &new); assert!(apply_diff_produces_new(&old, &diff, &new)) } }`. Note: `apply_diff` is a test-only helper, not a production function. The assertion is that the diff correctly describes the delta. | `tests/proptest_config.rs` |
-| 7.4 | Implement `arb_app_config()` strategy | proptest strategy that generates random `AppConfig` instances with 0–5 servers, random ports (1024–65535), random field values. Keep it bounded to avoid slow tests. | `tests/proptest_config.rs` |
-| 7.5 | Implement VC-3 integration tests | All 15 checks from VC-3 above. Each as a separate `#[tokio::test]` function. All use `tempfile::TempDir`. | `tests/vc3_full_component.rs` |
-| 7.6 | Implement design doc Section 8.4 tests | `test_concurrent_sighups_serialized`, `test_writeback_atomic_rename`, `test_empty_config_at_startup_exits`, `test_serde_default_backward_compat`, `test_broadcast_lagged_subscriber`, `test_readonly_fs_writeback_graceful`. These overlap with VC-3 but use the exact test signatures from the design doc. | `tests/design_doc_tests.rs` |
-| 7.7 | Add `#[ignore]` slow tests | Tag property-based tests and the 100-server memory test with `#[ignore]` so they don't run in normal `cargo test`. Run with `cargo test -- --ignored`. | — |
-| 7.8 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`. | — |
+| 7.1 | Property test: serde roundtrip | `proptest! { fn roundtrip(config in arb_app_config()) { assert_eq!(parse(serialize(config)), config) } }`. Requires implementing `Arbitrary` for `AppConfig` (derive or manual strategy). | [x] `tests/proptest_config.rs` |
+| 7.2 | Property test: backward compat | Generate full TOML via `toml::to_string`, then randomly delete keys before re-parsing. Verify parse succeeds with defaults for all deleted fields. | [x] `tests/proptest_config.rs` |
+| 7.3 | Property test: diff correctness | `proptest! { fn diff_correct(old in arb_app_config(), new in arb_app_config()) { let diff = compute_diff(&old, &new); assert!(apply_diff_produces_new(&old, &diff, &new)) } }`. Note: `apply_diff` is a test-only helper, not a production function. The assertion is that the diff correctly describes the delta. | [x] `tests/proptest_config.rs` |
+| 7.4 | Implement `arb_app_config()` strategy | proptest strategy that generates random `AppConfig` instances with 0–5 servers, random ports (1024–65535), random field values. Keep it bounded to avoid slow tests. | [x] `tests/proptest_config.rs` |
+| 7.5 | Implement VC-3 integration tests | All 15 checks from VC-3 above. Each as a separate `#[tokio::test]` function. All use `tempfile::TempDir`. | [x] `tests/vc3_full_component.rs` |
+| 7.6 | Implement design doc Section 8.4 tests | `test_concurrent_sighups_serialized`, `test_writeback_atomic_rename`, `test_empty_config_at_startup_exits`, `test_serde_default_backward_compat`, `test_broadcast_lagged_subscriber`, `test_readonly_fs_writeback_graceful`. These overlap with VC-3 but use the exact test signatures from the design doc. | [x] `tests/design_doc_tests.rs` |
+| 7.7 | Add `#[ignore]` slow tests | Tag property-based tests and the 100-server memory test with `#[ignore]` so they don't run in normal `cargo test`. Run with `cargo test -- --ignored`. | [x] — |
+| 7.8 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`. | [x] — |
 
 ### PR7 Acceptance Criteria
 
-- [ ] All 3 property-based tests pass (with reasonable iteration counts: 256 cases each)
-- [ ] All 15 VC-3 integration tests pass
-- [ ] All 6 design doc Section 8.4 test cases pass
-- [ ] `cargo test --workspace` passes (excluding `#[ignore]` tests)
-- [ ] `cargo test --workspace -- --ignored` passes (including slow tests)
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] No production code changes in this PR — test code only
+- [x] All 3 property-based tests pass (with reasonable iteration counts: 256 cases each)
+- [x] All 15 VC-3 integration tests pass
+- [x] All 6 design doc Section 8.4 test cases pass
+- [x] `cargo test --workspace` passes (excluding `#[ignore]` tests)
+- [x] `cargo test --workspace -- --ignored` passes (including slow tests)
+- [x] `cargo clippy --workspace -- -D warnings` passes
+- [x] No production code changes in this PR — test code only
 
 ### PR7 Creation Steps
 
