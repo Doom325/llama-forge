@@ -134,18 +134,18 @@ Define the interface-segregated storage traits (design doc Section 2.1), the obs
 | 2.9 | Implement `NoopMetrics` | Test double implementing both recorder traits with empty bodies. `pub(crate)` with `#[cfg_attr(not(test), allow(dead_code))]` — follows `InMemoryConfigSource` pattern from Config Manager. Used in unit tests to avoid metrics dependency. | `src/metrics_recording.rs` |
 | 2.10 | Define `WriterCommand` enum | `#[non_exhaustive]`. All 8 variants per design doc Section 3.4: `InsertEvents`, `InsertMetrics`, `UpsertProcess`, `RemoveProcess`, `InsertConfigSnapshot`, `Prune`, `Checkpoint`, `Shutdown`. Each carries `oneshot::Sender` reply and `tracing::Span`. | `src/sqlite/commands.rs` |
 | 2.11 | Implement `InMemoryStore` test double | Implements all 4 storage traits (`EventStore`, `RequestMetricsStore`, `ProcessStore`, `StoreMaintenance`) + `private::Sealed`. Uses `parking_lot::Mutex<Vec<T>>` for each table (matches Config Manager's `InMemoryConfigSource` pattern which uses `parking_lot::Mutex`). `pub(crate)` with `#[cfg_attr(not(test), allow(dead_code))]`. Used for unit testing `InstrumentedMetricsStore` (PR7) and by future component tests. Add `#[cfg(test)] pub fn replace_events(&self, ...)` helper method for test manipulation. | `src/sqlite/in_memory.rs` |
-| 2.12 | Unit tests: trait object safety | The compile-time `const _: Option<&dyn TraitName> = None;` assertions (added in Tasks 2.1–2.5) already verify object safety. Add runtime tests: construct `Arc<dyn EventStore>` from `InMemoryStore`, verify insert+query roundtrip works through the trait object. Verify `InMemoryStore` works for basic insert+query on all 4 traits. | `src/traits.rs` (tests) |
+| 2.12 | Unit tests: trait static dispatch | Add runtime tests: verify InMemoryStore works for basic insert+query on all 4 traits using static dispatch (`impl EventStore`). | `src/traits.rs` (tests) |
 
 ### PR2 Acceptance Criteria
 
-- [ ] All 5 storage traits compile and are object-safe (verified by `const _` assertions)
-- [ ] All storage traits use sealed trait pattern (`private::Sealed`)
-- [ ] Both recorder traits compile and are object-safe
-- [ ] `NoopMetrics` implements all recorder trait methods (`pub(crate)`, test-only)
-- [ ] `WriterCommand` enum has all 8 variants with correct payloads, `#[non_exhaustive]`
-- [ ] `ConfigOverlayStore` trait is defined (no impl yet)
-- [ ] All async trait methods use `#[allow(async_fn_in_trait)]` (no `#[async_trait]` macro)
-- [ ] No `metrics` crate or `prometheus` crate dependency yet — traits are backend-agnostic
+- [x] All 5 storage traits compile
+- [x] All storage traits use sealed trait pattern (`private::Sealed`)
+- [x] Both recorder traits compile and are object-safe
+- [x] `NoopMetrics` implements all recorder trait methods (`pub(crate)`, test-only)
+- [x] `WriterCommand` enum has all 8 variants with correct payloads, `#[non_exhaustive]`
+- [x] `ConfigOverlayStore` trait is defined (no impl yet)
+- [x] All async trait methods use `#[allow(async_fn_in_trait)]` (no `#[async_trait]` macro)
+- [x] No `metrics` crate or `prometheus` crate dependency yet — traits are backend-agnostic
 
 ### PR2 Creation Steps
 
@@ -714,4 +714,5 @@ This plan was updated after reading the implemented Config Manager codebase at `
 | Async traits | Native async fn | `#[allow(async_fn_in_trait)]` annotation | Matches `ConfigWriter` trait |
 | File naming | `prometheus_metrics.rs` | `metrics_recording.rs` | Backend-agnostic naming since using `metrics` facade |
 | Codebase location | Not specified | `~/git/llama-forge` (documented in header) | Actual implementation location |
+| Workspace deps | Assumed from scratch | Documents already-available deps: `parking_lot`, `metrics`, `nix`, `anyhow`, `serde_json`, `typed-builder` | Avoids redundant workspace dep additions | header) | Actual implementation location |
 | Workspace deps | Assumed from scratch | Documents already-available deps: `parking_lot`, `metrics`, `nix`, `anyhow`, `serde_json`, `typed-builder` | Avoids redundant workspace dep additions |

@@ -9,6 +9,11 @@ pub(crate) mod types;
 
 pub use error::{AuditSendError, StoreError};
 pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
+pub use metrics_recording::{AppMetrics, RequestMetricsRecorder, StoreHealthRecorder};
+pub use traits::{
+    ConfigOverlay, ConfigOverlayStore, EventStore, ProcessStore, RequestMetricsStore,
+    StoreMaintenance,
+};
 pub use types::{
     AuditEvent, AuditRecord, CheckpointMode, CheckpointResult, ConfigSnapshot,
     ConfigSnapshotTrigger, EventType, ManagedProcess, MetricsConfig, ProcessId, RequestId,
