@@ -17,6 +17,11 @@ parking_lot = { workspace = true }
 metrics = { workspace = true }
 nix = { workspace = true }
 chrono = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+deadpool-sqlite = { workspace = true }
+deadpool-sync = { workspace = true }
+deadpool = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
