@@ -35,6 +35,7 @@ pub enum ConfigLoadError {
 /// Error during hot-reload triggered by SIGHUP or API.
 /// See design doc Section 2.7.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConfigReloadError {
     /// Reload failed during the load/parse stage.
     #[error("reload failed: {0}")]

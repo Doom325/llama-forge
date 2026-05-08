@@ -16,9 +16,11 @@ tokio.workspace = true
 tracing.workspace = true
 nix.workspace = true
 parking_lot.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 proptest.workspace = true
 typed-builder.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber.workspace = true

@@ -18,6 +18,9 @@ pub trait ConfigReader: Send + Sync + private::Sealed {
 
     /// Subscribe to configuration changes.
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>>;
+
+    /// Access the underlying ArcSwap for cached readers.
+    fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>>;
 }
 
 /// Write access for reloading or mutating configuration.

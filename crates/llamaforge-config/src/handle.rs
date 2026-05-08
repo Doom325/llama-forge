@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 /// See design doc Section 2.3.
 pub struct ConfigHandle {
     source: Arc<dyn ConfigSource>,
-    inner: ArcSwap<AppConfig>,
+    inner: Arc<ArcSwap<AppConfig>>,
     reload_mutex: tokio::sync::Mutex<()>,
     change_tx: broadcast::Sender<Arc<ConfigDiff>>,
 }
@@ -28,7 +28,7 @@ impl ConfigHandle {
 
         Ok(Self {
             source,
-            inner: ArcSwap::from_pointee(config),
+            inner: Arc::new(ArcSwap::from_pointee(config)),
             reload_mutex: tokio::sync::Mutex::new(()),
             change_tx,
         })
@@ -38,6 +38,11 @@ impl ConfigHandle {
     pub fn export_toml(&self) -> Result<String, WritebackError> {
         let snapshot = self.inner.load();
         self.source.export(&snapshot)
+    }
+
+    /// Access the underlying ArcSwap for cached readers.
+    pub(crate) fn arc_swap(&self) -> Arc<ArcSwap<AppConfig>> {
+        self.inner.clone()
     }
 }
 
@@ -50,6 +55,10 @@ impl ConfigReader for ConfigHandle {
 
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>> {
         self.change_tx.subscribe()
+    }
+
+    fn arc_swap(&self) -> Arc<ArcSwap<AppConfig>> {
+        self.inner.clone()
     }
 }
 
@@ -93,13 +102,20 @@ impl ConfigWriter for ConfigHandle {
             crate::types::MutationOutcome::Applied => {}
         }
 
+        // TODO(PR5/Design §3.2): In the full protocol, we should first attempt to apply
+        // the hot-reload via the `llama-server` API before doing this disk writeback.
+        // For now, this just persists the configuration.
+
         let source = self.source.clone();
         let current_config_arc = current_guard.clone();
         let mutation_clone = mutation.clone();
 
-        tokio::task::spawn_blocking(move || source.persist(&current_config_arc, &mutation_clone))
-            .await
-            .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
+        let parent_span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            parent_span.in_scope(|| source.persist(&current_config_arc, &mutation_clone))
+        })
+        .await
+        .map_err(|e| WritebackError::PersistTaskJoin { message: e.to_string() })??;
 
         let diff = compute_diff(&current_guard, &new_config);
 

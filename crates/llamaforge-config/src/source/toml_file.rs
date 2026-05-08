@@ -267,7 +267,10 @@ impl ConfigSource for TomlFileConfigSource {
         })?;
 
         match fs::rename(&temp_path, &self.paths.main_config) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                tracing::Span::current().record("config.write_strategy", "AtomicRename");
+                Ok(())
+            }
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
                     || e.raw_os_error() == Some(nix::libc::EROFS) =>
@@ -293,6 +296,7 @@ impl ConfigSource for TomlFileConfigSource {
                 f.write_all(doc.to_string().as_bytes())
                     .map_err(|e| WritebackError::WriteFailed { source: e })?;
                 f.sync_all().map_err(|e| WritebackError::WriteFailed { source: e })?;
+                tracing::Span::current().record("config.write_strategy", "TruncateFallback");
                 Ok(())
             }
             Err(e) => Err(WritebackError::WriteFailed { source: e }),

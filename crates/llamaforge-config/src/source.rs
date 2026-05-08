@@ -7,7 +7,6 @@ pub mod toml_file;
 
 use crate::error::{ConfigLoadError, WritebackError};
 use crate::types::{AppConfig, ConfigMutation};
-
 /// Port abstraction for config persistence — separates domain logic from I/O.
 ///
 /// See design doc Section 2.1.
@@ -24,7 +23,6 @@ pub trait ConfigSource: Send + Sync + private::Sealed {
     /// Export the config as a serialized string (TOML for file-backed).
     fn export(&self, config: &AppConfig) -> Result<String, WritebackError>;
 }
-
 /// Sealed trait pattern to prevent external implementations.
 pub(crate) mod private {
     pub trait Sealed {}
