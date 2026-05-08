@@ -492,7 +492,6 @@ impl ConfigPaths {
         Self { main_config, priority_rules, state_dir, lock_file }
     }
 }
-
 /// Mutations that can be applied to the configuration at runtime.
 /// See design doc Section 2.6.
 #[non_exhaustive]
@@ -502,6 +501,34 @@ pub enum ConfigMutation {
     SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> },
 }
 
+/// The result of applying a `ConfigMutation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MutationOutcome {
+    Applied,
+    Unchanged,
+    TargetMissing,
+}
+
+impl ConfigMutation {
+    /// Applies the mutation in-place to an AppConfig.
+    pub fn apply(&self, config: &mut AppConfig) -> MutationOutcome {
+        match self {
+            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
+                if let Some(server) = config.servers.get_mut(server_id) {
+                    if server.lora_adapters != *adapters {
+                        server.lora_adapters = adapters.clone();
+                        MutationOutcome::Applied
+                    } else {
+                        MutationOutcome::Unchanged
+                    }
+                } else {
+                    MutationOutcome::TargetMissing
+                }
+            }
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

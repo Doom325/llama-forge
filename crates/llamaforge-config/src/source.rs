@@ -37,10 +37,12 @@ mod tests {
     use super::*;
     use crate::source::memory::InMemoryConfigSource;
     use crate::types::ServerId;
-
     #[test]
     fn test_in_memory_source_load_persist() {
-        let config = AppConfig::default();
+        let mut config = AppConfig::default();
+        config
+            .servers
+            .insert(crate::types::ServerId::from("s1"), crate::types::ServerConfig::default());
         let source = InMemoryConfigSource::new(config.clone());
 
         let loaded = source.load().unwrap();
@@ -51,6 +53,6 @@ mod tests {
 
         source.persist(&config, &mutation).unwrap();
         let updated = source.load().unwrap();
-        assert_eq!(updated, config); // unchanged because s1 doesn't exist
+        assert_eq!(updated, config); // unchanged because s1 already had empty adapters
     }
 }

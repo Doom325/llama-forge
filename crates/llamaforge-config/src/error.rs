@@ -9,6 +9,7 @@ use thiserror::Error;
 /// Error during initial configuration load.
 /// See design doc Section 2.7.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ConfigLoadError {
     /// Config file was not found.
     #[error("config file not found: {path}")]
@@ -51,6 +52,7 @@ pub enum ConfigReloadError {
 /// Error during crash-safe writeback.
 /// See design doc Section 2.7.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WritebackError {
     /// Target filesystem is read-only (e.g. Kubernetes ConfigMap).
     #[error("config file is read-only (Kubernetes ConfigMap?): {path}")]
@@ -67,6 +69,14 @@ pub enum WritebackError {
     /// Failed to serialize the config to TOML.
     #[error("serialization failed: {source}")]
     SerializeError { source: Box<dyn std::error::Error + Send + Sync> },
+
+    /// Target server was not found.
+    #[error("target server not found in configuration")]
+    ServerNotFound,
+
+    /// The blocking task responsible for persisting the configuration panicked.
+    #[error("spawn_blocking task panicked: {message}")]
+    PersistTaskJoin { message: String },
 
     /// Writeback is not yet implemented.
     #[error("writeback is not yet implemented")]

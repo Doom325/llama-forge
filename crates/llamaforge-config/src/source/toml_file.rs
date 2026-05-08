@@ -155,9 +155,7 @@ impl TomlFileConfigSource {
                 let server = servers
                     .get_mut(&server_id.0)
                     .and_then(|v| v.as_table_like_mut())
-                    .ok_or_else(|| WritebackError::SerializeError {
-                        source: format!("server '{}' not found in config", server_id).into(),
-                    })?;
+                    .ok_or_else(|| WritebackError::ServerNotFound)?;
 
                 let mut lora_array = toml_edit::Array::new();
                 for adapter in adapters {
@@ -224,16 +222,17 @@ impl ConfigSource for TomlFileConfigSource {
         _config: &AppConfig,
         mutation: &ConfigMutation,
     ) -> Result<(), WritebackError> {
-        // 0. Check for read-only filesystem
-        if let Ok(metadata) = fs::metadata(&self.paths.main_config) {
-            if metadata.permissions().readonly() {
-                return Err(WritebackError::ReadOnly { path: self.paths.main_config.clone() });
-            }
-        }
-
         // 1. Open and lock
-        let lock_file = File::create(&self.paths.lock_file)
-            .map_err(|e| WritebackError::WriteFailed { source: e })?;
+        let lock_file = match File::create(&self.paths.lock_file) {
+            Ok(f) => f,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    || e.raw_os_error() == Some(nix::libc::EROFS) =>
+            {
+                return Err(WritebackError::ReadOnly { path: self.paths.lock_file.clone() });
+            }
+            Err(e) => return Err(WritebackError::WriteFailed { source: e }),
+        };
         Self::acquire_flock_with_timeout(&lock_file, Duration::from_secs(30))?;
 
         // 2. Read existing main config to preserve comments
@@ -248,8 +247,16 @@ impl ConfigSource for TomlFileConfigSource {
 
         // 4. Atomic writeback (Phase 1: Temp file + Rename)
         let temp_path = self.paths.state_dir.join("config.tmp");
-        let mut temp_file =
-            File::create(&temp_path).map_err(|e| WritebackError::WriteFailed { source: e })?;
+        let mut temp_file = match File::create(&temp_path) {
+            Ok(f) => f,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    || e.raw_os_error() == Some(nix::libc::EROFS) =>
+            {
+                return Err(WritebackError::ReadOnly { path: temp_path.clone() });
+            }
+            Err(e) => return Err(WritebackError::WriteFailed { source: e }),
+        };
 
         temp_file
             .write_all(doc.to_string().as_bytes())
@@ -263,12 +270,26 @@ impl ConfigSource for TomlFileConfigSource {
             Ok(()) => Ok(()),
             Err(e)
                 if e.kind() == std::io::ErrorKind::PermissionDenied
-                    || e.raw_os_error() == Some(nix::libc::EXDEV) =>
+                    || e.raw_os_error() == Some(nix::libc::EROFS) =>
             {
+                Err(WritebackError::ReadOnly { path: self.paths.main_config.clone() })
+            }
+            Err(e) if e.raw_os_error() == Some(nix::libc::EXDEV) => {
                 // Phase 2: Fallback to truncation
                 tracing::warn!(error = ?e, "atomic rename failed, falling back to truncation");
-                let mut f = File::create(&self.paths.main_config)
-                    .map_err(|e| WritebackError::WriteFailed { source: e })?;
+
+                let mut f = match File::create(&self.paths.main_config) {
+                    Ok(file) => file,
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::PermissionDenied
+                            || e.raw_os_error() == Some(nix::libc::EROFS) =>
+                    {
+                        return Err(WritebackError::ReadOnly {
+                            path: self.paths.main_config.clone(),
+                        });
+                    }
+                    Err(e) => return Err(WritebackError::WriteFailed { source: e }),
+                };
                 f.write_all(doc.to_string().as_bytes())
                     .map_err(|e| WritebackError::WriteFailed { source: e })?;
                 f.sync_all().map_err(|e| WritebackError::WriteFailed { source: e })?;
