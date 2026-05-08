@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 //! Async batch collector task for metrics and events.
 //!
 //! Bridges the non-blocking async world to the synchronous writer thread.
@@ -63,11 +61,31 @@ impl From<AuditRecord> for AuditEvent {
 
         let payload = serde_json::json!({
             "model_name": r.request_metrics.model_name,
+            "slot_id": r.request_metrics.slot_id,
             "task_type": r.request_metrics.task_type.0,
             "requestor": r.request_metrics.requestor.0,
+            "effective_priority": r.request_metrics.effective_priority,
+            "queue_wait_ms": r.request_metrics.queue_wait_ms,
+            "ttft_ms": r.request_metrics.ttft_ms,
+            "generation_duration_ms": r.request_metrics.generation_duration_ms,
+            "total_latency_ms": r.request_metrics.total_latency_ms,
             "prompt_tokens": r.request_metrics.prompt_tokens,
             "completion_tokens": r.request_metrics.completion_tokens,
-            "total_latency_ms": r.request_metrics.total_latency_ms,
+            "prompt_tps": r.request_metrics.prompt_tps,
+            "generation_tps": r.request_metrics.generation_tps,
+            "status": match r.request_metrics.status {
+                RequestStatus::Queued => "queued",
+                RequestStatus::Processing => "processing",
+                RequestStatus::Completed => "completed",
+                RequestStatus::Failed => "failed",
+                RequestStatus::Evicted => "evicted",
+                RequestStatus::Cancelled => "cancelled",
+                RequestStatus::Timeout => "timeout",
+            },
+            "finish_reason": r.request_metrics.finish_reason,
+            "was_evicted": r.request_metrics.was_evicted,
+            "eviction_count": r.request_metrics.eviction_count,
+            "error_message": r.request_metrics.error_message,
         });
 
         Self {

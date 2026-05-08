@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 //! Synchronous SQLite writer thread and state machine.
 //!
 //! See design doc Section 3.3.
@@ -8,10 +6,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
-use rusqlite::{Connection, Transaction};
-use tokio::sync::oneshot;
-use tracing::{debug, error, info, info_span, warn, Span};
+use rusqlite::Connection;
+use tracing::{debug, error, info, warn};
 
 use crate::error::StoreError;
 use crate::sqlite::commands::WriterCommand;
@@ -295,18 +291,34 @@ fn handle_command(conn: &mut Connection, state: &mut WriterState, cmd: WriterCom
 
             let cutoff_str = cutoff.to_rfc3339();
 
-            // Execute sequentially outside of explicit transaction for simplicity
-            let res1 =
-                conn.execute("DELETE FROM audit_events WHERE created_at < ?1", [&cutoff_str]);
-            let res2 =
-                conn.execute("DELETE FROM request_metrics WHERE received_at < ?1", [&cutoff_str]);
+            match conn.transaction() {
+                Ok(tx) => {
+                    let res1 =
+                        tx.execute("DELETE FROM audit_events WHERE created_at < ?1", [&cutoff_str]);
+                    let res2 = tx.execute(
+                        "DELETE FROM request_metrics WHERE received_at < ?1",
+                        [&cutoff_str],
+                    );
 
-            match (res1, res2) {
-                (Ok(r1), Ok(r2)) => {
-                    state.record_success();
-                    let _ = reply.send(Ok((r1 + r2) as u64));
+                    match (res1, res2) {
+                        (Ok(r1), Ok(r2)) => {
+                            if let Err(e) = tx.commit() {
+                                state.record_failure();
+                                let _ =
+                                    reply.send(Err(StoreError::Internal { source: Box::new(e) }));
+                            } else {
+                                state.record_success();
+                                let _ = reply.send(Ok((r1 + r2) as u64));
+                            }
+                        }
+                        (Err(e), _) | (_, Err(e)) => {
+                            let _ = tx.rollback();
+                            state.record_failure();
+                            let _ = reply.send(Err(StoreError::Internal { source: Box::new(e) }));
+                        }
+                    }
                 }
-                (Err(e), _) | (_, Err(e)) => {
+                Err(e) => {
                     state.record_failure();
                     let _ = reply.send(Err(StoreError::Internal { source: Box::new(e) }));
                 }
