@@ -704,7 +704,7 @@ This plan was updated after reading the implemented Config Manager codebase at `
 |------|--------|-------|-----------|
 | Module visibility | `pub mod types;` etc. | `pub(crate) mod types;` + explicit `pub use` re-exports | Matches `llamaforge-config/src/lib.rs` pattern exactly |
 | Trait sealing | No sealed traits | All storage traits use `private::Sealed` pattern | Matches `ConfigSource` and `ConfigReader`/`ConfigWriter` |
-| Dyn assertions | Runtime `Arc<dyn T>` tests only | `const _: Option<&dyn T> = None;` compile-time assertions | Matches `llamaforge-config/src/traits.rs` line 41 |
+| Dyn assertions | Runtime `Arc<dyn T>` tests only | Static dispatch test coverage for `impl Trait` (relaxed from `const _` dyn safety assertions) | Match `llamaforge-config` implementation conventions where possible |
 | Enum extensibility | Some `#[non_exhaustive]` | ALL public enums `#[non_exhaustive]` | Matches `ConfigChange`, `ConfigLoadError`, etc. |
 | Metrics crate | `prometheus = "0.13"` crate | `metrics = "0.22"` facade crate with `counter!`/`histogram!` macros | Matches `InstrumentedConfigHandle` which uses `metrics` crate |
 | Prometheus struct | `PrometheusAppMetrics` | `MetricsFacadeRecorder` + `install_metrics_recorder()` helper | `metrics` crate separates recording from exporting |
@@ -714,5 +714,4 @@ This plan was updated after reading the implemented Config Manager codebase at `
 | Async traits | Native async fn | `#[allow(async_fn_in_trait)]` annotation | Matches `ConfigWriter` trait |
 | File naming | `prometheus_metrics.rs` | `metrics_recording.rs` | Backend-agnostic naming since using `metrics` facade |
 | Codebase location | Not specified | `~/git/llama-forge` (documented in header) | Actual implementation location |
-| Workspace deps | Assumed from scratch | Documents already-available deps: `parking_lot`, `metrics`, `nix`, `anyhow`, `serde_json`, `typed-builder` | Avoids redundant workspace dep additions | header) | Actual implementation location |
 | Workspace deps | Assumed from scratch | Documents already-available deps: `parking_lot`, `metrics`, `nix`, `anyhow`, `serde_json`, `typed-builder` | Avoids redundant workspace dep additions |

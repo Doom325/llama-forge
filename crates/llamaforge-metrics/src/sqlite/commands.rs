@@ -2,8 +2,6 @@
 //!
 //! See design doc Section 3.3 and 3.4.
 
-#![allow(dead_code)]
-
 use chrono::{DateTime, Utc};
 use tokio::sync::oneshot;
 use tracing::Span;
@@ -15,7 +13,7 @@ use crate::types::{
 };
 
 /// Command protocol for the SQLite writer thread.
-#[cfg_attr(not(test), allow(dead_code))]
+#[allow(dead_code)]
 #[non_exhaustive]
 #[derive(Debug)]
 pub enum WriterCommand {
