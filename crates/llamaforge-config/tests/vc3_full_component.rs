@@ -527,8 +527,10 @@ ctx_size = 2048
 async fn test_vc3_15_memory_bounds() {
     let mut config = AppConfig::default();
     for i in 0..100 {
-        let mut server = llamaforge_config::ServerConfig::default();
-        server.model_path = PathBuf::from(format!("model_{}.gguf", i));
+        let mut server = llamaforge_config::ServerConfig {
+            model_path: PathBuf::from(format!("model_{}.gguf", i)),
+            ..Default::default()
+        };
         for j in 0..50 {
             server.lora_adapters.push(LoraAdapterConfig {
                 path: PathBuf::from(format!("lora_{}_{}.gguf", i, j)),

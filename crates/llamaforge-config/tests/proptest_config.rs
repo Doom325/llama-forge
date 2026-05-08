@@ -11,19 +11,19 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 fn arb_server_id() -> impl Strategy<Value = ServerId> {
-    "[a-z0-9]{1,8}".prop_map(|s| ServerId::from(s))
+    "[a-z0-9]{1,8}".prop_map(|s| ServerId::from(s.to_string()))
 }
 
 fn arb_task_type_id() -> impl Strategy<Value = TaskTypeId> {
-    "[a-z0-9]{1,8}".prop_map(|s| TaskTypeId::from(s))
+    "[a-z0-9]{1,8}".prop_map(|s| TaskTypeId::from(s.to_string()))
 }
 
 fn arb_requestor_id() -> impl Strategy<Value = RequestorId> {
-    "[a-z0-9]{1,8}".prop_map(|s| RequestorId::from(s))
+    "[a-z0-9]{1,8}".prop_map(|s| RequestorId::from(s.to_string()))
 }
 
 fn arb_task_class_name() -> impl Strategy<Value = TaskClassName> {
-    "[a-z0-9]{1,8}".prop_map(|s| TaskClassName::from(s))
+    "[a-z0-9]{1,8}".prop_map(|s| TaskClassName::from(s.to_string()))
 }
 
 fn arb_path_buf() -> impl Strategy<Value = PathBuf> {
@@ -284,7 +284,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn test_diff_correctness(old in arb_app_config(), new in arb_app_config()) {
         let diff = compute_diff(&old, &new);
         assert!(apply_diff_produces_new(&old, &diff, &new));
