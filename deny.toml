@@ -1,3 +1,16 @@
+[advisories]
+ignore = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+deny = []
+skip = []
+skip-tree = []
+
 [licenses]
 allow = [
     "MIT",
@@ -8,3 +21,10 @@ allow = [
     "Unicode-3.0",
 ]
 confidence-threshold = 0.8
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+

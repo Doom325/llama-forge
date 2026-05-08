@@ -5,7 +5,7 @@ pub mod diff;
 pub mod error;
 pub(crate) mod handle;
 pub(crate) mod instrumented;
-pub mod source;
+pub(crate) mod source;
 pub(crate) mod traits;
 pub mod types;
 
