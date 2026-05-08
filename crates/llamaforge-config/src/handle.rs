@@ -41,6 +41,8 @@ impl ConfigHandle {
     }
 }
 
+impl crate::traits::private::Sealed for ConfigHandle {}
+
 impl ConfigReader for ConfigHandle {
     fn snapshot(&self) -> Guard<Arc<AppConfig>> {
         self.inner.load()
@@ -51,7 +53,6 @@ impl ConfigReader for ConfigHandle {
     }
 }
 
-#[async_trait::async_trait]
 impl ConfigWriter for ConfigHandle {
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError> {
         let _guard = self.reload_mutex.lock().await;
@@ -67,19 +68,16 @@ impl ConfigWriter for ConfigHandle {
 
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));
-            // It's okay if there are no active subscribers.
-            let _ = self.change_tx.send(Arc::new(diff.clone()));
-        } else {
-            // Design choice: broadcast even if empty.
-            let _ = self.change_tx.send(Arc::new(diff.clone()));
         }
+        // Design choice: broadcast even if empty.
+        let _ = self.change_tx.send(Arc::new(diff.clone()));
 
         Ok(diff)
     }
 
-    async fn writeback(&self, _mutation: ConfigMutation) -> Result<(), WritebackError> {
+    async fn writeback(&self, _mutation: ConfigMutation) -> Result<ConfigDiff, WritebackError> {
         // Implemented in PR5 (Writeback Protocol). Stubbed for now to satisfy the trait.
-        unimplemented!("writeback is implemented in PR5")
+        Ok(ConfigDiff::new(vec![]))
     }
 }
 
@@ -122,7 +120,7 @@ mod tests {
             ServerConfig { port: 8080, ..Default::default() },
         );
         // Replace inner directly for the test
-        *source.config.lock() = new_config.clone();
+        source.replace_config(new_config.clone());
 
         let diff = handle.reload().await.unwrap();
         assert_eq!(diff.changes.len(), 1);

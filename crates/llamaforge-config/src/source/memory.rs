@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 /// R17/R20: This is pub(crate) to keep the stable API focused on production sources.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct InMemoryConfigSource {
-    pub(crate) config: Mutex<AppConfig>,
+    config: Mutex<AppConfig>,
 }
 
 impl InMemoryConfigSource {
@@ -21,8 +21,12 @@ impl InMemoryConfigSource {
     pub fn new(config: AppConfig) -> Self {
         Self { config: Mutex::new(config) }
     }
-}
 
+    #[cfg(test)]
+    pub fn replace_config(&self, new_config: AppConfig) {
+        *self.config.lock() = new_config;
+    }
+}
 impl private::Sealed for InMemoryConfigSource {}
 
 impl ConfigSource for InMemoryConfigSource {

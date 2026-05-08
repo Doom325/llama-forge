@@ -1,13 +1,11 @@
-use llamaforge_config::diff::{ConfigChange, ServerConfigField};
 use llamaforge_config::error::ConfigLoadError;
 use llamaforge_config::traits::{ConfigReader, ConfigWriter};
-use llamaforge_config::types::{AppConfig, ConfigPaths, LoraAdapterConfig, ServerId};
+use llamaforge_config::types::{ConfigPaths, ServerId};
 use llamaforge_config::{ConfigHandle, TomlFileConfigSource};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
-use tokio::time::Duration;
 
 #[tokio::test]
 async fn test_vc2_1_end_to_end_reload() {
@@ -33,7 +31,7 @@ ctx_size = 2048
 
     let paths = ConfigPaths::new(main_path.clone(), rules_path, state_dir);
     let source = Arc::new(TomlFileConfigSource::new(paths));
-    
+
     // 2. Load into ConfigHandle
     let handle = ConfigHandle::load(source).unwrap();
     let mut rx = handle.subscribe();
@@ -128,7 +126,10 @@ async fn test_vc2_4_validation_rejects_bad_config() {
         fs::write(&main_path, content).unwrap();
         let paths = ConfigPaths::new(main_path.clone(), PathBuf::new(), state_dir.clone());
         let source = Arc::new(TomlFileConfigSource::new(paths));
-        let err = ConfigHandle::load(source).unwrap_err();
+        let err = match ConfigHandle::load(source) {
+            Err(e) => e,
+            Ok(_) => panic!("expected validation error"),
+        };
         if let ConfigLoadError::ValidationError { message } = err {
             assert!(message.contains(expected));
         } else {
@@ -167,7 +168,7 @@ ctx_size = 2048
 
     let snap = handle.snapshot();
     let server = snap.servers.get(&ServerId::from("s1")).unwrap();
-    
+
     // Check defaults were populated
     assert_eq!(server.gpu_layers, -1);
     assert_eq!(server.parallel_slots, 1);
