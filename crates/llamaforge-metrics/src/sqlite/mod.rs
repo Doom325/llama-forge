@@ -1,10 +1,12 @@
 //! SQLite backend infrastructure
 
+pub(crate) mod batch_collector;
 pub(crate) mod commands;
 pub(crate) mod in_memory;
 pub(crate) mod migrations;
 pub(crate) mod pool;
 pub(crate) mod rows;
+pub(crate) mod writer;
 
 use std::fs::File;
 use std::mem::ManuallyDrop;

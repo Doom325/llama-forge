@@ -12,11 +12,14 @@ pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 pub use metrics_recording::{AppMetrics, RequestMetricsRecorder, StoreHealthRecorder};
 pub use sqlite::open_and_migrate;
 pub use sqlite::{
+    batch_collector::{batch_collector_main, cmd_channel_drops},
+    commands::WriterCommand,
     migrations::get_migrations,
     pool::create_read_pool,
     rows::{
         AuditEventRow, ConfigOverlayRow, ConfigSnapshotRow, ManagedProcessRow, RequestMetricsRow,
     },
+    writer::{writer_thread_main, WriterTestHandle},
 };
 pub use traits::{
     ConfigOverlay, ConfigOverlayStore, EventStore, ProcessStore, RequestMetricsStore,
