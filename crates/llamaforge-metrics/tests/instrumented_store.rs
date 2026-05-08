@@ -4,7 +4,7 @@ use std::sync::mpsc;
 
 use llamaforge_metrics::InstrumentedMetricsStore;
 use llamaforge_metrics::{create_read_pool, open_and_migrate, writer_thread_main, MetricsConfig};
-use llamaforge_metrics::{AuditEvent, EventStore, EventType, NoopMetrics};
+use llamaforge_metrics::{AuditEvent, EventStore, EventType};
 
 #[tokio::test]
 async fn test_instrumented_store_events() {
@@ -28,7 +28,7 @@ async fn test_instrumented_store_events() {
         30,
     );
 
-    let metrics = NoopMetrics;
+    let metrics = llamaforge_metrics::MetricsFacadeRecorder::new();
     let instrumented = InstrumentedMetricsStore::new(store, metrics);
 
     // We can't easily assert on spans without a custom layer, but we can verify the delegation works.

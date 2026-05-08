@@ -50,6 +50,11 @@ impl SqliteMetricsStore {
         }
     }
 
+    /// Check if the writer thread has panicked or finished.
+    pub fn is_writer_finished(&self) -> bool {
+        self.writer_join_handle.as_ref().map_or(true, |h| h.is_finished())
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     #[doc(hidden)]
     pub fn new_for_test(

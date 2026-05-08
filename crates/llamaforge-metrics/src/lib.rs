@@ -11,7 +11,7 @@ pub use error::{AuditSendError, StoreError};
 pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 pub use ingest::{audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest};
 pub use instrumented::InstrumentedMetricsStore;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub use metrics_recording::MetricsFacadeRecorder;
 pub use metrics_recording::{
     install_metrics_recorder, AppMetrics, NoopMetrics, RequestMetricsRecorder, StoreHealthRecorder,
@@ -22,7 +22,7 @@ pub use sqlite::writer::writer_thread_main;
 pub use sqlite::{
     batch_collector::batch_collector_main,
     commands::WriterCommand,
-    liveness::{start_liveness_monitor, LivenessState},
+    liveness::start_liveness_monitor,
     migrations::get_migrations,
     pool::create_read_pool,
     prune::start_prune_task,

@@ -227,7 +227,7 @@ impl StoreHealthRecorder for MetricsFacadeRecorder {
     }
 
     fn record_prune_rows(&self, deleted: u64) {
-        counter!("llamaforge_prune_rows_deleted").absolute(deleted);
+        counter!("llamaforge_prune_rows_deleted").increment(deleted);
     }
 
     fn record_cmd_channel_dropped(&self, count: u64) {

@@ -9,20 +9,20 @@ use tracing::{info_span, Instrument};
 
 use crate::error::StoreError;
 use crate::filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
-use crate::metrics_recording::StoreHealthRecorder;
+use crate::metrics_recording::{MetricsFacadeRecorder, StoreHealthRecorder};
 use crate::sqlite::store::SqliteMetricsStore;
 use crate::traits::{private, EventStore, ProcessStore, RequestMetricsStore, StoreMaintenance};
 use crate::types::{AuditEvent, ConfigSnapshot, ManagedProcess, ProcessId, RequestMetrics};
 
 /// Decorator for `SqliteMetricsStore` that adds tracing spans and metrics.
-pub struct InstrumentedMetricsStore<M: StoreHealthRecorder> {
+pub struct InstrumentedMetricsStore {
     inner: SqliteMetricsStore,
-    metrics: M,
+    metrics: MetricsFacadeRecorder,
 }
 
-impl<M: StoreHealthRecorder> InstrumentedMetricsStore<M> {
+impl InstrumentedMetricsStore {
     /// Create a new instrumented store.
-    pub fn new(inner: SqliteMetricsStore, metrics: M) -> Self {
+    pub fn new(inner: SqliteMetricsStore, metrics: MetricsFacadeRecorder) -> Self {
         Self { inner, metrics }
     }
 
@@ -40,11 +40,16 @@ impl<M: StoreHealthRecorder> InstrumentedMetricsStore<M> {
         self.metrics.observe_checkpoint_duration(mode_str, start.elapsed().as_secs_f64());
         result
     }
+
+    /// Check if the writer thread has panicked or finished.
+    pub fn is_writer_finished(&self) -> bool {
+        self.inner.is_writer_finished()
+    }
 }
 
-impl<M: StoreHealthRecorder> private::Sealed for InstrumentedMetricsStore<M> {}
+impl private::Sealed for InstrumentedMetricsStore {}
 
-impl<M: StoreHealthRecorder + Send + Sync> EventStore for InstrumentedMetricsStore<M> {
+impl EventStore for InstrumentedMetricsStore {
     async fn insert_events(&self, events: Vec<AuditEvent>) -> Result<(), StoreError> {
         let start = Instant::now();
         let count = events.len();
@@ -71,7 +76,7 @@ impl<M: StoreHealthRecorder + Send + Sync> EventStore for InstrumentedMetricsSto
     }
 }
 
-impl<M: StoreHealthRecorder + Send + Sync> RequestMetricsStore for InstrumentedMetricsStore<M> {
+impl RequestMetricsStore for InstrumentedMetricsStore {
     async fn insert_request_metrics(&self, metrics: Vec<RequestMetrics>) -> Result<(), StoreError> {
         let start = Instant::now();
         let count = metrics.len();
@@ -111,7 +116,7 @@ impl<M: StoreHealthRecorder + Send + Sync> RequestMetricsStore for InstrumentedM
     }
 }
 
-impl<M: StoreHealthRecorder + Send + Sync> ProcessStore for InstrumentedMetricsStore<M> {
+impl ProcessStore for InstrumentedMetricsStore {
     async fn upsert_managed_process(&self, process: &ManagedProcess) -> Result<(), StoreError> {
         let start = Instant::now();
         let span = info_span!("metrics.upsert_managed_process", pid = process.pid.0);
@@ -142,9 +147,7 @@ impl<M: StoreHealthRecorder + Send + Sync> ProcessStore for InstrumentedMetricsS
     }
 }
 
-impl<M: StoreHealthRecorder + Send + Sync + Clone> StoreMaintenance
-    for InstrumentedMetricsStore<M>
-{
+impl StoreMaintenance for InstrumentedMetricsStore {
     async fn insert_config_snapshot(&self, snapshot: &ConfigSnapshot) -> Result<(), StoreError> {
         let start = Instant::now();
         let span = info_span!("metrics.insert_config_snapshot", id = %snapshot.id);

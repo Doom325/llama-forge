@@ -35,4 +35,4 @@ proptest = { workspace = true }
 typed-builder = { workspace = true }
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-metrics-util = "0.17"
+metrics-util = { workspace = true }

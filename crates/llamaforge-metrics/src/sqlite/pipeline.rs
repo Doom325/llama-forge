@@ -26,9 +26,13 @@ pub struct MetricsPipeline {
     /// The frontend for producers to send telemetry and audit events.
     pub ingest: MetricsIngest,
     /// The SQLite store for querying metrics and maintenance.
-    pub store: SqliteMetricsStore,
+    pub store: Arc<crate::instrumented::InstrumentedMetricsStore>,
     /// The async task handling batching of incoming events.
     pub batch_collector_handle: tokio::task::JoinHandle<()>,
+
+    // Background tasks to hold handles for graceful shutdown
+    pub liveness_handle: tokio::task::JoinHandle<()>,
+    pub prune_handle: tokio::task::JoinHandle<()>,
 }
 
 impl MetricsPipeline {
@@ -44,6 +48,10 @@ impl MetricsPipeline {
         // We drop our side of the channels by consuming self.ingest.
         drop(self.ingest);
 
+        // Abort background tasks that might hold sender clones (e.g. liveness monitor)
+        self.liveness_handle.abort();
+        self.prune_handle.abort();
+
         // Await the batch collector finishing its current batch and exiting
         let _ = self.batch_collector_handle.await;
 
@@ -53,7 +61,10 @@ impl MetricsPipeline {
 }
 
 /// Assembles the complete metrics pipeline.
-pub fn create_metrics_pipeline(config: &MetricsConfig) -> Result<MetricsPipeline, StoreError> {
+pub fn create_metrics_pipeline(
+    config: &MetricsConfig,
+    config_reader: Arc<dyn llamaforge_config::ConfigReader>,
+) -> Result<MetricsPipeline, StoreError> {
     // 1. Open and migrate the database. Also acquires the advisory lock.
     let conn = open_and_migrate(&config.db_path)?;
 
@@ -61,6 +72,11 @@ pub fn create_metrics_pipeline(config: &MetricsConfig) -> Result<MetricsPipeline
     let (telemetry_tx, telemetry_rx) = tokio_mpsc::channel(config.telemetry_channel_capacity);
     let (audit_tx, audit_rx) = tokio_mpsc::channel(config.audit_channel_capacity);
     let (writer_tx, writer_rx) = mpsc::sync_channel(64); // Hardcoded small bounded command channel
+
+    // We can't poll tokio mpsc channel depth directly easily if it's the receiver,
+    // but the sender has capacity() and max_capacity(). We'll clone senders for liveness.
+    let telemetry_tx_liveness = telemetry_tx.clone();
+    let audit_tx_liveness = audit_tx.clone();
 
     // 3. Spawn the writer thread
     let failure_threshold = config.writer_failure_threshold;
@@ -84,12 +100,28 @@ pub fn create_metrics_pipeline(config: &MetricsConfig) -> Result<MetricsPipeline
     let ingest = MetricsIngest::new(telemetry_tx, audit_tx, audit_semaphore);
 
     // 7. Assemble the pipeline
-    let store = SqliteMetricsStore::new(
+    let raw_store = SqliteMetricsStore::new(
         writer_tx,
         read_pool,
         Some(writer_handle),
         config.read_statement_timeout_secs,
     );
 
-    Ok(MetricsPipeline { ingest, store, batch_collector_handle })
+    let facade = crate::metrics_recording::MetricsFacadeRecorder::new();
+    let store =
+        Arc::new(crate::instrumented::InstrumentedMetricsStore::new(raw_store, facade.clone()));
+
+    // 8. Start background tasks
+    let liveness_handle = crate::sqlite::liveness::start_liveness_monitor(
+        config,
+        facade.clone(),
+        store.clone(),
+        telemetry_tx_liveness,
+        audit_tx_liveness,
+    );
+
+    let prune_handle =
+        crate::sqlite::prune::start_prune_task(store.clone(), config_reader, facade.clone());
+
+    Ok(MetricsPipeline { ingest, store, batch_collector_handle, liveness_handle, prune_handle })
 }

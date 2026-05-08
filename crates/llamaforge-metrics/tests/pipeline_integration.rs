@@ -52,8 +52,35 @@ fn dummy_audit() -> AuditRecord {
     }
 }
 
+async fn create_test_pipeline(config: &MetricsConfig) -> llamaforge_metrics::MetricsPipeline {
+    use std::io::Write;
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("llamaforge.toml");
+    let priority_rules = temp_dir.path().join("priority_rules.toml");
+    let state_dir = temp_dir.path().join("state");
+    std::fs::create_dir(&state_dir).unwrap();
+
+    let mut file = std::fs::File::create(&config_path).unwrap();
+    writeln!(file, "[global]").unwrap();
+    writeln!(file, "metrics_db_path = \"{}\"", config.db_path.to_str().unwrap()).unwrap();
+    writeln!(file, "metrics_retention_days = 30").unwrap();
+    writeln!(file, "[metrics]").unwrap();
+    writeln!(file, "telemetry_channel_capacity = {}", config.telemetry_channel_capacity).unwrap();
+    writeln!(file, "audit_channel_capacity = {}", config.audit_channel_capacity).unwrap();
+    writeln!(file, "batch_flush_interval_ms = {}", config.batch_flush_interval_ms).unwrap();
+    writeln!(file, "batch_flush_size = {}", config.batch_flush_size).unwrap();
+    writeln!(file, "audit_semaphore_permits = {}", config.audit_semaphore_permits).unwrap();
+
+    let paths = llamaforge_config::ConfigPaths::new(config_path, priority_rules, state_dir);
+    let source = llamaforge_config::TomlFileConfigSource::new(paths);
+    let handle = llamaforge_config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
+    let reader: std::sync::Arc<dyn llamaforge_config::ConfigReader> = std::sync::Arc::new(handle);
+    create_metrics_pipeline(config, reader).unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_pipeline_integration_happy_path() {
+    println!("test_pipeline_integration_happy_path: start");
     let temp_dir = TempDir::new().unwrap();
     let config = MetricsConfig {
         db_path: temp_dir.path().join("llamaforge.db"),
@@ -61,25 +88,32 @@ async fn test_pipeline_integration_happy_path() {
         ..Default::default()
     };
 
-    let pipeline = create_metrics_pipeline(&config).unwrap();
+    println!("test_pipeline_integration_happy_path: create_test_pipeline");
+    let pipeline = create_test_pipeline(&config).await;
 
+    println!("test_pipeline_integration_happy_path: send_telemetry");
     // Send telemetry
     assert!(pipeline.ingest.send_telemetry(dummy_telemetry()));
 
+    println!("test_pipeline_integration_happy_path: send_audit");
     // Send audit
     pipeline.ingest.send_audit(dummy_audit()).await.unwrap();
 
+    println!("test_pipeline_integration_happy_path: sleep");
     // Wait for batch collector to process
     tokio::time::sleep(Duration::from_millis(100)).await;
 
+    println!("test_pipeline_integration_happy_path: query_events");
     // Verify
     let events = pipeline.store.query_events(&EventFilter::default(), None, None).await.unwrap();
     assert_eq!(events.len(), 2);
     assert_eq!(events.iter().filter(|e| e.event_type == EventType::Telemetry).count(), 1);
     assert_eq!(events.iter().filter(|e| e.event_type == EventType::Audit).count(), 1);
 
+    println!("test_pipeline_integration_happy_path: shutdown");
     // Test shutdown
     pipeline.shutdown().await;
+    println!("test_pipeline_integration_happy_path: done");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -87,18 +121,21 @@ async fn test_telemetry_drop_backpressure() {
     let temp_dir = TempDir::new().unwrap();
     let config = MetricsConfig {
         db_path: temp_dir.path().join("llamaforge.db"),
-        telemetry_channel_capacity: 10, // Small channel
-        batch_flush_interval_ms: 1000,  // Slow flush so it fills up
+        telemetry_channel_capacity: 1, // Small channel
+        batch_flush_size: 1,           // Small batch
+        batch_flush_interval_ms: 1000, // Slow flush so it fills up
         ..Default::default()
     };
 
-    let pipeline = create_metrics_pipeline(&config).unwrap();
+    let pipeline = create_test_pipeline(&config).await;
     let initial_drops = telemetry_drops();
 
+    // Fill batch collector buffer
+    pipeline.ingest.send_telemetry(dummy_telemetry());
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
     // Fill channel
-    for _ in 0..10 {
-        assert!(pipeline.ingest.send_telemetry(dummy_telemetry()));
-    }
+    pipeline.ingest.send_telemetry(dummy_telemetry());
 
     // Next one should drop
     assert!(!pipeline.ingest.send_telemetry(dummy_telemetry()));
@@ -115,20 +152,8 @@ async fn test_audit_semaphore_exhaustion() {
         ..Default::default()
     };
 
-    let _pipeline = create_metrics_pipeline(&config).unwrap();
+    let _pipeline = create_test_pipeline(&config).await;
     let initial_drops = audit_drops();
-
-    // Wait, the semaphore is released internally. To test exhaustion, we need to block the sends.
-    // Easiest is to just drop the receiver side or fill the channel.
-    // Actually, `send_audit` doesn't hold the permit during the channel send indefinitely, it acquires and then does `timeout(..., send)`.
-    // Wait, the design doc says: `try_acquire` semaphore -> `timeout(send)`.
-    // The permit is held across the `.await`? No, let's look at `ingest.rs`:
-    // let _permit = self.audit_semaphore.try_acquire()...
-    // The permit is dropped at the end of the `send_audit` async function. So it IS held during the send.
-    // But if we use `.await`, we wait for the send to complete.
-
-    // To trigger exhaustion, we spawn 2 tasks that block on sending.
-    // We can block sending by filling a small channel and stopping the batch collector.
 
     // Let's just create a dummy ingest with a 0-permit semaphore for this specific test
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -152,33 +177,17 @@ async fn test_graceful_shutdown_data_safety() {
         ..Default::default()
     };
 
-    let pipeline = create_metrics_pipeline(&config).unwrap();
+    let pipeline = create_test_pipeline(&config).await;
 
     // Send 50 telemetry events
     for _ in 0..50 {
         pipeline.ingest.send_telemetry(dummy_telemetry());
     }
 
-    // Give it a moment to flush to the batch collector.
-    // In our test, the flush interval is 1000ms. If we drop immediately, the batch
-    // collector will exit because the channel drops, but wait, the batch collector
-    // might drop the events if they aren't flushed!
-    // The design doc says: "When the pipeline is dropped, it sends Shutdown to the writer."
-    // It doesn't guarantee that the async batch collector drains its internal buffer on drop.
-    // If we want to guarantee data safety, we should wait for a flush or the batch collector
-    // needs to flush on exit.
-    // But since this is a test of the Writer Thread's shutdown safety (that it flushes its commands),
-    // we should wait for the commands to reach the writer thread.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Drop immediately. The pipeline's shutdown handler MUST drain the channel.
+    // The shutdown method awaits the batch collector finishing, which guarantees all events are flushed.
     pipeline.shutdown().await;
 
     // Small sleep to ensure OS thread finishes
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // Open read-only connection to verify
-    // Wait for the advisory lock to be fully released by the OS
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // We can just open a raw rusqlite connection instead of a full pipeline which grabs the lock again
@@ -197,7 +206,7 @@ async fn test_audit_timeout() {
         ..Default::default()
     };
 
-    let _pipeline = create_metrics_pipeline(&config).unwrap();
+    let _pipeline = create_test_pipeline(&config).await;
     let initial_drops = audit_drops();
 
     let (audit_tx, _audit_rx) = tokio::sync::mpsc::channel(1);

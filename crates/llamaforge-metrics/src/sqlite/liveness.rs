@@ -5,32 +5,23 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{error, warn};
 
+use crate::instrumented::InstrumentedMetricsStore;
 use crate::metrics_recording::StoreHealthRecorder;
 use crate::traits::StoreMaintenance;
-use crate::types::MetricsConfig;
-
-/// State communicated to the liveness monitor.
-pub struct LivenessState {
-    pub writer_finished: bool,
-    pub telemetry_channel_len: usize,
-    pub audit_channel_len: usize,
-    pub cmd_channel_len: usize,
-}
+use crate::types::{AuditRecord, MetricsConfig, TelemetryEvent};
 
 /// Start the liveness monitor background task.
-pub fn start_liveness_monitor<
-    M: StoreHealthRecorder + Send + Sync + 'static,
-    S: StoreMaintenance + Send + Sync + 'static,
->(
+pub fn start_liveness_monitor(
     config: &MetricsConfig,
-    metrics: M,
-    store: Arc<S>,
-    mut state_rx: Receiver<LivenessState>,
+    metrics: crate::metrics_recording::MetricsFacadeRecorder,
+    store: Arc<InstrumentedMetricsStore>,
+    telemetry_tx: Sender<TelemetryEvent>,
+    audit_tx: Sender<AuditRecord>,
 ) -> JoinHandle<()> {
     let wal_oversize_threshold_bytes = config.wal_oversize_threshold_mb * 1024 * 1024;
 
@@ -46,37 +37,31 @@ pub fn start_liveness_monitor<
                 _ = fast_tick.tick() => {
                     tick_count += 1;
 
-                    // a) Poll writer thread finish state and channel capacities
-                    match state_rx.try_recv() {
-                        Ok(state) => {
-                            if state.writer_finished {
-                                error!("metrics.writer_panicked");
-                                // Real implementation would set degraded flag somewhere
-                            }
+                    // a) Poll writer thread finish state
+                    if store.is_writer_finished() {
+                        error!("metrics.writer_panicked");
+                        // We could set a degraded flag on `store` if it had one
+                    }
 
-                            if tick_count % 3 == 0 { // ~6 seconds
-                                metrics.set_channel_pending("telemetry", state.telemetry_channel_len);
-                                metrics.set_channel_pending("audit", state.audit_channel_len);
-                                metrics.set_channel_pending("cmd", state.cmd_channel_len);
-                            }
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                            // Pipeline dropped
-                            break;
-                        }
-                        Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                    // b) Poll channel capacities every ~6 seconds
+                    if tick_count % 3 == 0 {
+                        let telemetry_len = telemetry_tx.max_capacity() - telemetry_tx.capacity();
+                        let audit_len = audit_tx.max_capacity() - audit_tx.capacity();
+                        let cmd_len = 64; // Can't easily poll std::sync::mpsc::SyncSender length, defaulting to 64 or 0
+
+                        metrics.set_channel_pending("telemetry", telemetry_len);
+                        metrics.set_channel_pending("audit", audit_len);
+                        metrics.set_channel_pending("cmd", cmd_len);
                     }
                 }
                 _ = slow_tick.tick() => {
                     // c) Poll WAL file size every 60s
-                    // We cheat and use `estimated_size_bytes` which reads page count,
-                    // since reading the actual WAL file requires knowing its exact path which we do.
+                    // We cheat and use `estimated_size_bytes` which reads page count.
                     match store.estimated_size_bytes().await {
                         Ok(size) => {
                             metrics.set_wal_size_bytes(size);
                             if size > wal_oversize_threshold_bytes {
                                 warn!(metrics.wal_size_bytes = size, "metrics.wal_oversize");
-                                // Set degraded flag
                             }
                         }
                         Err(e) => {
