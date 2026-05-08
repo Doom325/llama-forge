@@ -11,17 +11,12 @@ use deadpool_sqlite::Pool;
 use tokio::sync::oneshot;
 use tracing::Span;
 
-use llamaforge_config::ServerId;
-
 use crate::error::StoreError;
 use crate::filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 use crate::sqlite::commands::WriterCommand;
 use crate::sqlite::query_builder::{build_event_where, build_group_by, build_metrics_where};
-use crate::sqlite::rows::{AuditEventRow, ConfigOverlayRow, ManagedProcessRow, RequestMetricsRow};
-use crate::traits::{
-    private, ConfigOverlay, ConfigOverlayStore, EventStore, ProcessStore, RequestMetricsStore,
-    StoreMaintenance,
-};
+use crate::sqlite::rows::{AuditEventRow, ManagedProcessRow, RequestMetricsRow};
+use crate::traits::{private, EventStore, ProcessStore, RequestMetricsStore, StoreMaintenance};
 use crate::types::{
     AuditEvent, CheckpointMode, CheckpointResult, ConfigSnapshot, ManagedProcess, ProcessId,
     RequestMetrics,
@@ -39,9 +34,9 @@ pub struct SqliteMetricsStore {
 }
 
 impl SqliteMetricsStore {
-    /// Creates a new `SqliteMetricsStore`. Intended to be called by `create_metrics_pipeline()`.
+    /// Creates a new `SqliteMetricsStore`.
     #[allow(dead_code)]
-    pub(crate) fn new(
+    pub fn new(
         cmd_tx: SyncSender<WriterCommand>,
         read_pool: Pool,
         writer_join_handle: Option<JoinHandle<()>>,
@@ -88,16 +83,17 @@ impl SqliteMetricsStore {
         F: FnOnce(&mut rusqlite::Connection) -> Result<R, StoreError> + Send + 'static,
         R: Send + 'static,
     {
-        let conn =
-            self.read_pool.get().await.map_err(|e| StoreError::Internal { source: Box::new(e) })?;
+        let conn = self.read_pool.get().await.map_err(|e| StoreError::Internal {
+            source: Box::new(std::io::Error::other(e.to_string())),
+        })?;
 
         let future = conn.interact(|c| f(c));
 
         match tokio::time::timeout(self.read_timeout, future).await {
             Ok(Ok(result)) => result,
-            Ok(Err(e)) => Err(StoreError::Internal {
-                source: Box::new(std::io::Error::other(format!("interact error: {}", e))),
-            }),
+            Ok(Err(e)) => {
+                Err(StoreError::Internal { source: Box::new(std::io::Error::other(e.to_string())) })
+            }
             Err(_) => Err(StoreError::Timeout { elapsed: self.read_timeout }),
         }
     }
@@ -319,15 +315,17 @@ impl RequestMetricsStore for SqliteMetricsStore {
         // and add a separate query. For now, we will collect total_latency_ms into a string via group_concat.
 
         let sql = format!(
-            r#"SELECT
+            r#"SELECT 
                 {}
                 COUNT(*) as request_count,
                 SUM(prompt_tokens) as total_prompt_tokens,
                 SUM(completion_tokens) as total_completion_tokens,
                 AVG(total_latency_ms) as avg_latency_ms,
-                GROUP_CONCAT(total_latency_ms) as latencies
-             FROM request_metrics
-             {}
+                AVG(ttft_ms) as avg_ttft_ms,
+                AVG(generation_tps) as avg_generation_tps,
+                GROUP_CONCAT(ttft_ms) as ttfts,
+                GROUP_CONCAT(generation_tps) as tps
+             FROM (SELECT * FROM request_metrics {} ORDER BY received_at DESC LIMIT 10000)
              {}"#,
             select_clause, where_clause, group_by_clause
         );
@@ -345,16 +343,18 @@ impl RequestMetricsStore for SqliteMetricsStore {
 
             let rows = stmt
                 .query_map(rusqlite::params_from_iter(sql_params), |row| {
+                    let sum_prompt: i64 = row.get(group_by_len + 1).unwrap_or(0);
+                    let sum_comp: i64 = row.get(group_by_len + 2).unwrap_or(0);
                     let mut aggregated = AggregatedMetrics {
                         group_key: String::new(),
                         request_count: row.get(group_by_len)?,
-                        sum_prompt_tokens: row.get(group_by_len + 1)?,
-                        sum_completion_tokens: row.get(group_by_len + 2)?,
-                        sum_total_tokens: 0,
-                        avg_ttft_ms: None,
+                        sum_prompt_tokens: sum_prompt as u64,
+                        sum_completion_tokens: sum_comp as u64,
+                        sum_total_tokens: (sum_prompt + sum_comp) as u64,
+                        avg_ttft_ms: row.get(group_by_len + 4)?,
                         p50_ttft_ms: None,
                         p99_ttft_ms: None,
-                        avg_generation_tps: None,
+                        avg_generation_tps: row.get(group_by_len + 5)?,
                         p50_generation_tps: None,
                         p99_generation_tps: None,
                         avg_total_latency_ms: row.get(group_by_len + 3)?,
@@ -373,20 +373,32 @@ impl RequestMetricsStore for SqliteMetricsStore {
                     }
                     aggregated.group_key = keys.join(",");
 
-                    // Compute percentiles in Rust
-                    let latencies_str: Option<String> = row.get(group_by_len + 4)?;
-                    if let Some(s) = latencies_str {
-                        let mut lats: Vec<f64> =
-                            s.split(',').filter_map(|s| s.parse::<f64>().ok()).collect();
-                        if !lats.is_empty() {
-                            lats.sort_by(|a, b| {
-                                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                            });
-                            let _p50_idx = (lats.len() as f64 * 0.50) as usize;
-                            let _p99_idx = (lats.len() as f64 * 0.99) as usize;
-                            // not fetching p50_ttft_ms yet, mapping to total latency for now if we wanted
+                    let compute_percentiles = |s: Option<String>| -> (Option<f64>, Option<f64>) {
+                        if let Some(s) = s {
+                            let mut vals: Vec<f64> =
+                                s.split(',').filter_map(|s| s.parse::<f64>().ok()).collect();
+                            if !vals.is_empty() {
+                                vals.sort_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                });
+                                let p50_idx = (vals.len() as f64 * 0.50) as usize;
+                                let p99_idx = (vals.len() as f64 * 0.99) as usize;
+                                return (
+                                    Some(vals[p50_idx.min(vals.len() - 1)]),
+                                    Some(vals[p99_idx.min(vals.len() - 1)]),
+                                );
+                            }
                         }
-                    }
+                        (None, None)
+                    };
+
+                    let (p50_ttft, p99_ttft) = compute_percentiles(row.get(group_by_len + 6)?);
+                    aggregated.p50_ttft_ms = p50_ttft;
+                    aggregated.p99_ttft_ms = p99_ttft;
+
+                    let (p50_tps, p99_tps) = compute_percentiles(row.get(group_by_len + 7)?);
+                    aggregated.p50_generation_tps = p50_tps;
+                    aggregated.p99_generation_tps = p99_tps;
 
                     Ok(aggregated)
                 })
@@ -509,79 +521,6 @@ impl StoreMaintenance for SqliteMetricsStore {
             Ok((page_count * page_size) as u64)
         })
         .await
-    }
-}
-
-impl ConfigOverlayStore for SqliteMetricsStore {
-    async fn get_overlay(
-        &self,
-        server_id: ServerId,
-        overlay_key: &str,
-    ) -> Result<Option<ConfigOverlay>, StoreError> {
-        let server_id_str = server_id.0.clone();
-        let overlay_key_str = overlay_key.to_string();
-
-        self.interact_with_timeout(move |conn| {
-            let mut stmt = conn.prepare_cached(
-                "SELECT server_id, overlay_key, value, applied_at FROM config_overlays WHERE server_id = ?1 AND overlay_key = ?2"
-            ).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-
-            let mut rows = stmt.query(rusqlite::params![server_id_str, overlay_key_str]).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-
-            if let Some(row) = rows.next().map_err(|e| StoreError::Internal { source: Box::new(e) })? {
-                let overlay_row = ConfigOverlayRow {
-                    server_id: row.get(0).map_err(|e| StoreError::Internal { source: Box::new(e) })?,
-                    overlay_key: row.get(1).map_err(|e| StoreError::Internal { source: Box::new(e) })?,
-                    value: row.get(2).map_err(|e| StoreError::Internal { source: Box::new(e) })?,
-                    applied_at: row.get(3).map_err(|e| StoreError::Internal { source: Box::new(e) })?,
-                };
-
-                let overlay = ConfigOverlay::try_from(overlay_row).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-                Ok(Some(overlay))
-            } else {
-                Ok(None)
-            }
-        }).await
-    }
-
-    async fn set_overlay(&self, _overlay: ConfigOverlay) -> Result<(), StoreError> {
-        // Implementation omitted for v1.0, wait for WriterCommand::SetOverlay
-        Err(StoreError::Internal { source: Box::new(std::io::Error::other("Not implemented")) })
-    }
-
-    async fn remove_overlay(
-        &self,
-        _server_id: ServerId,
-        _overlay_key: &str,
-    ) -> Result<(), StoreError> {
-        // Implementation omitted for v1.0
-        Err(StoreError::Internal { source: Box::new(std::io::Error::other("Not implemented")) })
-    }
-
-    async fn list_overlays(&self, server_id: ServerId) -> Result<Vec<ConfigOverlay>, StoreError> {
-        let server_id_str = server_id.0.clone();
-
-        self.interact_with_timeout(move |conn| {            let mut stmt = conn.prepare_cached(
-                "SELECT server_id, overlay_key, value, applied_at FROM config_overlays WHERE server_id = ?1"
-            ).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-
-            let rows = stmt.query_map([server_id_str], |row| {
-                Ok(ConfigOverlayRow {
-                    server_id: row.get(0)?,
-                    overlay_key: row.get(1)?,
-                    value: row.get(2)?,
-                    applied_at: row.get(3)?,
-                })
-            }).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-
-            let mut overlays = Vec::new();
-            for r in rows {
-                let row = r.map_err(|e| StoreError::Internal { source: Box::new(e) })?;
-                overlays.push(ConfigOverlay::try_from(row).map_err(|e| StoreError::Internal { source: Box::new(e) })?);
-            }
-
-            Ok(overlays)
-        }).await
     }
 }
 
