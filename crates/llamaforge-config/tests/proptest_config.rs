@@ -259,7 +259,6 @@ proptest! {
     })]
 
     #[test]
-    #[ignore]
     fn test_serde_roundtrip(config in arb_app_config()) {
         let serialized = toml::to_string(&config).unwrap();
         let deserialized: AppConfig = toml::from_str(&serialized).unwrap();
@@ -267,7 +266,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore]
     fn test_backward_compat(config in arb_app_config()) {
         let serialized = toml::to_string(&config).unwrap();
         // Since deleting keys randomly from a toml string is non-trivial,
@@ -282,9 +280,8 @@ proptest! {
         let deserialized: AppConfig = toml::from_str(&doc.to_string()).unwrap();
         assert_eq!(deserialized.priority_rules, PriorityRulesConfig::default());
     }
-
-    #[test]
-    fn test_diff_correctness(old in arb_app_config(), new in arb_app_config()) {
+#[test]
+fn test_diff_correctness(old in arb_app_config(), new in arb_app_config()) {
         let diff = compute_diff(&old, &new);
         assert!(apply_diff_produces_new(&old, &diff, &new));
     }
