@@ -6,7 +6,7 @@ pub mod error;
 pub(crate) mod handle;
 pub(crate) mod instrumented;
 pub mod source;
-pub mod traits;
+pub(crate) mod traits;
 pub mod types;
 
 pub use handle::ConfigHandle;

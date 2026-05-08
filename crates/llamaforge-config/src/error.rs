@@ -42,6 +42,10 @@ pub enum ConfigReloadError {
     /// Diff computation failed (unexpected schema drift).
     #[error("diff computation failed: {message}")]
     DiffError { message: String },
+
+    /// The blocking task responsible for loading the configuration panicked.
+    #[error("spawn_blocking task panicked: {message}")]
+    LoadTaskJoin { message: String },
 }
 
 /// Error during crash-safe writeback.
@@ -63,4 +67,8 @@ pub enum WritebackError {
     /// Failed to serialize the config to TOML.
     #[error("serialization failed: {source}")]
     SerializeError { source: Box<dyn std::error::Error + Send + Sync> },
+
+    /// Writeback is not yet implemented.
+    #[error("writeback is not yet implemented")]
+    NotImplemented,
 }

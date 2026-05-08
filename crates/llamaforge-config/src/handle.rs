@@ -61,7 +61,7 @@ impl ConfigWriter for ConfigHandle {
         // Load the new config in a blocking task since source I/O blocks.
         let new_config = tokio::task::spawn_blocking(move || source.load())
             .await
-            .expect("spawn_blocking panicked")?;
+            .map_err(|e| ConfigReloadError::LoadTaskJoin { message: e.to_string() })??;
 
         let old_config = self.inner.load();
         let diff = compute_diff(&old_config, &new_config);
