@@ -12,8 +12,6 @@ pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 pub use metrics_recording::{AppMetrics, RequestMetricsRecorder, StoreHealthRecorder};
 pub use sqlite::open_and_migrate;
 pub use sqlite::writer::writer_thread_main;
-#[cfg(any(test, feature = "test-utils"))]
-pub use sqlite::writer::WriterTestHandle;
 pub use sqlite::{
     batch_collector::{batch_collector_main, cmd_channel_drops},
     commands::WriterCommand,
@@ -22,6 +20,12 @@ pub use sqlite::{
     rows::{
         AuditEventRow, ConfigOverlayRow, ConfigSnapshotRow, ManagedProcessRow, RequestMetricsRow,
     },
+    store::SqliteMetricsStore,
+};
+#[cfg(any(test, feature = "test-utils"))]
+pub use sqlite::{
+    query_builder::{build_event_where, build_group_by, build_metrics_where},
+    writer::WriterTestHandle,
 };
 pub use traits::{
     ConfigOverlay, ConfigOverlayStore, EventStore, ProcessStore, RequestMetricsStore,

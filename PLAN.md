@@ -305,7 +305,7 @@ Implement the read side of `SqliteMetricsStore`: all query methods from the stor
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `SqliteMetricsStore` struct | Fields: `cmd_tx: std::sync::mpsc::SyncSender<WriterCommand>`, `read_pool: deadpool_sqlite::Pool`, `writer_join_handle: Option<std::thread::JoinHandle<()>>`. Constructor is private — created only via `create_metrics_pipeline()`. | `src/sqlite/store.rs` |
+| 5.1 | Implement `SqliteMetricsStore` struct | Fields: `cmd_tx: std::sync::mpsc::SyncSender<WriterCommand>`, `read_pool: deadpool_sqlite::Pool`, `writer_join_handle: Option<std::thread::JoinHandle<()>>`. Constructor is `pub` so it can be instantiated in production (factory logic deferred to PR6). | `src/sqlite/store.rs` |
 | 5.2 | Implement `EventStore` for `SqliteMetricsStore` | `insert_events`: send `WriterCommand::InsertEvents` via `cmd_tx`, await oneshot reply. `query_events`: `pool.get().await` → `interact()` → build SQL WHERE from `EventFilter`, execute, map rows to `AuditEvent` via row DTOs. | `src/sqlite/store.rs` |
 | 5.3 | Implement `RequestMetricsStore` for `SqliteMetricsStore` | `insert_request_metrics`: send `WriterCommand::InsertMetrics`. `query_request_metrics`: filter → SQL. `aggregate_request_metrics`: build GROUP BY from `GroupByField` enum, compute COUNT, SUM, AVG. For p50/p99: use `NTILE` window function or collect and compute in Rust (SQLite lacks native percentiles). | `src/sqlite/store.rs` |
 | 5.4 | Implement `ProcessStore` for `SqliteMetricsStore` | `upsert_managed_process`: send `WriterCommand::UpsertProcess`. `remove_managed_process`: send `WriterCommand::RemoveProcess`. `list_managed_processes`: read pool query. | `src/sqlite/store.rs` |

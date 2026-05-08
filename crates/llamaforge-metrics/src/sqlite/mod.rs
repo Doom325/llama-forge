@@ -5,7 +5,9 @@ pub(crate) mod commands;
 pub(crate) mod in_memory;
 pub(crate) mod migrations;
 pub(crate) mod pool;
+pub(crate) mod query_builder;
 pub(crate) mod rows;
+pub(crate) mod store;
 pub(crate) mod writer;
 
 use std::fs::File;
