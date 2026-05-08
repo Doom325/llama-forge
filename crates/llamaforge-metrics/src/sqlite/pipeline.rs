@@ -19,12 +19,9 @@ use crate::types::MetricsConfig;
 ///
 /// # Shutdown Ordering
 /// To cleanly shut down the pipeline:
-/// 1. Ensure `ingest.audit_semaphore.close()` has been called and all existing
-///    tasks holding permits have finished.
-/// 2. Drop `MetricsPipeline` (which drops `SqliteMetricsStore`).
-/// 3. The `SqliteMetricsStore` drop handler will send a Shutdown command to the
-///    writer thread, which drains all remaining events and executes a WAL truncate
-///    checkpoint before exiting.
+/// 1. Call `shutdown().await`, which closes the ingest semaphore,
+/// 2. Awaits the batch collector to flush all pending events,
+/// 3. Drops the store, which tells the SQLite writer thread to drain, checkpoint, and exit.
 pub struct MetricsPipeline {
     /// The frontend for producers to send telemetry and audit events.
     pub ingest: MetricsIngest,
@@ -32,6 +29,27 @@ pub struct MetricsPipeline {
     pub store: SqliteMetricsStore,
     /// The async task handling batching of incoming events.
     pub batch_collector_handle: tokio::task::JoinHandle<()>,
+}
+
+impl MetricsPipeline {
+    /// Gracefully shuts down the metrics pipeline.
+    ///
+    /// 1. Closes the ingestion frontend so new requests fail fast.
+    /// 2. Awaits the batch collector task so pending events are flushed to the writer.
+    /// 3. Drops the SQLite store, which triggers the writer thread's clean shutdown
+    ///    (including draining its command queue and checkpointing).
+    pub async fn shutdown(self) {
+        self.ingest.close();
+        // The batch collector loop terminates when the incoming channels close.
+        // We drop our side of the channels by consuming self.ingest.
+        drop(self.ingest);
+
+        // Await the batch collector finishing its current batch and exiting
+        let _ = self.batch_collector_handle.await;
+
+        // Finally, dropping `self.store` triggers the writer thread shutdown.
+        drop(self.store);
+    }
 }
 
 /// Assembles the complete metrics pipeline.

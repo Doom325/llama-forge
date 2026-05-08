@@ -9,10 +9,7 @@ pub(crate) mod types;
 
 pub use error::{AuditSendError, StoreError};
 pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
-pub use ingest::{
-    audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest, AUDIT_EVENTS_DROPPED,
-    TELEMETRY_EVENTS_DROPPED,
-};
+pub use ingest::{audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest};
 pub use metrics_recording::{AppMetrics, RequestMetricsRecorder, StoreHealthRecorder};
 pub use sqlite::open_and_migrate;
 pub use sqlite::pipeline::{create_metrics_pipeline, MetricsPipeline};

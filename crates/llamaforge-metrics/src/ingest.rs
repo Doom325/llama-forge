@@ -103,9 +103,9 @@ impl MetricsIngest {
         }
     }
 
-    /// Exposed for testing or controlled shutdown of the semaphore.
-    #[cfg(any(test, feature = "test-utils"))]
-    pub fn close_semaphore(&self) {
+    /// Signal to producers that the pipeline is shutting down.
+    /// New audit requests will fail to acquire a permit.
+    pub fn close(&self) {
         self.audit_semaphore.close();
     }
 }

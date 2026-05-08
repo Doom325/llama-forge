@@ -79,8 +79,7 @@ async fn test_pipeline_integration_happy_path() {
     assert_eq!(events.iter().filter(|e| e.event_type == EventType::Audit).count(), 1);
 
     // Test shutdown
-    pipeline.ingest.close_semaphore();
-    drop(pipeline); // Should trigger Drop impl and shutdown cleanly
+    pipeline.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -172,9 +171,8 @@ async fn test_graceful_shutdown_data_safety() {
     // we should wait for the commands to reach the writer thread.
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    // Drop immediately. The writer thread's shutdown handler MUST drain the channel.
-    pipeline.ingest.close_semaphore();
-    drop(pipeline);
+    // Drop immediately. The pipeline's shutdown handler MUST drain the channel.
+    pipeline.shutdown().await;
 
     // Small sleep to ensure OS thread finishes
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -188,4 +186,35 @@ async fn test_graceful_shutdown_data_safety() {
     let count: i64 =
         conn.query_row("SELECT count(*) FROM audit_events", [], |row| row.get(0)).unwrap();
     assert_eq!(count, 50);
+}
+
+#[tokio::test]
+async fn test_audit_timeout() {
+    let temp_dir = TempDir::new().unwrap();
+    let config = MetricsConfig {
+        db_path: temp_dir.path().join("llamaforge.db"),
+        batch_flush_interval_ms: 1000,
+        ..Default::default()
+    };
+
+    let _pipeline = create_metrics_pipeline(&config).unwrap();
+    let initial_drops = audit_drops();
+
+    let (audit_tx, _audit_rx) = tokio::sync::mpsc::channel(1);
+    let (telemetry_tx, _telemetry_rx) = tokio::sync::mpsc::channel(1);
+    let ingest = llamaforge_metrics::MetricsIngest::new_for_test(
+        telemetry_tx,
+        audit_tx,
+        std::sync::Arc::new(tokio::sync::Semaphore::new(10)),
+    );
+
+    // Fill the channel of size 1
+    ingest.send_audit(dummy_audit()).await.unwrap();
+
+    // Fast forward time to trigger timeout
+    tokio::time::pause();
+
+    let res = ingest.send_audit(dummy_audit()).await;
+    assert!(matches!(res, Err(AuditSendError::Timeout)));
+    assert_eq!(audit_drops(), initial_drops + 1);
 }
