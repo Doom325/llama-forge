@@ -180,6 +180,7 @@ pub struct CheckpointResult {
 }
 
 /// The current health state of the SQLite writer thread.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum WriterMode {
     Healthy,
