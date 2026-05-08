@@ -4,6 +4,7 @@ pub(crate) mod batch_collector;
 pub(crate) mod commands;
 pub(crate) mod in_memory;
 pub(crate) mod migrations;
+pub(crate) mod pipeline;
 pub(crate) mod pool;
 pub(crate) mod query_builder;
 pub(crate) mod rows;

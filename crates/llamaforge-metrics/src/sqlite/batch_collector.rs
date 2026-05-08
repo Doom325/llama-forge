@@ -22,6 +22,7 @@ use crate::types::{
 pub(crate) static CMD_CHANNEL_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// Get the number of events dropped due to full command channel.
+#[allow(dead_code)]
 pub fn cmd_channel_drops() -> u64 {
     CMD_CHANNEL_EVENTS_DROPPED.load(Ordering::Relaxed)
 }
