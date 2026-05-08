@@ -205,13 +205,13 @@ Set up SQLite: opening the database, running migrations, configuring WAL mode an
 
 ### PR3 Acceptance Criteria
 
-- [ ] `open_and_migrate()` creates a WAL-mode SQLite DB with all 5 tables
-- [ ] Migrations are idempotent (running twice is harmless)
-- [ ] Read pool connections have `query_only = ON`
-- [ ] Advisory flock prevents dual-instance
-- [ ] All row DTO↔domain conversions are lossless
-- [ ] All integration tests pass using `tempfile::TempDir`
-- [ ] No `unwrap()` in any `interact()` closure
+- [x] `open_and_migrate()` creates a WAL-mode SQLite DB with all 5 tables
+- [x] Migrations are idempotent (running twice is harmless)
+- [x] Read pool connections have `query_only = ON`
+- [x] Advisory flock prevents dual-instance
+- [x] All row DTO↔domain conversions are lossless
+- [x] All integration tests pass using `tempfile::TempDir`
+- [x] No `unwrap()` in any `interact()` closure
 
 ### PR3 Creation Steps
 

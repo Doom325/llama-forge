@@ -35,6 +35,9 @@ typed-builder = "0.20"
 parking_lot = "0.12"
 metrics = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite_migration = "1"
+deadpool-sqlite = "0.8"
 
 [profile.release]
 lto = "thin"

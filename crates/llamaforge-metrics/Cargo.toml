@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 llamaforge-config = { workspace = true }
+anyhow = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -17,6 +18,11 @@ parking_lot = { workspace = true }
 metrics = { workspace = true }
 nix = { workspace = true }
 chrono = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+deadpool-sqlite = { workspace = true }
+deadpool-sync = "0.1.4"
+deadpool = "0.12"
 
 [dev-dependencies]
 tempfile = { workspace = true }
