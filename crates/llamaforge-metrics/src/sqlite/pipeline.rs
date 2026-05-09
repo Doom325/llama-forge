@@ -52,6 +52,10 @@ impl MetricsPipeline {
         self.liveness_handle.abort();
         self.prune_handle.abort();
 
+        // Await the aborted tasks to ensure they drop their Arc<InstrumentedMetricsStore> clones
+        let _ = self.liveness_handle.await;
+        let _ = self.prune_handle.await;
+
         // Await the batch collector finishing its current batch and exiting
         let _ = self.batch_collector_handle.await;
 

@@ -19,7 +19,7 @@ pub fn start_prune_task<
     S: StoreMaintenance + Send + Sync + 'static,
 >(
     store: Arc<S>,
-    _config_reader: Arc<dyn ConfigReader>,
+    config_reader: Arc<dyn ConfigReader>,
     metrics: M,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
@@ -29,8 +29,7 @@ pub fn start_prune_task<
         loop {
             tick.tick().await;
 
-            // TODO: Ensure metrics.retention_days exists in ConfigReader. Using a default for now to satisfy compiler if the type structure changed or is undefined.
-            let retention_days = 30i64; // Default to 30 days
+            let retention_days = config_reader.snapshot().global.metrics_retention_days as i64;
             let cutoff = Utc::now() - chrono::Duration::days(retention_days);
 
             match store.prune_events_older_than(cutoff).await {
