@@ -13,7 +13,8 @@ pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
 pub use ingest::{audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest};
 pub use instrumented::InstrumentedMetricsStore;
 pub use metrics_recording::{
-    install_metrics_recorder, AppMetrics, RequestMetricsRecorder, StoreHealthRecorder,
+    install_metrics_recorder, AppMetrics, MetricsFacadeRecorder, RequestMetricsRecorder,
+    StoreHealthRecorder,
 };
 pub use sqlite::pipeline::{create_metrics_pipeline, MetricsPipeline};
 pub use sqlite::store::SqliteMetricsStore;
@@ -29,7 +30,7 @@ pub use types::{
 
 // Internal types exposed for integration tests
 #[cfg(any(test, feature = "test-utils"))]
-pub use metrics_recording::{MetricsFacadeRecorder, NoopMetrics};
+pub use metrics_recording::NoopMetrics;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub use sqlite::{

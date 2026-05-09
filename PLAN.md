@@ -528,7 +528,7 @@ Final PR: property-based tests (design doc Section 8.3), all VC-3 and VC-4 integ
 - [x] All 9 design doc Section 8.4 test cases pass
 - [x] Public API is cleanly re-exported from `lib.rs`
 - [x] `cargo doc --no-deps -p llamaforge-metrics` builds without warnings
-- [x] No production code changes — test code and re-exports only
+- [x] Explicitly owns the lock file lifecycle change (tying it to store lifetime instead of process lifetime) to fix tests without hanging
 - [x] `cargo test --workspace -- --ignored` passes
 
 ### PR8 Creation Steps
@@ -541,7 +541,13 @@ git push -u origin metrics/08-verification
 # Open PR: "Metrics & Storage PR8: Property Tests, Full Verification & Public API"
 # Description: "Pure test + API PR. 4 proptest property-based tests (Section 8.3),
 # 6 VC-3 e2e integration tests, 9 design doc Section 8.4 test cases. Clean public
-# API re-exports from lib.rs. Total: 19 new test functions. No production code changes."
+# API re-exports from lib.rs.
+#
+# **Note on Design Shift:** This PR modifies the advisory lock lifecycle. Instead of
+# leaking the lock file descriptor to hold it for the process lifetime, it is now
+# returned from `open_and_migrate` and held in `SqliteMetricsStore`. This is required
+# so that when the pipeline drops (e.g., between integration tests), the file lock
+# is released, allowing subsequent tests to re-acquire the lock without failing."
 ```
 
 ---
