@@ -17,7 +17,7 @@ use llamaforge_metrics::{
 fn spawn_writer(failure_threshold: u32) -> (TempDir, WriterTestHandle) {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("llamaforge.db");
-    let conn = open_and_migrate(&db_path).unwrap();
+    let (conn, _lock_file) = open_and_migrate(&db_path).unwrap();
 
     let (tx, rx) = mpsc::sync_channel(64);
     let handle = std::thread::spawn(move || {

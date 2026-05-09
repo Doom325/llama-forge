@@ -13,7 +13,7 @@ async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();
     let db_path = temp_dir.path().join("llamaforge.db");
 
-    let conn = open_and_migrate(&db_path).unwrap();
+    let (conn, lock_file) = open_and_migrate(&db_path).unwrap();
     let (cmd_tx, cmd_rx) = mpsc::sync_channel(100);
 
     let writer_handle = std::thread::spawn(move || {
@@ -23,13 +23,14 @@ async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let config = MetricsConfig { db_path, ..Default::default() };
 
     let read_pool = create_read_pool(&config).unwrap();
-    let store = SqliteMetricsStore::new_for_test(cmd_tx, read_pool, Some(writer_handle), 30);
+    let store =
+        SqliteMetricsStore::new_for_test(cmd_tx, read_pool, Some(writer_handle), 30, lock_file);
 
     (temp_dir, store)
 }
 
 #[tokio::test]
-async fn test_maintenance() {
+async fn test_retention_prune() {
     let (_temp, store) = setup_store().await;
 
     let now = Utc::now();

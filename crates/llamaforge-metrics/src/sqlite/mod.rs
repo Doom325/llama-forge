@@ -14,7 +14,6 @@ pub(crate) mod store;
 pub(crate) mod writer;
 
 use std::fs::File;
-use std::mem::ManuallyDrop;
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
@@ -25,7 +24,7 @@ use rusqlite::Connection;
 use crate::error::StoreError;
 
 /// Open a SQLite connection, run WAL pragmas, run migrations, and acquire an advisory lock.
-pub fn open_and_migrate(db_path: &Path) -> Result<Connection, StoreError> {
+pub fn open_and_migrate(db_path: &Path) -> Result<(Connection, File), StoreError> {
     // 1. Acquire advisory lock on {db_path}.lock
     let mut lock_path = db_path.to_path_buf().into_os_string();
     lock_path.push(".lock");
@@ -38,9 +37,6 @@ pub fn open_and_migrate(db_path: &Path) -> Result<Connection, StoreError> {
     flock(lock_file.as_raw_fd(), FlockArg::LockExclusiveNonblock).map_err(|_| {
         StoreError::Unavailable { message: "Database is locked by another instance".into() }
     })?;
-
-    // Leak the lock file so it stays open for the lifetime of the process.
-    let _ = ManuallyDrop::new(lock_file);
 
     // 2. Open connection
     let mut conn =
@@ -60,5 +56,5 @@ pub fn open_and_migrate(db_path: &Path) -> Result<Connection, StoreError> {
     let migrations = migrations::get_migrations();
     migrations.to_latest(&mut conn).map_err(|e| StoreError::Internal { source: Box::new(e) })?;
 
-    Ok(conn)
+    Ok((conn, lock_file))
 }

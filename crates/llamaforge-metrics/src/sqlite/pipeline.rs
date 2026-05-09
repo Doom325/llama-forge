@@ -70,7 +70,7 @@ pub fn create_metrics_pipeline(
     config_reader: Arc<dyn llamaforge_config::ConfigReader>,
 ) -> Result<MetricsPipeline, StoreError> {
     // 1. Open and migrate the database. Also acquires the advisory lock.
-    let conn = open_and_migrate(&config.db_path)?;
+    let (conn, lock_file) = open_and_migrate(&config.db_path)?;
 
     // 2. Create the communication channels
     let (telemetry_tx, telemetry_rx) = tokio_mpsc::channel(config.telemetry_channel_capacity);
@@ -109,6 +109,7 @@ pub fn create_metrics_pipeline(
         read_pool,
         Some(writer_handle),
         config.read_statement_timeout_secs,
+        lock_file,
     );
 
     let facade = crate::metrics_recording::MetricsFacadeRecorder::new();
