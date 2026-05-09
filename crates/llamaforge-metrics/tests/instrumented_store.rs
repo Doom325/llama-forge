@@ -11,7 +11,7 @@ async fn test_instrumented_store_events() {
     let temp_dir = tempfile::TempDir::new().unwrap();
     let db_path = temp_dir.path().join("llamaforge.db");
 
-    let conn = open_and_migrate(&db_path).unwrap();
+    let (conn, lock_file) = open_and_migrate(&db_path).unwrap();
     let (cmd_tx, cmd_rx) = mpsc::sync_channel(100);
 
     let writer_handle = std::thread::spawn(move || {
@@ -26,6 +26,7 @@ async fn test_instrumented_store_events() {
         read_pool,
         Some(writer_handle),
         30,
+        lock_file,
     );
 
     let metrics = llamaforge_metrics::MetricsFacadeRecorder::new();

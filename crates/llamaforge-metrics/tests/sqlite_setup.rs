@@ -17,7 +17,7 @@ async fn test_schema_migration_idempotent() {
     let db_path = temp_dir.path().join("llamaforge.db");
 
     // 1. Run migrations once
-    let mut conn = open_and_migrate(&db_path).expect("first migration failed");
+    let (mut conn, _lock_file) = open_and_migrate(&db_path).expect("first migration failed");
 
     // Verify WAL mode
     let journal_mode: String = conn.query_row("PRAGMA journal_mode", [], |row| row.get(0)).unwrap();
@@ -69,7 +69,7 @@ async fn test_advisory_lock() {
     drop(lock_file);
 
     // 4. Try again -> success
-    let _conn = open_and_migrate(&db_path).expect("failed after lock drop");
+    let (_conn, _lock_file2) = open_and_migrate(&db_path).expect("failed after lock drop");
 }
 
 #[tokio::test]

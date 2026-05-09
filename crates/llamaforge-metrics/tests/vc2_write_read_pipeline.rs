@@ -26,7 +26,7 @@ async fn setup_full_pipeline() -> (
     let db_path = temp_dir.path().join("llamaforge.db");
 
     // 1. Setup SQLite writer
-    let conn = open_and_migrate(&db_path).unwrap();
+    let (conn, lock_file) = open_and_migrate(&db_path).unwrap();
     let (writer_tx, writer_rx) = mpsc::sync_channel(100);
 
     let writer_handle = std::thread::spawn(move || {
@@ -53,7 +53,8 @@ async fn setup_full_pipeline() -> (
 
     // 3. Setup read pool and store
     let read_pool = create_read_pool(&config).unwrap();
-    let store = SqliteMetricsStore::new_for_test(writer_tx, read_pool, Some(writer_handle), 30);
+    let store =
+        SqliteMetricsStore::new_for_test(writer_tx, read_pool, Some(writer_handle), 30, lock_file);
 
     (temp_dir, audit_tx, telemetry_tx, store)
 }
@@ -371,7 +372,7 @@ async fn test_vc2_6_prune_correctness() {
 use llamaforge_metrics::CheckpointMode;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_vc2_7_wal_checkpoint() {
+async fn test_wal_checkpoint_passive() {
     let (_temp, _audit_tx, telemetry_tx, store) = setup_full_pipeline().await;
 
     for _ in 0..50 {

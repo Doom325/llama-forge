@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5b47164a7255bdc723ed7df965d775a693c8889d21afc5e384d478ae6a3d020b # shrinks to events = [AuditEvent { event_id: "0-AAAa--0C", event_type: Audit, event_kind: "yb_om__", server_id: Some(ServerId("s--yf")), request_id: None, created_at: 2105-10-19T18:32:34Z, payload: Object {} }]

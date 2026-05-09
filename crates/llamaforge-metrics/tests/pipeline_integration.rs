@@ -117,7 +117,7 @@ async fn test_pipeline_integration_happy_path() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_telemetry_drop_backpressure() {
+async fn test_telemetry_channel_full_drops_event() {
     let temp_dir = TempDir::new().unwrap();
     let config = MetricsConfig {
         db_path: temp_dir.path().join("llamaforge.db"),

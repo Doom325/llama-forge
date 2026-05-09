@@ -31,6 +31,7 @@ pub struct SqliteMetricsStore {
     read_pool: Pool,
     writer_join_handle: Option<JoinHandle<()>>,
     read_timeout: Duration,
+    _lock_file: std::fs::File,
 }
 
 impl SqliteMetricsStore {
@@ -41,12 +42,14 @@ impl SqliteMetricsStore {
         read_pool: Pool,
         writer_join_handle: Option<JoinHandle<()>>,
         read_timeout_secs: u64,
+        lock_file: std::fs::File,
     ) -> Self {
         Self {
             cmd_tx,
             read_pool,
             writer_join_handle,
             read_timeout: Duration::from_secs(read_timeout_secs),
+            _lock_file: lock_file,
         }
     }
 
@@ -62,8 +65,9 @@ impl SqliteMetricsStore {
         read_pool: Pool,
         writer_join_handle: Option<JoinHandle<()>>,
         read_timeout_secs: u64,
+        lock_file: std::fs::File,
     ) -> Self {
-        Self::new(cmd_tx, read_pool, writer_join_handle, read_timeout_secs)
+        Self::new(cmd_tx, read_pool, writer_join_handle, read_timeout_secs, lock_file)
     }
 
     /// Perform a WAL checkpoint. This is an inherent method because it is SQLite-specific.
