@@ -98,7 +98,10 @@ impl StoreMaintenance for InMemoryStore {
         Ok(())
     }
 
-    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
+    fn prune_events_older_than(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
         let mut events = self.events.lock();
         let initial_len = events.len();
         events.retain(|e| e.created_at >= cutoff);
@@ -107,16 +110,17 @@ impl StoreMaintenance for InMemoryStore {
         let mut metrics = self.metrics.lock();
         metrics.retain(|m| m.received_at >= cutoff);
 
-        Ok(deleted)
+        async move { Ok(deleted) }
     }
 
-    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
-        // Dummy size based on item count
+    fn estimated_size_bytes(
+        &self,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
         let total_items = self.events.lock().len()
             + self.metrics.lock().len()
             + self.processes.lock().len()
             + self.snapshots.lock().len();
-        Ok((total_items * 1024) as u64)
+        async move { Ok((total_items * 1024) as u64) }
     }
 }
 

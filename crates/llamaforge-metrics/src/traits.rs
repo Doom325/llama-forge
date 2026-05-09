@@ -66,10 +66,15 @@ pub trait StoreMaintenance: Send + Sync + private::Sealed {
     /// Prune old events and request metrics.
     ///
     /// Returns the number of rows deleted.
-    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError>;
+    fn prune_events_older_than(
+        &self,
+        cutoff: DateTime<Utc>,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
 
     /// Return the estimated size of the database in bytes.
-    async fn estimated_size_bytes(&self) -> Result<u64, StoreError>;
+    fn estimated_size_bytes(
+        &self,
+    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
 }
 
 /// An override for a specific configuration value on a specific server.

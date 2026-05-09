@@ -18,6 +18,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 nix = { workspace = true }
 chrono = { workspace = true }
 rusqlite = { workspace = true }
@@ -34,3 +35,4 @@ proptest = { workspace = true }
 typed-builder = { workspace = true }
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+metrics-util = { workspace = true }
