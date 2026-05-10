@@ -18,7 +18,9 @@ use crate::types::{
     TelemetryEvent, TelemetryEventKind,
 };
 
-// Global counter for commands dropped due to backpressure.
+// Tracks telemetry dropped during SQLite writer saturation, implementing the
+// lossy-telemetry policy to allow observability of backpressure without blocking
+// the application's hot path.
 pub(crate) static CMD_CHANNEL_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 /// Get the number of events dropped due to full command channel.
@@ -125,7 +127,6 @@ pub async fn batch_collector_main(
         let mut events_batch = Vec::new();
         let mut metrics_batch = Vec::new();
 
-        // Phase 1: Drain audit channel
         while events_batch.len() < batch_cap {
             match audit_rx.try_recv() {
                 Ok(record) => {

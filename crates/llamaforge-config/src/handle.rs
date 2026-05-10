@@ -67,7 +67,8 @@ impl ConfigWriter for ConfigHandle {
         let _guard = self.reload_mutex.lock().await;
 
         let source = self.source.clone();
-        // Load the new config in a blocking task since source I/O blocks.
+        // Offload source loading to a blocking task to prevent starvation of the async executor,
+        // as file I/O operations will block the current thread.
         let new_config = tokio::task::spawn_blocking(move || source.load())
             .await
             .map_err(|e| ConfigReloadError::LoadTaskJoin { message: e.to_string() })??;
@@ -78,7 +79,9 @@ impl ConfigWriter for ConfigHandle {
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));
         }
-        // Design choice: broadcast even if empty.
+        // Design choice: Broadcast an empty diff even if no changes occurred.
+        // This explicitly signals to subscribers that a requested reload cycle has completed,
+        // allowing them to unblock or verify synchronization state.
         let _ = self.change_tx.send(Arc::new(diff.clone()));
 
         Ok(diff)

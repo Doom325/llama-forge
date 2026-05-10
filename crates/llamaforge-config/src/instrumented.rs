@@ -193,14 +193,11 @@ mod tests {
         let handle = ConfigHandle::load(source).unwrap();
         let instrumented = InstrumentedConfigHandle::new(handle);
 
-        // Snapshot delegates
         assert_eq!(**instrumented.snapshot(), config);
 
-        // Reload delegates
         let diff = instrumented.reload().await.unwrap();
         assert!(diff.changes.is_empty());
 
-        // Writeback delegates
         let mutation = ConfigMutation::SetLoraAdapters {
             server_id: ServerId::from("missing"),
             adapters: vec![],
