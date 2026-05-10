@@ -37,5 +37,6 @@ pub(crate) mod private {
     pub trait Sealed {}
 }
 
-// Compile-time dyn assertions
+// Ensure trait remains object-safe (can be used as Box<dyn ConfigReader>)
+// so that tests or dynamic configurations can inject mock implementations.
 const _: Option<&dyn ConfigReader> = None;

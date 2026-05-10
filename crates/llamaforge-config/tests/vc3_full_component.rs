@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
 
-// Helper to construct the full stack
 fn setup_stack(
     main_path: PathBuf,
     rules_path: PathBuf,

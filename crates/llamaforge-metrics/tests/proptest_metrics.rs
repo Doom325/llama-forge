@@ -7,7 +7,6 @@ use llamaforge_metrics::{
     create_metrics_pipeline, AuditEvent, EventFilter, EventStore, EventType, MetricsConfig,
 };
 
-// Strategy to generate arbitrary AuditEvents
 prop_compose! {
     fn arb_audit_event()(
         event_id in "[a-zA-Z0-9_-]{10,20}",

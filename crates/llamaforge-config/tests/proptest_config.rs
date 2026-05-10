@@ -237,7 +237,6 @@ fn arb_app_config() -> impl Strategy<Value = AppConfig> {
         })
 }
 
-// apply_diff helper for tests
 fn apply_diff_produces_new(old: &AppConfig, diff: &ConfigDiff, new: &AppConfig) -> bool {
     // Diff just describes what changed, we can check if it correctly identified everything
     let expected_diff = compute_diff(old, new);
