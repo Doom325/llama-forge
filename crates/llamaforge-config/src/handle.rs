@@ -79,7 +79,7 @@ impl ConfigWriter for ConfigHandle {
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));
         }
-        // Design choice (Section 2.3): Broadcast an empty diff even if no changes occurred.
+        // Design choice: Broadcast an empty diff even if no changes occurred.
         // This explicitly signals to subscribers that a requested reload cycle has completed,
         // allowing them to unblock or verify synchronization state.
         let _ = self.change_tx.send(Arc::new(diff.clone()));

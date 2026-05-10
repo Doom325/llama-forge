@@ -245,6 +245,7 @@ impl ConfigSource for TomlFileConfigSource {
         // 3. Apply mutation to doc
         Self::apply_mutation_to_doc(&mut doc, mutation)?;
 
+        // 4. Atomic writeback (Phase 1: Temp file + Rename)
         // Write via temporary file and atomic rename to guarantee we never leave a partially
         // written config on disk in case of a crash or power loss.
         let temp_path = self.paths.state_dir.join("config.tmp");
