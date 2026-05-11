@@ -1,17 +1,194 @@
-// LlamaForge entrypoint.
-//
-// Component decomposition (per `component-designs/`):
-//   01 Config Manager
-//   02 Metrics & Storage
-//   03 Server Manager
-//   04 Request Queue & Scheduler
-//   05 Smart Routing
-//   06 Dispatch & Proxy
-//   07 Transport Layer
-//
-// Phase 0 (this commit) is just the skeleton; subsequent phases per
-// IMPLEMENTATION_PLAN.md fill these in.
+use clap::Parser;
+use llamaforge_config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
+use std::env;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::Arc;
+
+#[derive(clap::Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Path to llamaforge.toml (overrides env var and default search)
+    #[arg(long)]
+    config: Option<PathBuf>,
+
+    /// Path to priority_rules.toml (optional overlay)
+    #[arg(long)]
+    priority_rules: Option<PathBuf>,
+
+    /// Writable state directory (overrides env var and default)
+    #[arg(long)]
+    state_dir: Option<PathBuf>,
+}
+
+fn xdg_config_home() -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| {
+        if let Some(home) = env::var_os("HOME") {
+            PathBuf::from(home).join(".config")
+        } else {
+            PathBuf::from("/etc") // fallback if HOME is missing
+        }
+    })
+}
+
+fn find_config() -> PathBuf {
+    if let Ok(p) = env::var("LLAMAFORGE_CONFIG") {
+        return PathBuf::from(p);
+    }
+    let config_home = xdg_config_home();
+    let xdg_path = config_home.join("llamaforge").join("llamaforge.toml");
+    if xdg_path.exists() {
+        return xdg_path;
+    }
+    let etc_path = PathBuf::from("/etc/llamaforge/llamaforge.toml");
+    if etc_path.exists() {
+        return etc_path;
+    }
+    xdg_path
+}
+
+fn find_rules() -> PathBuf {
+    if let Ok(p) = env::var("LLAMAFORGE_RULES") {
+        return PathBuf::from(p);
+    }
+    let config_home = xdg_config_home();
+    let xdg_path = config_home.join("llamaforge").join("priority_rules.toml");
+    if xdg_path.exists() {
+        return xdg_path;
+    }
+    let etc_path = PathBuf::from("/etc/llamaforge/priority_rules.toml");
+    if etc_path.exists() {
+        return etc_path;
+    }
+    xdg_path
+}
+
+fn find_state_dir() -> PathBuf {
+    if let Ok(p) = env::var("LLAMAFORGE_STATE_DIR") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from("/var/run/llamaforge/")
+}
+
+fn check_state_dir(path: &Path) {
+    if !path.exists() || !path.is_dir() {
+        print_state_dir_error(path);
+        process::exit(78);
+    }
+
+    let lock_file = path.join("config.lock");
+    match fs::OpenOptions::new().create(true).write(true).truncate(true).open(&lock_file) {
+        Ok(_) => {}
+        Err(_) => {
+            print_state_dir_error(path);
+            process::exit(78);
+        }
+    }
+}
+
+fn print_state_dir_error(path: &Path) {
+    eprintln!("error: state directory not writable: {}", path.display());
+    eprintln!();
+    eprintln!("LlamaForge needs a writable directory for its lock file (config.lock) and");
+    eprintln!("writeback temp files. Create it:");
+    eprintln!();
+    eprintln!("  mkdir -p {}", path.display());
+    eprintln!("  # If running as a non-root service user:");
+    eprintln!("  chown <user>:<group> {}", path.display());
+    eprintln!();
+    eprintln!("Or pass --state-dir <other-path> / set $LLAMAFORGE_STATE_DIR.");
+}
+
+fn handle_config_error(err: ConfigLoadError) -> ! {
+    match err {
+        ConfigLoadError::NotFound { path } => {
+            eprintln!("error: config file not found: {}", path.display());
+            eprintln!();
+            eprintln!("To get started:");
+            eprintln!("  1. Copy the example config from the repo:");
+            eprintln!("       cp examples/llamaforge.toml {}", path.display());
+            eprintln!("  2. Edit `model_path`, `port`, `ctx_size` for your llama-server instances");
+            eprintln!("  3. Re-run llamaforge");
+            eprintln!();
+            eprintln!("Search order: --config, $LLAMAFORGE_CONFIG, $XDG_CONFIG_HOME/llamaforge/, /etc/llamaforge/");
+            eprintln!("See: docs/configuration.md");
+        }
+        ConfigLoadError::EmptyFile { path } => {
+            eprintln!("error: config file is empty: {}", path.display());
+            eprintln!();
+            eprintln!(
+                "This can happen if a previous writeback was killed mid-write. The atomic-rename"
+            );
+            eprintln!(
+                "protocol should prevent this, but the truncation fallback path has a microsecond"
+            );
+            eprintln!("crash window.");
+            eprintln!();
+            eprintln!("Recovery:");
+            eprintln!("  1. Restore the file from version control (it should be checked in)");
+            eprintln!("  2. Or restore from your most recent backup");
+            eprintln!("  3. Or copy examples/llamaforge.toml as a starting point and re-edit");
+        }
+        ConfigLoadError::ParseError { path, source } => {
+            eprintln!("error: failed to parse {}:", path.display());
+            eprintln!("  {}", source);
+            eprintln!();
+            eprintln!("Common causes:");
+            eprintln!("  - Mismatched quotes or brackets");
+            eprintln!(
+                "  - Invalid TOML syntax (e.g. duplicate [[servers]] entries with the same key)"
+            );
+            eprintln!(
+                "  - Wrong field types (e.g. ctx_size = \"2048\" instead of ctx_size = 2048)"
+            );
+            eprintln!();
+            eprintln!("Try: toml-cli check {}  (or your editor's TOML linter)", path.display());
+        }
+        ConfigLoadError::ValidationError { message } => {
+            eprintln!("error: config validation failed: {}", message);
+            eprintln!();
+            eprintln!("Validation rules (design §6.1):");
+            eprintln!("  - Server ports must be unique across all [servers] entries");
+            eprintln!("  - Every server must have a non-empty model_path, ctx_size > 0, parallel_slots > 0");
+            eprintln!("  - device.gpu_id must be unique within each server");
+            eprintln!("  - global.queue_default_timeout_secs must be > 0");
+            eprintln!();
+            eprintln!("Edit the config file to fix the issue and re-run.");
+        }
+        ConfigLoadError::IoError { path, source } => {
+            eprintln!("error: I/O error reading {}: {}", path.display(), source);
+            eprintln!();
+            eprintln!("Check file permissions and that the path is on a local filesystem (NFS/EFS");
+            eprintln!("is unsupported because flock semantics differ).");
+        }
+        _ => {
+            eprintln!("error: config load failed: {}", err);
+        }
+    }
+    process::exit(78);
+}
 
 fn main() {
-    println!("llamaforge: skeleton — see IMPLEMENTATION_PLAN.md Phase 0");
+    let cli = Cli::parse();
+
+    let config_path = cli.config.unwrap_or_else(find_config);
+    let rules_path = cli.priority_rules.unwrap_or_else(find_rules);
+    let state_dir = cli.state_dir.unwrap_or_else(find_state_dir);
+
+    check_state_dir(&state_dir);
+
+    let paths = ConfigPaths::new(config_path, rules_path, state_dir);
+    let source = Arc::new(TomlFileConfigSource::new(paths));
+
+    match ConfigHandle::load(source) {
+        Ok(_handle) => {
+            // Keep the stub message from Phase 0 or indicate success.
+            // As there's no actual long-running process yet, we just print and exit.
+            println!("llamaforge: skeleton — see IMPLEMENTATION_PLAN.md Phase 0");
+        }
+        Err(err) => {
+            handle_config_error(err);
+        }
+    }
 }

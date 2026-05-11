@@ -12,4 +12,5 @@ name = "llamaforge"
 path = "src/main.rs"
 
 [dependencies]
-llamaforge-config = { version = "0.1.0-draft", path = "../llamaforge-config" }
+clap = { workspace = true }
+llamaforge-config = { workspace = true }
