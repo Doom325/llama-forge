@@ -111,18 +111,18 @@ Define the `GpuTelemetry` trait (Section 2.2) and its fallback implementation.
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| [ ] 2.1 | Define `GpuDevice` struct | Basic struct representing a GPU (ID, Name, Total VRAM). | `src/telemetry.rs` |
-| [ ] 2.2 | Define `GpuTelemetry` trait | `free_vram_bytes`, `utilization_percent`, `list_devices`. `Send + Sync + 'static`. **NOT sealed** — this is a port trait per design Section 2.2; feature-gated adapters (`NvmlTelemetry`, `MetalTelemetry`, `RocmTelemetry`) and downstream-component test mocks must be free to implement it. Object-safe (used as `Arc<dyn GpuTelemetry>` in `ServerManager`). | `src/telemetry.rs` |
-| [ ] 2.3 | Define `TelemetryError` | Variants: `Unavailable`, `DeviceNotFound`, `FfiError`. | `src/telemetry.rs` |
-| [ ] 2.4 | Implement `StubTelemetry` | Returns `Err(TelemetryError::Unavailable)` for all trait methods. Used as fallback. | `src/telemetry.rs` |
-| [ ] 2.5 | Cargo feature flags | Add `gpu-nvml`, `gpu-metal`, `gpu-rocm` to Cargo.toml (empty features for now, implementations deferred). | `Cargo.toml` |
-| [ ] 2.6 | Unit tests: telemetry | Test `StubTelemetry` returns correct error variants. | `src/telemetry.rs` (tests) |
+| [x] 2.1 | Define `GpuDevice` struct | Basic struct representing a GPU (ID, Name, Total VRAM). | `src/telemetry.rs` |
+| [x] 2.2 | Define `GpuTelemetry` trait | `free_vram_bytes`, `utilization_percent`, `list_devices`. `Send + Sync + 'static`. **NOT sealed** — this is a port trait per design Section 2.2; feature-gated adapters (`NvmlTelemetry`, `MetalTelemetry`, `RocmTelemetry`) and downstream-component test mocks must be free to implement it. Object-safe (used as `Arc<dyn GpuTelemetry>` in `ServerManager`). | `src/telemetry.rs` |
+| [x] 2.3 | Define `TelemetryError` | Variants: `Unavailable`, `DeviceNotFound`, `FfiError`. | `src/telemetry.rs` |
+| [x] 2.4 | Implement `StubTelemetry` | Returns `Err(TelemetryError::Unavailable)` for all trait methods. Used as fallback. | `src/telemetry.rs` |
+| [x] 2.5 | Cargo feature flags | Add `gpu-nvml`, `gpu-metal`, `gpu-rocm` to Cargo.toml (empty features for now, implementations deferred). | `Cargo.toml` |
+| [x] 2.6 | Unit tests: telemetry | Test `StubTelemetry` returns correct error variants. | `src/telemetry.rs` (tests) |
 
 ### PR2 Acceptance Criteria
 
-- [ ] Trait compiles and is object-safe
-- [ ] `StubTelemetry` provides a safe fallback
-- [ ] Feature flags correctly defined in Cargo.toml
+- [x] Trait compiles and is object-safe
+- [x] `StubTelemetry` provides a safe fallback
+- [x] Feature flags correctly defined in Cargo.toml
 
 ### PR2 Creation Steps
 

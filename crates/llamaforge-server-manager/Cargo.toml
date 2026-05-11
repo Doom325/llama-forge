@@ -20,6 +20,7 @@ nix = { workspace = true, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 metrics = { workspace = true }
 chrono = { workspace = true }
+async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -32,6 +33,9 @@ serde_json = { workspace = true }
 
 [features]
 test-utils = ["dep:axum", "dep:tower"]
+gpu-nvml = []
+gpu-metal = []
+gpu-rocm = []
 
 [dependencies.axum]
 workspace = true
