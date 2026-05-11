@@ -23,5 +23,7 @@ pub(crate) fn spawn_child_process(
     #[cfg(unix)]
     cmd.process_group(0);
 
+    cmd.kill_on_drop(true);
+
     cmd.spawn()
 }

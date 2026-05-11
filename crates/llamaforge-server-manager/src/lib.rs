@@ -15,7 +15,9 @@ pub(crate) mod types;
 pub(crate) mod vram_estimate;
 
 pub use error::ServerManagerError;
+pub use instrumented::InstrumentedServerManager;
 pub use manager::ServerManager;
+pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
 pub use state::ServerStateSnapshot;
 pub use telemetry::{GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
 pub use types::{

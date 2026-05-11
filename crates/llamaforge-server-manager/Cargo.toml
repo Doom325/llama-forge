@@ -27,12 +27,12 @@ metrics = { workspace = true }
 chrono = { workspace = true }
 rand = "0.8"
 serde_json = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
-tracing-subscriber = { workspace = true }
 typed-builder = { workspace = true }
 metrics-util = { workspace = true, features = ["debugging"] }
 

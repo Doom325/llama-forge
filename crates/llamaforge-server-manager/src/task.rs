@@ -1,5 +1,5 @@
 use chrono::Utc;
-use llamaforge_config::{ServerConfig, ServerId};
+use llamaforge_config::{ConfigReader, ServerConfig, ServerId};
 use llamaforge_metrics::{ManagedProcess, ProcessId, ProcessStore};
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +16,32 @@ use crate::manager::ServerManager;
 use crate::types::ServerLifecycle;
 use crate::types::SlotState;
 use crate::vram_estimate::{parse_gguf, GgufError, GgufMetadata};
+
+pub(crate) fn compute_backoff_delay(restart_count: u32, cooldown_base: f64) -> f64 {
+    let max_delay = cooldown_base * 4.0;
+    let mut base_delay = cooldown_base * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
+    if base_delay > max_delay {
+        base_delay = max_delay;
+    }
+
+    let jitter_range = base_delay * 0.2;
+    let jitter = (rand::random::<f64>() * 2.0 * jitter_range) - jitter_range;
+    (base_delay + jitter).max(1.0)
+}
+
+pub(crate) fn release_permit_with_stagger(
+    permit: tokio::sync::OwnedSemaphorePermit,
+    stagger_secs: u64,
+) {
+    if stagger_secs > 0 {
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(stagger_secs)).await;
+            drop(permit);
+        });
+    } else {
+        drop(permit);
+    }
+}
 
 pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, config: ServerConfig) {
     let mut restart_count = 0;
@@ -83,8 +109,23 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
             None => break,
         };
 
+        let gpu_semaphore = {
+            let entry = mgr
+                .gpu_semaphores
+                .entry(gpu_id.clone())
+                .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)));
+            entry.value().clone()
+        };
+        // INVARIANT: The Arc<Semaphore> is owned by the DashMap which has the same lifetime as ServerManager.
+        // We only insert and acquire, never close the semaphore.
+        let mut permit = Some(gpu_semaphore.acquire_owned().await.expect("Semaphore closed"));
+
         if let Err(e) = mgr.pre_spawn_vram_check(&server_id, &config, &gpu_id, &meta_ref) {
             error!(server.id = %server_id, "Insufficient VRAM: {}", e);
+            let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+            if let Some(p) = permit.take() {
+                release_permit_with_stagger(p, stagger);
+            }
             transition_to(&mgr, &server_id, ServerLifecycle::Failed);
             break;
         }
@@ -95,6 +136,10 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
             Err(e) => {
                 error!(server.id = %server_id, "Failed to spawn process: {}", e);
                 mgr.clear_vram_reservation(&server_id);
+                let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+                if let Some(p) = permit.take() {
+                    release_permit_with_stagger(p, stagger);
+                }
                 transition_to(&mgr, &server_id, ServerLifecycle::Failed);
                 break;
             }
@@ -105,6 +150,10 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
             None => {
                 error!(server.id = %server_id, "Child has no PID immediately after spawn");
                 mgr.clear_vram_reservation(&server_id);
+                let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+                if let Some(p) = permit.take() {
+                    release_permit_with_stagger(p, stagger);
+                }
                 transition_to(&mgr, &server_id, ServerLifecycle::Failed);
                 break;
             }
@@ -132,7 +181,8 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         }
 
         // Monitor loop
-        let should_restart = monitor_loop(&mgr, &server_id, &config, &mut child, pid).await;
+        let should_restart =
+            monitor_loop(&mgr, &server_id, &config, &mut child, pid, &mut permit).await;
 
         // Cleanup after loop
         #[cfg(unix)]
@@ -146,6 +196,11 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         let _ = child.wait().await;
 
         mgr.clear_vram_reservation(&server_id);
+
+        let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+        if let Some(p) = permit.take() {
+            release_permit_with_stagger(p, stagger);
+        }
 
         if let Err(e) = mgr.metrics_store.remove_managed_process(ProcessId(pid)).await {
             error!(server.id = %server_id, "Failed to remove managed process row: {}", e);
@@ -164,10 +219,8 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
 
         info!(server.id = %server_id, "Backing off before restart {}", restart_count);
 
-        let base_delay = 10.0 * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
-        let jitter_range = base_delay * 0.2;
-        let jitter = (rand::random::<f64>() * 2.0 * jitter_range) - jitter_range;
-        let delay_secs = (base_delay + jitter).max(1.0);
+        let cooldown_base = config.restart_cooldown_secs as f64;
+        let delay_secs = compute_backoff_delay(restart_count, cooldown_base);
 
         sleep(Duration::from_secs_f64(delay_secs)).await;
     }
@@ -225,6 +278,7 @@ async fn monitor_loop(
     config: &ServerConfig,
     child: &mut tokio::process::Child,
     pid: u32,
+    _permit: &mut Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> bool {
     use crate::health::{create_health_client, RollingTpsWindow};
     use crate::types::{ClientRefreshEvent, SlotState};
@@ -290,6 +344,10 @@ async fn monitor_loop(
                 let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
                 info!(server.id = %server_id, server.stopped = true, "Server process exited with code {}", code);
 
+                if !mgr.shutdown_token.is_cancelled() {
+                    info!(server.id = %server_id, server.restarted = true, reason = "crash", "Server restarting");
+                }
+
                 mgr.clear_vram_reservation(server_id);
                 transition_to(mgr, server_id, ServerLifecycle::Restarting);
                 return true; // Restart
@@ -297,6 +355,40 @@ async fn monitor_loop(
 
             // Health tick
             _ = health_interval.tick() => {
+                let mut is_dl = false;
+                let dl_args = mgr.servers.get(server_id).map(|s| {
+                    (s.slots.clone(), s.last_n_decoded.clone(), s.first_health_ok_at, s.gpu_id.clone())
+                });
+
+                if let Some((slots, last_n_decoded, first_health_ok_at, gpu_id)) = dl_args {
+                    is_dl = crate::health::is_deadlocked(
+                        pid,
+                        mgr.pending_dispatches(server_id),
+                        &slots,
+                        &last_n_decoded,
+                        first_health_ok_at,
+                        &*mgr.gpu_telemetry,
+                        &gpu_id,
+                    ).await;
+                }
+
+                if is_dl {
+                    error!(
+                        server.id = %server_id,
+                        server.deadlock_detected = true,
+                        "Server deadlock detected. Sending SIGKILL."
+                    );
+                    info!(server.id = %server_id, server.restarted = true, reason = "deadlock", "Server restarting");
+                    #[cfg(unix)]
+                    {
+                        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+                    }
+                    // Transition to Restarting to match reason, but let the child.wait() branch handle the actual restart
+                    // to ensure unified cleanup.
+                    transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                    continue;
+                }
+
                 let url = format!("{}/health", base_url);
                 match client.get(&url).send().await {
                     Ok(resp) => {
@@ -326,6 +418,7 @@ async fn monitor_loop(
                             if consecutive_health_failures >= 3 {
                                 warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
                                 transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
                                 return true; // Restart
                             }
                         }
@@ -336,6 +429,7 @@ async fn monitor_loop(
                         if consecutive_health_failures >= 3 {
                             warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
                             transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                            info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
                             return true; // Restart
                         }
                     }
@@ -409,6 +503,7 @@ async fn monitor_loop(
                                         "Server performance significantly degraded, restarting."
                                     );
                                     transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                    info!(server.id = %server_id, server.restarted = true, reason = "degradation", "Server restarting");
                                     return true;
                                 }
                                 DegradationAction::WarnOnly => {
@@ -523,5 +618,34 @@ mod tests {
             check_degradation(8.0, 50, Some(10.0), &[normal_slot], 4096, true, &mut consec);
         assert!(matches!(action, DegradationAction::None));
         assert_eq!(consec, 0);
+    }
+
+    #[test]
+    fn test_backoff_math() {
+        let base = 10.0;
+
+        // Attempt 1
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(1, base);
+            assert!((8.0..=12.0).contains(&delay));
+        }
+
+        // Attempt 2
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(2, base);
+            assert!((16.0..=24.0).contains(&delay));
+        }
+
+        // Attempt 3
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(3, base);
+            assert!((32.0..=48.0).contains(&delay));
+        }
+
+        // Attempt 4 (capped)
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(4, base);
+            assert!((32.0..=48.0).contains(&delay));
+        }
     }
 }
