@@ -89,7 +89,7 @@ async fn test_read_pool_query_only() {
     conn.interact(|c| {
         // query_only should prevent writes
         let result = c.execute(
-            "INSERT INTO managed_processes (pid, server_id, started_at, cmdline) VALUES (1, 's1', 'now', 'cmd')",
+            "INSERT INTO managed_processes (pid, server_id, started_at, cmdline, port, model_alias) VALUES (1, 's1', 'now', 'cmd', 8080, 'test-model')",
             [],
         );
         assert!(result.is_err());

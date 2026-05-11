@@ -219,8 +219,8 @@ fn handle_command(conn: &mut Connection, state: &mut WriterState, cmd: WriterCom
 
             let row = ManagedProcessRow::from(proc);
             let res = conn.execute(
-                "INSERT OR REPLACE INTO managed_processes (pid, server_id, started_at, cmdline) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![row.pid, row.server_id, row.started_at, row.cmdline],
+                "INSERT OR REPLACE INTO managed_processes (pid, server_id, started_at, cmdline, port, model_alias) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![row.pid, row.server_id, row.started_at, row.cmdline, row.port, row.model_alias],
             );
 
             match res {

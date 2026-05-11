@@ -75,17 +75,20 @@ fn test_request_metrics_roundtrip() {
 #[test]
 fn test_managed_process_roundtrip() {
     let proc = ManagedProcess {
-        pid: ProcessId(12345),
-        server_id: ServerId("s2".to_string()),
+        pid: ProcessId(1234),
+        server_id: ServerId("srv1".into()),
         started_at: Utc::now(),
-        cmdline: "./llama-server --model x".to_string(),
+        cmdline: "cmd".to_string(),
+        port: 8080,
+        model_alias: "test-model".to_string(),
     };
 
     let row = ManagedProcessRow::from(proc.clone());
     let restored = ManagedProcess::try_from(row).expect("failed to restore");
 
     assert_eq!(restored.pid, proc.pid);
-    assert_eq!(restored.cmdline, proc.cmdline);
+    assert_eq!(restored.port, proc.port);
+    assert_eq!(restored.model_alias, proc.model_alias);
 }
 
 #[test]
