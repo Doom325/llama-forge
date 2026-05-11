@@ -344,6 +344,10 @@ async fn monitor_loop(
                 let code = status.map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
                 info!(server.id = %server_id, server.stopped = true, "Server process exited with code {}", code);
 
+                if !mgr.shutdown_token.is_cancelled() {
+                    info!(server.id = %server_id, server.restarted = true, reason = "crash", "Server restarting");
+                }
+
                 mgr.clear_vram_reservation(server_id);
                 transition_to(mgr, server_id, ServerLifecycle::Restarting);
                 return true; // Restart
@@ -374,6 +378,7 @@ async fn monitor_loop(
                         server.deadlock_detected = true,
                         "Server deadlock detected. Sending SIGKILL."
                     );
+                    info!(server.id = %server_id, server.restarted = true, reason = "deadlock", "Server restarting");
                     #[cfg(unix)]
                     {
                         let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
