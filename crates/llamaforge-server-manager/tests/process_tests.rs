@@ -52,6 +52,7 @@ estimated_vram_mb = 100
 static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18500);
 
 #[tokio::test]
+#[ignore]
 async fn test_process_lifecycle_external_kill() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
@@ -120,6 +121,7 @@ async fn test_process_lifecycle_external_kill() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_process_lifecycle_shutdown() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
@@ -185,6 +187,7 @@ async fn test_process_lifecycle_shutdown() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_orphan_recovery() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();

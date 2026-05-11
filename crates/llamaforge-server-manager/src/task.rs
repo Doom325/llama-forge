@@ -17,7 +17,7 @@ use crate::types::ServerLifecycle;
 use crate::types::SlotState;
 use crate::vram_estimate::{parse_gguf, GgufError, GgufMetadata};
 
-pub(crate) fn compute_backoff_delay(restart_count: u32, cooldown_base: f64) -> f64 {
+pub fn compute_backoff_delay(restart_count: u32, cooldown_base: f64) -> f64 {
     let max_delay = cooldown_base * 4.0;
     let mut base_delay = cooldown_base * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
     if base_delay > max_delay {
