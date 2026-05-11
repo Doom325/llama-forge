@@ -1,41 +1,36 @@
-# Metrics & Storage — Implementation Plan
+# Server Manager — Implementation Plan
 
-**Component:** Metrics & Storage (`02_METRICS_AND_STORAGE.md`)  
-**Estimated LOC:** ~2,900  
-**Estimated Duration:** 10–11 working days (single engineer) / 6–7 days (two engineers, PR4 code + PR5 code parallelizable after PR3; PR5 tests require PR4 merged)  
-**Design Document:** `component-designs/02_METRICS_AND_STORAGE.md`  
-**Branch Prefix:** `metrics/`  
+**Component:** Server Manager (`03_SERVER_MANAGER.md`)  
+**Estimated LOC:** ~3,400  
+**Estimated Duration:** 13–15 working days (single engineer) / 8–9 days (two engineers, PR4 and PR5 can be developed in parallel)  
+**Design Document:** `docs/component-designs/03_SERVER_MANAGER.md`  
+**Branch Prefix:** `server-manager/`  
 **Target:** `main` (via squash-merge PRs)  
-**Prerequisite:** Config Manager (PR1–PR7 merged) — depends on `AppConfig`, `ServerId`, `TaskTypeId`, `RequestorId` types and `ConfigReader` for `metrics_db_path`/`retention_days`.  
+**Prerequisite:** Config Manager (PR1–PR7 merged) and Metrics & Storage (PR1–PR8 merged). Depends on `ConfigHandle`, `MetricsIngest`, `MetricsStore`, and `ServerId`.  
 **Codebase Location:** `~/git/llama-forge` (Cargo workspace root)  
-**Existing Crates:** `llamaforge` (binary), `llamaforge-config` (implemented), `llamaforge-proto` (stub)
+**Existing Crates:** `llamaforge` (binary), `llamaforge-config` (implemented), `llamaforge-metrics` (implemented), `llamaforge-proto` (stub)
 
 ---
 
 ## Ground Rules for CoderAgents
 
 1. **Read the design doc first.** Every PR description must reference the specific design doc sections it implements.
-2. **No `unwrap()` or `expect()` anywhere** — not in production code, not inside `interact()` closures. A panic inside `interact()` permanently drops the pool connection.
-3. **All SQLite I/O runs off the Tokio reactor.** Writer thread uses `std::thread`. Read path uses `deadpool-sqlite` `interact()` (runs on blocking threadpool).
-4. **Single-writer invariant is sacred.** Only the writer thread mutates the database. Read pool connections have `PRAGMA query_only = ON`.
-5. **Audit before telemetry.** Whenever both channels have data, drain audit first (billing-critical).
-6. **Every public type gets a doc comment.** Reference the design doc section number (e.g., `/// See design doc Section 2.5.`).
-7. **Tests use `tempfile::TempDir` for database isolation.** Never use a fixed path.
-8. **Commit messages:** `metrics: <imperative summary>` (e.g., `metrics: add batch collector with audit-priority draining`).
+2. **No `unwrap()` or `expect()` anywhere** — not in production code, except where statically impossible (e.g. arithmetic bounds with comments). Panics in the server task can lead to unmanaged zombie processes.
+3. **Graceful before forceful.** SIGTERM always precedes SIGKILL (with a 10s timeout between).
+4. **Child process reaping is sacred.** `child.wait()` must always be awaited in the server task. No zombie processes allowed.
+5. **State is a projection.** `ServerState` must reflect reality. Do not transition to `Running` until `/health` actively passes.
+6. **VRAM Ledger consistency.** Ledger entries exist ONLY for servers in the `Starting` state. Remove them on ANY process exit or transition to `Running`.
+7. **Every public type gets a doc comment.** Reference the design doc section number (e.g., `/// See design doc Section 3.2.`).
+8. **Tests use `mock-llama`.** Do not require an actual `llama-server` binary or GPU for unit/integration tests. All integration tests drive against the `mock-llama` test binary (PR4 task 4.6), configured via env-var knobs (`MOCK_HEALTH_FAIL_AFTER`, `MOCK_HANG_AFTER`, `MOCK_EXIT_AFTER_SECS`, `MOCK_MODEL_ALIAS`, `MOCK_TPS`). No `httpmock`, no shell scripts.
+9. **Commit messages:** `server-manager: <imperative summary>` (e.g., `server-manager: add deadlock detection logic`).
 
-### Conventions from Config Manager Implementation (MUST follow)
+### Conventions from Previous Components (MUST follow)
 
-9. **Module visibility:** All modules declared as `pub(crate) mod` in `lib.rs`, with explicit `pub use` re-exports for the public API. Never use bare `pub mod`.
-10. **Sealed traits:** All port/consumer traits use the sealed trait pattern (`trait Sealed {}` in a `private` module). See `llamaforge-config/src/traits.rs` for the exact pattern.
-11. **Compile-time dyn assertions:** Add `const _: Option<&dyn TraitName> = None;` for every trait that must be object-safe.
+10. **Module visibility:** All modules declared as `pub(crate) mod` in `lib.rs`, with explicit `pub use` re-exports for the public API.
+11. **Sealed traits:** All *consumer-facing* internal traits use the sealed trait pattern (`trait Sealed {}` in a `private` module). **Exception:** port traits (`GpuTelemetry`, `MetricsStore`, `ConfigOverlayStore`, …) MUST NOT be sealed — they are dependency-injection seams and need free external impls for adapters and test mocks.
 12. **`#[non_exhaustive]`:** All public enums get `#[non_exhaustive]` for forward compatibility.
-13. **`metrics` crate (not `prometheus`):** Use the `metrics` facade crate (already in workspace at version `0.22`) with `counter!`, `histogram!`, `describe_counter!`, `describe_histogram!` macros — NOT the `prometheus` crate directly. This matches Config Manager's `InstrumentedConfigHandle` pattern.
-14. **`parking_lot::Mutex`** for synchronous locks (already in workspace). NOT `std::sync::Mutex`.
-15. **`#[allow(async_fn_in_trait)]`** on async trait definitions. No `#[async_trait]` macro.
-16. **Error types:** Use `thiserror`, `#[non_exhaustive]`, and `Box<dyn std::error::Error + Send + Sync>` for opaque inner errors.
-17. **Test doubles:** Follow the `InMemoryConfigSource` pattern: `pub(crate)` struct with `#[cfg_attr(not(test), allow(dead_code))]`.
-18. **`spawn_blocking` for file I/O** in async context, with parent span propagation: `let parent_span = tracing::Span::current(); tokio::task::spawn_blocking(move || { parent_span.in_scope(|| ...) })`.
-19. **Instrumented decorator pattern:** Zero overhead on hot paths (no instrumentation on reads), full tracing + metrics on write/mutation paths. Use `tracing::field::Empty` for late-recorded span fields.
+13. **`metrics` crate:** Use the `metrics` facade crate (`counter!`, `gauge!`) for observability, NEVER `prometheus` directly.
+14. **`#[allow(async_fn_in_trait)]`** on async trait definitions. No `#[async_trait]` macro.
 
 ---
 
@@ -45,551 +40,448 @@
 PR1 ─── PR2 ─── PR3 ─── PR4 ─── PR5 ─── PR6 ─── PR7 ─── PR8
                           │               │
                           └── can overlap ─┘
-                          (PR4 writer vs PR5 read pool)
+                       (PR4 task logic vs PR5 polling)
 ```
 
-PR1 → PR2 → PR3 → PR4 → PR5 → PR6 → PR7 → PR8 (strict merge ordering; PR4 code and PR5 code can be **developed** concurrently after PR3 merges, but PR5 **integration tests** require PR4 merged because read-path tests need a functioning writer to insert data)
+PR1 → PR2 → PR3 → PR4 → PR5 → PR6 → PR7 → PR8 (strict merge ordering; PR4 code and PR5 code can be developed concurrently after PR3 merges, but integration requires PR4 to be merged first).
 
 ---
 
 ## PR1: Crate Setup & Domain Types
 
-**Branch:** `metrics/01-types`  
+**Branch:** `server-manager/01-types`  
 **Merge Target:** `main`  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 3–4 hours
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 4–5 hours
 
 ### Purpose
 
-Create the `llamaforge-metrics` library crate, define all domain types from design doc Section 2.5, error types from Section 2.4, and query/filter types. This is the type foundation — every other PR builds on it. No I/O, no SQLite, no channels.
+Create the `llamaforge-server-manager` library crate, define all domain types from design doc Section 2.3, and error types from Section 2.4. This is the type foundation — every other PR builds on it.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 1.1 | Add `llamaforge-metrics` to workspace | New lib crate `crates/llamaforge-metrics`. Add to workspace members. Depends on `llamaforge-config` (for `ServerId`, `TaskTypeId`, `RequestorId`). | `Cargo.toml`, `crates/llamaforge-metrics/Cargo.toml` |
-| 1.2 | Wire workspace dependencies | Inherit from workspace (already available): `serde`, `thiserror`, `tokio`, `tracing`, `parking_lot`, `metrics`, `nix`. Add new workspace deps: `chrono = { version = "0.4", features = ["serde"] }`. Dev-deps (inherit): `tempfile`, `proptest`, `typed-builder`, `tokio` (with `test-util`), `tracing-subscriber`. | `Cargo.toml` (workspace), `crates/llamaforge-metrics/Cargo.toml` |
-| 1.3 | Create module structure | `lib.rs` declares all modules as `pub(crate) mod`: `types`, `error`, `filter`, `traits`, `ingest`, `sqlite`, `metrics_recording`, `instrumented`. Stub each module file. Add explicit `pub use` re-exports at bottom of `lib.rs` for the public API (populated as types are implemented in Tasks 1.4–1.11). Follow the exact pattern from `llamaforge-config/src/lib.rs`. **Note:** module is `metrics_recording` not `prometheus_metrics` — the `metrics` facade crate is backend-agnostic. | `src/lib.rs`, `src/*.rs` |
-| 1.4 | Implement producer-side types | `TelemetryEvent` (with `#[non_exhaustive] TelemetryEventKind` enum), `AuditRecord`, `#[non_exhaustive] RequestStatus` enum. All with `Debug, Clone`. `RequestStatus` also gets `Serialize, Deserialize, PartialEq, Eq, Copy`. | `src/types.rs` |
-| 1.5 | Implement domain storage types | `AuditEvent`, `#[non_exhaustive] EventType` enum, `RequestMetrics`, `ManagedProcess`, `ProcessId` newtype (`u32`, transparent serde, derive `Default` per convention), `ConfigSnapshot`, `#[non_exhaustive] ConfigSnapshotTrigger` enum. All per design doc Section 2.5. | `src/types.rs` |
-| 1.6 | Implement `RequestId` newtype | `RequestId(pub String)` with `Debug, Clone, PartialEq, Eq, Hash`. Add `Display`, `From<String>`, `From<&str>`. | `src/types.rs` |
-| 1.7 | Implement query/filter types | `EventFilter`, `MetricsFilter` (both `Default`-able), `GroupByField` enum, `AggregatedMetrics` (with `Serialize, Deserialize`). | `src/filter.rs` |
-| 1.8 | Implement WAL types | `CheckpointMode` enum (`Passive`, `Truncate`), `CheckpointResult` struct. | `src/types.rs` |
-| 1.9 | Implement error types | `#[non_exhaustive] StoreError` (3 variants: `Unavailable`, `Timeout`, `Internal` with `Box<dyn std::error::Error + Send + Sync>`), `#[non_exhaustive] AuditSendError` (3 variants: `ChannelClosed`, `Timeout`, `SemaphoreExhausted`). Both with `thiserror`. Follow the exact pattern from `llamaforge-config/src/error.rs` — `#[derive(Debug, Error)]`, `#[non_exhaustive]`, descriptive `#[error("...")]` messages. | `src/error.rs` |
-| 1.10 | Implement `WriterMode` enum | `Healthy`, `Degraded { consecutive_failures: u32, since: Instant }`. Internal to writer, but define now for use in later PRs. | `src/types.rs` |
-| 1.11 | Implement `MetricsConfig` struct | All 12 configurable knobs from design doc Section 6: `db_path: PathBuf`, `retention_days: u32`, `telemetry_channel_capacity: usize`, `audit_channel_capacity: usize`, `audit_semaphore_permits: usize`, `read_pool_size: usize`, `read_statement_timeout_secs: u64`, `batch_flush_interval_ms: u64`, `batch_flush_size: usize`, `wal_checkpoint_interval_secs: u64`, `wal_oversize_threshold_mb: u64`, `writer_failure_threshold: u32`. Every field `#[serde(default = "...")]` with a named default matching design doc. Derive `Default, Debug, Clone, Serialize, Deserialize, PartialEq`. **This struct lives in `llamaforge-metrics`, NOT in `llamaforge-config`** — the composition root (`main.rs`) extracts values from `AppConfig` and constructs `MetricsConfig`. | `src/types.rs` |
-| 1.12 | Unit tests: type construction | Construct every type, verify `Debug` output is meaningful. Verify `RequestStatus` serde roundtrip. Verify `ProcessId` transparent serde. Verify `EventFilter::default()` has all `None` fields. Verify `MetricsConfig::default()` matches design doc defaults (db_path="./llamaforge.db", retention_days=30, telemetry_channel_capacity=10000, etc.). | `src/types.rs` (tests) |
-| 1.13 | Unit tests: type interop with config types | Verify `ServerId`, `TaskTypeId`, `RequestorId` from `llamaforge-config` work in `AuditRecord`, `RequestMetrics`, `ManagedProcess`. Verify no orphan-rule issues. | `tests/type_interop.rs` |
+| [x] 1.0 | **Pre-flight: verify `ManagedProcess` contract** | Before any code in this crate, confirm `llamaforge-metrics::types::ManagedProcess` carries the fields required for orphan recovery (PR7 Task 7.4) and PID persistence (PR4 Task 4.5): `pid: ProcessId`, `port: u16`, `model_alias: String`, `server_id: ServerId`, `started_at: chrono::DateTime<Utc>`. If any field is missing, land a small additive PR in `llamaforge-metrics` first (extend the struct, the SQL migration, and the row DTO) — block this crate's work on its merge. This is a hard cross-component contract; PR4 will not compile without it. | (verification step; no files in this crate) |
+| [x] 1.1 | Add `llamaforge-server-manager` to workspace | New lib crate `crates/llamaforge-server-manager`. Add to workspace members. Depends on `llamaforge-config` (for `ServerId`, `ConfigHandle`) and `llamaforge-metrics`. | `Cargo.toml`, `crates/llamaforge-server-manager/Cargo.toml` |
+| [x] 1.2 | Wire workspace dependencies | Inherit (already in `[workspace.dependencies]` from Config Manager / Metrics): `serde`, `thiserror`, `tokio` (with `process`, `sync`, `signal`, `macros`, `rt-multi-thread`), `tracing`, `dashmap`, `reqwest` (with `json`), `parking_lot`, `nix` (with `signal`, `process`), `tokio-util` (with `rt`) for `CancellationToken` + `JoinSet`, `metrics`, `chrono`. Inherit dev-deps: `tempfile`, `proptest`, `tokio` (with `test-util` for `tokio::time::pause()`/`advance()`), `tracing-subscriber` (with `env-filter`, for `#[traced_test]` in unit tests asserting on log events), `typed-builder`, `metrics-util` (with `debugging` feature, for VC-3.6's in-process recorder). Add `axum` and `tower` as **`test-utils`-feature-gated** deps (not dev-deps) — they're consumed by the `mock-llama` binary in Task 4.6 which is itself feature-gated. If any are not yet in `[workspace.dependencies]`, add there first (workspace-deps-only convention). | `Cargo.toml` (workspace), `crates/llamaforge-server-manager/Cargo.toml` |
+| [x] 1.3 | Create module structure | `lib.rs` declares `pub(crate) mod`: `types`, `error`, `state`, `telemetry` (GPU FFI port — `GpuTelemetry` trait), `manager`, `task`, `process`, `health`, `vram_estimate`, `observability` (Prometheus metric registration via the `metrics` facade — separate from `telemetry.rs` to avoid the GPU-FFI/Prometheus-metric collision), `instrumented`. Stub every file. Explicit `pub use` re-exports for the public API at the bottom of `lib.rs` (populated as tasks implement them). Follow the exact pattern from `llamaforge-config/src/lib.rs` and `llamaforge-metrics/src/lib.rs`. | `src/lib.rs`, `src/*.rs` |
+| [x] 1.4 | Implement `ServerLifecycle` enum | `#[non_exhaustive]`. Variants: `Stopped`, `Starting`, `Running`, `Draining`, `Restarting`, `Failed`. Derive `Debug, Clone, Copy, PartialEq, Eq`. | `src/types.rs` |
+| [x] 1.5 | Implement `ServerCapabilities` & `SlotState` | From Section 2.3. Derive `Debug, Clone`. `SlotState` includes `id`, `is_processing`, `n_past`, `n_decoded`, `prompt_hash`. `ServerCapabilities` includes `models: Vec<String>`, `lora_adapters: Vec<String>`, `multimodal: bool`, `speculative: SpeculativeMethod`, `architecture: ModelArchitecture`. | `src/types.rs` |
+| [x] 1.5a | Implement `SpeculativeMethod` enum | `#[non_exhaustive]`. Variants per llama.cpp: `None`, `Draft`, `Lookup`, `Mtp`. Derive `Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize`. | `src/types.rs` |
+| [x] 1.5b | Implement `ModelArchitecture` enum | `#[non_exhaustive]`. Variants for common families: `Llama`, `Mistral`, `Mixtral`, `Qwen`, `Gemma`, `Phi`, `DeepSeek`, `Other(String)`. Derive `Debug, Clone, PartialEq, Eq, Serialize, Deserialize`. | `src/types.rs` |
+| [x] 1.6 | Implement `ServerStateSnapshot` | **Public** read-only snapshot returned by accessors. Fields: `id`, `lifecycle`, `pid: Option<u32>`, `port`, `model_alias`, `parallel_slots`, `ctx_size`, `slots`, `last_health_check`, `restart_count: u32`, `cumulative_requests: u64`, `capabilities`. Derive `Debug, Clone`. | `src/state.rs` |
+| [x] 1.6a | Implement internal `ServerState` | **Internal mutable state**, `pub(crate)` only. Stored in `Arc<DashMap<ServerId, ServerState>>`. Fields: all of `ServerStateSnapshot`'s data PLUS internal bookkeeping: `first_health_ok_at: Option<Instant>` (used by deadlock detection), `last_n_decoded: HashMap<u32, u32>` (per-slot decode counter for deadlock detection), `gpu_id: GpuId`, `gguf_metadata: Option<Arc<GgufMetadata>>` (cached after first parse, PR3). Methods: `pub(crate) fn to_snapshot(&self) -> ServerStateSnapshot`. Task-local state (not in DashMap) stays in the per-server task: `consecutive_health_failures: u32`, `consecutive_degraded_ticks: u32`, `last_total_tokens_decoded: u64`, `warned_overflow: AtomicBool` (this last one is shared via `Arc` if accessed from accessors). Doc-comment which fields live where and why. | `src/state.rs` |
+| [x] 1.7 | Implement events & errors | `ClientRefreshEvent { server_id: ServerId, new_port: u16 }` (`Debug, Clone`). `#[non_exhaustive] ServerManagerError` using `thiserror` with 6 variants per design Section 2.4: `ServerNotFound { id }`, `InsufficientVram { gpu, needed_mb, free_mb }`, `StartFailed { id, reason }`, `MaxRestartsExceeded { id, max }`, `SpawnError { source: std::io::Error }`, `ConfigInvalid { message }`. | `src/types.rs`, `src/error.rs` |
+| [x] 1.8 | Unit tests: type construction | Construct types, verify `Debug` and `Clone` behavior. Verify `ServerManagerError` formatting. Verify all public enums are `#[non_exhaustive]` (compile-time match must use wildcard). Verify `ServerState::to_snapshot()` round-trips matching fields. | `src/types.rs` (tests) |
 
 ### PR1 Acceptance Criteria
 
-- [x] `cargo build --workspace` succeeds with zero warnings
-- [x] All domain types compile with required derives
-- [x] `llamaforge-metrics` depends on `llamaforge-config` and uses its newtypes
-- [x] `StoreError` uses `Box<dyn Error>` (not `anyhow::Error`) per design doc
-- [x] All public enums have `#[non_exhaustive]`
-- [x] `lib.rs` uses `pub(crate) mod` + explicit `pub use` pattern (matching `llamaforge-config`)
-- [x] All unit tests pass
-- [x] `EventFilter::default()` and `MetricsFilter::default()` produce empty filters
+- [ ] `ManagedProcess` pre-flight (Task 1.0) confirmed — required fields present in `llamaforge-metrics`, or an additive PR has landed
+- [ ] `cargo build --workspace` succeeds with zero warnings
+- [ ] `llamaforge-server-manager` inherits workspace deps and uses Config types
+- [ ] All public enums have `#[non_exhaustive]`; matches must use wildcard arm
+- [ ] `lib.rs` uses `pub(crate) mod` + explicit `pub use` pattern; module list includes `vram_estimate` and `instrumented` stubs
+- [ ] `ServerState::to_snapshot()` produces a snapshot whose fields exactly match `ServerStateSnapshot` (round-trip test passes)
+- [ ] `SpeculativeMethod` and `ModelArchitecture` serde round-trip (TOML and JSON)
 
 ### PR1 Creation Steps
 
 ```bash
-git checkout -b metrics/01-types main
-# ... implement tasks 1.1–1.12 ...
-git add -A && git commit -m "metrics: add llamaforge-metrics crate with domain types, errors, and filters"
-git push -u origin metrics/01-types
-# Open PR: "Metrics & Storage PR1: Crate Setup & Domain Types"
-# Description: "Creates llamaforge-metrics lib crate. Defines all domain types (Section 2.5),
-# error types (Section 2.4), and query/filter types. Producer-side types (TelemetryEvent,
-# AuditRecord) and storage types (AuditEvent, RequestMetrics, ManagedProcess, ConfigSnapshot).
-# Newtypes: ProcessId, RequestId. No I/O — pure type definitions."
+git checkout -b server-manager/01-types main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: add crate, domain types, and errors"
+git push -u origin server-manager/01-types
 ```
 
 ---
 
-## PR2: Storage Traits & Observability Port Traits
+## PR2: GPU Telemetry Trait & Implementations
 
-**Branch:** `metrics/02-traits`  
-**Base:** `metrics/01-types`  
-**Size:** Small–Medium (~250 lines)  
-**Estimated Time:** 3–4 hours
+**Branch:** `server-manager/02-gpu-telemetry`  
+**Base:** `server-manager/01-types`  
+**Size:** Small (~200 lines)  
+**Estimated Time:** 2–3 hours
 
 ### Purpose
 
-Define the interface-segregated storage traits (design doc Section 2.1), the observability port traits (Section 2.7), and the `ConfigOverlayStore` trait (Section 2.8, v1.1 deferred). These are the contract boundaries — every consumer and implementation codes against these traits.
+Define the `GpuTelemetry` trait (Section 2.2) and its fallback implementation.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 2.1 | Define `EventStore` trait | `insert_events(Vec<AuditEvent>)`, `query_events(&EventFilter, limit, offset)`. `Send + Sync + private::Sealed`. `#[allow(async_fn_in_trait)]` on the trait. Add sealed trait module `pub(crate) mod private { pub trait Sealed {} }` at bottom of `traits.rs`. Add compile-time dyn assertion: `const _: Option<&dyn EventStore> = None;`. | `src/traits.rs` |
-| 2.2 | Define `RequestMetricsStore` trait | `insert_request_metrics(Vec<RequestMetrics>)`, `query_request_metrics(&MetricsFilter, limit, offset)`, `aggregate_request_metrics(&MetricsFilter, &[GroupByField])`. `Send + Sync + private::Sealed`. `#[allow(async_fn_in_trait)]`. Add dyn assertion. | `src/traits.rs` |
-| 2.3 | Define `ProcessStore` trait | `upsert_managed_process(&ManagedProcess)`, `remove_managed_process(ProcessId)`, `list_managed_processes()`. `Send + Sync + private::Sealed`. `#[allow(async_fn_in_trait)]`. Add dyn assertion. | `src/traits.rs` |
-| 2.4 | Define `StoreMaintenance` trait | `insert_config_snapshot(&ConfigSnapshot)`, `prune_events_older_than(DateTime<Utc>)` → returns row count, `estimated_size_bytes()`. `Send + Sync + private::Sealed`. `#[allow(async_fn_in_trait)]`. Add dyn assertion. | `src/traits.rs` |
-| 2.5 | Define `ConfigOverlayStore` trait | `get_overlay`, `set_overlay`, `remove_overlay`, `list_overlays`. All return `Result<_, StoreError>`. `Send + Sync + private::Sealed`. `#[allow(async_fn_in_trait)]`. Mark with `/// v1.1: trait defined, impl deferred. See design doc Section 2.8.` doc comment. Define `ConfigOverlay` struct with fields: `server_id: ServerId`, `overlay_key: String`, `value: String`, `applied_at: chrono::DateTime<chrono::Utc>`. Derive `Debug, Clone`. | `src/traits.rs` |
-| 2.6 | Define `RequestMetricsRecorder` trait | 9 methods per design doc Section 2.7: `record_request`, `observe_request_duration`, `observe_ttft`, `observe_tokens_per_second`, `set_queue_depth`, `observe_queue_wait`, `set_server_slots`, `record_server_restart`, `record_config_reload`. All `&self`, `Send + Sync`. These are **port traits** — backend-agnostic. The `metrics` facade crate (used by Config Manager) is the implementation target, not the trait definition. | `src/metrics_recording.rs` |
-| 2.7 | Define `StoreHealthRecorder` trait | 10 methods per design doc Section 2.7: `set_wal_size_bytes`, `set_channel_pending`, `record_events_dropped`, `record_write_result`, `observe_write_duration`, `observe_checkpoint_duration`, `observe_read_duration`, `set_read_pool_active`, `record_prune_rows`, `record_cmd_channel_dropped`. | `src/metrics_recording.rs` |
-| 2.8 | Define `AppMetrics` super-trait | `pub trait AppMetrics: RequestMetricsRecorder + StoreHealthRecorder {}`. | `src/metrics_recording.rs` |
-| 2.9 | Implement `NoopMetrics` | Test double implementing both recorder traits with empty bodies. `pub(crate)` with `#[cfg_attr(not(test), allow(dead_code))]` — follows `InMemoryConfigSource` pattern from Config Manager. Used in unit tests to avoid metrics dependency. | `src/metrics_recording.rs` |
-| 2.10 | Define `WriterCommand` enum | `#[non_exhaustive]`. All 8 variants per design doc Section 3.4: `InsertEvents`, `InsertMetrics`, `UpsertProcess`, `RemoveProcess`, `InsertConfigSnapshot`, `Prune`, `Checkpoint`, `Shutdown`. Each carries `oneshot::Sender` reply and `tracing::Span`. | `src/sqlite/commands.rs` |
-| 2.11 | Implement `InMemoryStore` test double | Implements all 4 storage traits (`EventStore`, `RequestMetricsStore`, `ProcessStore`, `StoreMaintenance`) + `private::Sealed`. Uses `parking_lot::Mutex<Vec<T>>` for each table (matches Config Manager's `InMemoryConfigSource` pattern which uses `parking_lot::Mutex`). `pub(crate)` with `#[cfg_attr(not(test), allow(dead_code))]`. Used for unit testing `InstrumentedMetricsStore` (PR7) and by future component tests. Add `#[cfg(test)] pub fn replace_events(&self, ...)` helper method for test manipulation. | `src/sqlite/in_memory.rs` |
-| 2.12 | Unit tests: trait static dispatch | Add runtime tests: verify InMemoryStore works for basic insert+query on all 4 traits using static dispatch (`impl EventStore`). | `src/traits.rs` (tests) |
+| [ ] 2.1 | Define `GpuDevice` struct | Basic struct representing a GPU (ID, Name, Total VRAM). | `src/telemetry.rs` |
+| [ ] 2.2 | Define `GpuTelemetry` trait | `free_vram_bytes`, `utilization_percent`, `list_devices`. `Send + Sync + 'static`. **NOT sealed** — this is a port trait per design Section 2.2; feature-gated adapters (`NvmlTelemetry`, `MetalTelemetry`, `RocmTelemetry`) and downstream-component test mocks must be free to implement it. Object-safe (used as `Arc<dyn GpuTelemetry>` in `ServerManager`). | `src/telemetry.rs` |
+| [ ] 2.3 | Define `TelemetryError` | Variants: `Unavailable`, `DeviceNotFound`, `FfiError`. | `src/telemetry.rs` |
+| [ ] 2.4 | Implement `StubTelemetry` | Returns `Err(TelemetryError::Unavailable)` for all trait methods. Used as fallback. | `src/telemetry.rs` |
+| [ ] 2.5 | Cargo feature flags | Add `gpu-nvml`, `gpu-metal`, `gpu-rocm` to Cargo.toml (empty features for now, implementations deferred). | `Cargo.toml` |
+| [ ] 2.6 | Unit tests: telemetry | Test `StubTelemetry` returns correct error variants. | `src/telemetry.rs` (tests) |
 
 ### PR2 Acceptance Criteria
 
-- [x] All 5 storage traits compile
-- [x] All storage traits use sealed trait pattern (`private::Sealed`)
-- [x] Both recorder traits compile and are object-safe
-- [x] `NoopMetrics` implements all recorder trait methods (`pub(crate)`, test-only)
-- [x] `WriterCommand` enum has all 8 variants with correct payloads, `#[non_exhaustive]`
-- [x] `ConfigOverlayStore` trait is defined (no impl yet)
-- [x] All async trait methods use `#[allow(async_fn_in_trait)]` (no `#[async_trait]` macro)
-- [x] No `metrics` crate or `prometheus` crate dependency yet — traits are backend-agnostic
+- [ ] Trait compiles and is object-safe
+- [ ] `StubTelemetry` provides a safe fallback
+- [ ] Feature flags correctly defined in Cargo.toml
 
 ### PR2 Creation Steps
 
 ```bash
-git checkout -b metrics/02-traits main
-# ... implement tasks 2.1–2.11 ...
-git add -A && git commit -m "metrics: define storage traits, observability port traits, and WriterCommand protocol"
-git push -u origin metrics/02-traits
-# Open PR: "Metrics & Storage PR2: Storage Traits & Observability Ports"
-# Description: "Defines interface-segregated storage traits (Section 2.1): EventStore,
-# RequestMetricsStore, ProcessStore, StoreMaintenance. Observability port traits
-# (Section 2.7): RequestMetricsRecorder, StoreHealthRecorder, AppMetrics.
-# WriterCommand protocol (Section 3.4). ConfigOverlayStore (Section 2.8, deferred).
-# NoopMetrics test double. No implementations yet — contracts only."
+git checkout -b server-manager/02-gpu-telemetry main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: add GpuTelemetry trait and StubTelemetry fallback"
+git push -u origin server-manager/02-gpu-telemetry
 ```
 
 ---
 
-## VC-1: Contracts Verification Checkpoint
+## PR3: Core State Management, VRAM Ledger & GGUF Estimator
 
-**Gate:** PR1 + PR2 merged. All types and trait contracts defined.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-1.1 | Trait static dispatch | Tests compile and verify `InMemoryStore` works via static dispatch (`&impl EventStore`). (Relaxed from dyn safety). | Compiles |
-| VC-1.2 | Cross-crate types | `llamaforge-metrics` uses `ServerId` from `llamaforge-config` without issues | Compiles and tests pass |
-| VC-1.3 | WriterCommand completeness | Every storage trait method has a corresponding `WriterCommand` variant | Manual audit |
-| VC-1.4 | Error type hygiene | `StoreError` does not reference `rusqlite`, `anyhow`, or any backend type | Grep for banned deps in `error.rs` |
-| VC-1.5 | Convention compliance | All modules `pub(crate)` with explicit `pub use`. All public enums `#[non_exhaustive]`. All storage traits sealed. Async traits use `#[allow(async_fn_in_trait)]`. | Manual audit + `rg "pub mod" src/lib.rs` returns 0 hits |
-
----
-
-## PR3: SQLite Schema, Migrations & Database Setup
-
-**Branch:** `metrics/03-sqlite-setup`  
-**Base:** `metrics/02-traits`  
-**Size:** Medium (~300 lines)  
-**Estimated Time:** 4–5 hours
+**Branch:** `server-manager/03-core-state`  
+**Base:** `server-manager/02-gpu-telemetry`  
+**Size:** Large (~500 lines)  
+**Estimated Time:** 10–12 hours (1.5 days — GGUF header parsing is the bulk of the work)
 
 ### Purpose
 
-Set up SQLite: opening the database, running migrations, configuring WAL mode and PRAGMAs, creating the read pool with `deadpool-sqlite`, and advisory locking to prevent dual-instance corruption. This is the infrastructure foundation — no business logic yet, just database plumbing.
+Implement the `ServerManager` shell, `DashMap` for state tracking, and the VRAM Ledger logic (Section 3.3).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 3.1 | Add SQLite dependencies | Add to workspace deps: `rusqlite = { version = "0.31", features = ["bundled"] }` (Note: 0.31 instead of 0.32 to be compatible with deadpool-sqlite 0.8), `rusqlite_migration = "1"`, `deadpool-sqlite = "0.8"`. Wire into `llamaforge-metrics/Cargo.toml`. `nix` is already a workspace dep (version `0.29`, features `["fs"]`) — used by Config Manager for `flock` in writeback. Reuse for advisory flock in Task 3.4. | `Cargo.toml`, `crates/llamaforge-metrics/Cargo.toml` |
-| 3.2 | Implement `open_and_migrate()` | Open SQLite connection at `db_path`. Run PRAGMAs: `journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000`, `foreign_keys = ON`. Run schema migrations via `rusqlite_migration`. Return the `Connection`. | `src/sqlite/mod.rs` |
-| 3.3 | Define schema migrations | Migration V1: all 5 tables + indexes from design doc Section 2.6 (`audit_events`, `request_metrics`, `managed_processes`, `config_snapshots`, `config_overlays`). Use `rusqlite_migration::Migrations::new()`. | `src/sqlite/migrations.rs` |
-| 3.4 | Implement advisory flock on DB | At startup, open `{db_path}.lock` and `flock(LOCK_EX | LOCK_NB)`. If fails: return `StoreError::Unavailable` with message about another instance. Hold the lock file fd for process lifetime (leaked into a `ManuallyDrop`). | `src/sqlite/mod.rs` |
-| 3.5 | Implement `create_read_pool()` | `deadpool_sqlite::Config` with `max_size` from `MetricsConfig::read_pool_size` (validate range 1–16), `runtime = tokio`. `post_create` hook: execute `PRAGMA journal_mode;` and **assert** result is `"wal"` (do NOT set — the writer connection already set WAL mode; if it's not WAL, return an error from the hook). Then set `PRAGMA query_only = ON`, `PRAGMA busy_timeout = 5000`, `PRAGMA synchronous = NORMAL`. `pre_recycle` hook: `ROLLBACK` (ignore error if no transaction) + re-assert WAL mode. `max_lifetime = 300s`. | `src/sqlite/pool.rs` |
-| 3.6 | Implement row types (DTOs) | `AuditEventRow`, `RequestMetricsRow`, `ManagedProcessRow`, `ConfigSnapshotRow`, `ConfigOverlayRow` — all with bare `String`/`i64`/`f64` fields for SQL compatibility. `impl From<AuditEvent> for AuditEventRow` and vice versa. Same for all 4 domain↔row pairs. | `src/sqlite/rows.rs` |
-| 3.7 | Integration tests: migration | (a) Fresh DB → migrate → verify all 5 tables exist via `sqlite_master`. (b) Run migration twice → no error (idempotent). (c) Verify WAL mode set (`PRAGMA journal_mode` returns `wal`). (d) Verify `query_only` is ON for read pool connections. | `tests/sqlite_setup.rs` |
-| 3.8 | Integration tests: advisory lock | (a) Open DB with lock. Open second connection to same DB with lock → fails with `Unavailable`. (b) Drop first lock → second succeeds. | `tests/sqlite_setup.rs` |
-| 3.9 | Integration tests: row roundtrip | Create `AuditEvent` → convert to `AuditEventRow` → convert back → assert equality. Same for `RequestMetrics`, `ManagedProcess`, `ConfigSnapshot`. | `tests/row_conversion.rs` |
+| [ ] 3.1 | Implement `ServerManager` shell | Struct fields: `servers: Arc<DashMap<ServerId, ServerState>>`, `vram_ledger: Arc<parking_lot::Mutex<HashMap<GpuId, u64>>>` (**`parking_lot::Mutex`** — `std::sync::Mutex::lock().unwrap()` violates Ground Rule 2), `gpu_telemetry: Arc<dyn GpuTelemetry>`, `config: Arc<ConfigHandle>`, `metrics_ingest`, `metrics_store: Arc<dyn MetricsStore>`, `shutdown_token: CancellationToken`, `client_refresh_tx: tokio::sync::broadcast::Sender<ClientRefreshEvent>` (capacity 32; subscribers via Task 3.5), **`pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>`** (introduced here, not PR7, because PR6's `is_deadlocked()` reads it as condition 1 "active work"; PR7 just bolts on the drain semantics). | `src/manager.rs` |
+| [ ] 3.1a | Implement `pending_dispatches` API surface | Three `pub` methods on `ServerManager` (must be `pub`, not `pub(crate)`, because the future `llamaforge-dispatch` crate calls them): `pub fn pending_dispatches(&self, id: &ServerId) -> u64`, `pub fn increment_pending(&self, id: &ServerId)`, `pub fn decrement_pending(&self, id: &ServerId)`. All atomic via `AtomicU64::fetch_add`/`fetch_sub`/`load` with `Ordering::Relaxed`. Lazily insert an entry on first `increment_pending` for an id. **v1:** Dispatch & Proxy (component 06) is not yet built, so callers don't exist and the gauge stays at 0 — that's intentional and the drain path in PR7 handles it. | `src/manager.rs` |
+| [ ] 3.2 | Implement VRAM Ledger | `pre_spawn_vram_check(&ServerConfig, &GgufMetadata) -> Result<(), ServerManagerError>` per design Section 3.3. Caller must have parsed (or fetched cached) `GgufMetadata` first (Task 3.2a) — this function does NO file I/O. Acquire `parking_lot::Mutex` synchronously (no `.await` while held — Cancellation Safety, design Section 9.1), query `gpu_telemetry.free_vram_bytes()` (fallback to `u64::MAX` on `Unavailable` + WARN log), subtract ledger reservations, compare against `compute_vram_estimate(config, meta)`. Return `InsufficientVram { gpu, needed_mb, free_mb }` on failure. On success, record reservation. Separate `release_vram_reservation(gpu, bytes)` and `clear_vram_reservation(server_id)` methods for use on exit / Starting→Running transition. | `src/manager.rs` |
+| [ ] 3.2a | Implement GGUF metadata parser | Per design Section 9 Open Question 3 (decision: "Rust implementation"). New module `src/vram_estimate.rs`. **All types `pub(crate)`** — they are internal to VRAM estimation, no external consumer needs them; if that ever changes, promote and add to `lib.rs` re-exports. `pub(crate) struct GgufMetadata { architecture: ModelArchitecture, block_count: u32, embedding_length: u32, head_count: u32, head_count_kv: u32, quantization: Quantization, file_size_bytes: u64 }`. `pub(crate) enum Quantization { Q4_K_M, Q5_K_M, Q6_K, Q8_0, F16, F32, Other(String) }` (`#[non_exhaustive]`). `pub(crate) enum GgufError { Malformed, Io(std::io::Error), UnsupportedVersion(u32) }` (`#[non_exhaustive]`, `thiserror`). **Derive `Debug, thiserror::Error` only — NOT `Clone`** (`std::io::Error` is not `Clone`). If a `Clone`-able shape is ever needed later, wrap as `Io(Arc<std::io::Error>)`. Parser entry point: `pub(crate) async fn parse_gguf(path: &Path) -> Result<GgufMetadata, GgufError>`. **The actual file read MUST run on `tokio::task::spawn_blocking` with parent-span propagation** — sync `std::fs::File` reads on the tokio reactor violate Cancellation Safety. Idiomatic pattern: <pre>let span = tracing::Span::current();<br>tokio::task::spawn_blocking(move \|\| {<br>    let _enter = span.enter();<br>    sync_parse(path)<br>}).await?</pre> Defensive parser: bounded buffer (read first 1 MiB max), validate magic `GGUF`, version 2 or 3 (reject others with `UnsupportedVersion`), reject if KV header declares size > 1 MiB. On any parse error return the appropriate `GgufError` variant and let caller decide (PR4 Task 4.2 specifies the fallback). | `src/vram_estimate.rs` |
+| [ ] 3.2a-i | Implement `compute_vram_estimate` | `pub(crate) fn compute_vram_estimate(config: &ServerConfig, meta: &GgufMetadata) -> u64`. If `config.estimated_vram_mb.is_some()` → return that (operator override). Otherwise: weight footprint by quant type (table-driven bytes-per-param: Q4_K_M ≈ 4.5 bits/p, Q5_K_M ≈ 5.5, Q6_K ≈ 6.6, Q8_0 ≈ 8.5, F16 = 16, F32 = 32). KV cache: `2 * block_count * head_count_kv * (embedding_length / head_count) * ctx_size * bytes_per_elem * parallel_slots`. Add 10% safety margin. Pure-function, no I/O — easy to unit test. | `src/vram_estimate.rs` |
+| [ ] 3.2a-ii | Cache `GgufMetadata` on `ServerState` | After first successful parse (in the per-server task spawn path), store `Arc<GgufMetadata>` on `ServerState` (field added in PR1 Task 1.6a). Re-spawns reuse the cache; only a config diff that changes `model_path` invalidates it (handled in PR7). | `src/manager.rs` |
+| [ ] 3.2b | Implement `shutdown_drain_timeout_secs` resolver | Per design Section 6: `Auto: max(60, min(ctx_size/30, 600))`. Helper `fn resolve_drain_timeout(server: &ServerConfig) -> Duration`: returns `Duration::from_secs(config.shutdown_drain_timeout_secs)` if set, else applies the formula. Unit-tested separately (design Section 8.1 lists "Drain timeout formula" as a pure-logic target). | `src/manager.rs` |
+| [ ] 3.3 | Implement state accessors | `server_state()`, `running_servers()`, `slot_states()`. Extract snapshots from the `DashMap`. `running_servers()` filters to `ServerLifecycle::Running` only (never `Starting`/`Failed`/`Stopped` — guarantee to Transport Layer per design Section 4.2). | `src/manager.rs` |
+| [ ] 3.4 | Implement cumulative requests | `cumulative_requests()`, `increment_requests()`. Log warning **once** at `i32::MAX / 2` (latch a `warned_overflow: AtomicBool` so the warning fires exactly once per server lifetime — counter is `u64` so increments continue safely; warning is an operator advisory to rolling-restart, per design Section 3.5 invariant 7). | `src/manager.rs` |
+| [ ] 3.5 | Implement `subscribe_client_refresh` | Setup `tokio::sync::broadcast` channel for `ClientRefreshEvent` with capacity 32. Stored in `ServerManager`; `subscribe_client_refresh(&self) -> broadcast::Receiver<ClientRefreshEvent>`. | `src/manager.rs` |
+| [ ] 3.6 | Unit tests: VRAM logic | Test `pre_spawn_vram_check` arithmetic (effective_free = nvml_free - reserved). Test reservation add/remove. Test `Unavailable` telemetry falls back to skip-check. | `src/manager.rs` (tests) |
+| [ ] 3.6a | Unit tests: VRAM estimation | Per design Section 8.1 "VRAM estimation formula (various quant types, ctx sizes, architectures)". Table-driven `compute_vram_estimate` tests: (Q4_K_M, 7B-class meta, ctx 4096) → expected MB; (Q8_0, 13B-class, ctx 8192) → expected MB; explicit `estimated_vram_mb` override wins over formula. GGUF parser test against a **generated fixture** — implement `fn make_tiny_gguf(tmp: &TempDir, arch: &str, quant: Quantization) -> PathBuf` test helper that writes ≤8KB of synthetic header bytes (magic `GGUF`, version 3, minimal KV block, no real tensor data) to a tmpdir per run. Keeps no binary in the repo. Include a malformed-bytes test (truncate the header) → asserts `GgufError::Malformed`; an unsupported-version test (write version 1) → asserts `GgufError::UnsupportedVersion(1)`. | `tests/vram_estimate.rs`, `tests/helpers/gguf_fixture.rs` |
+| [ ] 3.6b | Unit tests: drain timeout formula | `ctx_size=0` → 60s. `ctx_size=3000` → 100s. `ctx_size=20000` → 600s (capped). Explicit override wins. | `src/manager.rs` (tests) |
+| [ ] 3.7 | Unit tests: accessors | Test `running_servers` filters non-Running states correctly. Test `cumulative_requests` warning latches at `i32::MAX/2`. | `src/manager.rs` (tests) |
 
 ### PR3 Acceptance Criteria
 
-- [x] `open_and_migrate()` creates a WAL-mode SQLite DB with all 5 tables
-- [x] Migrations are idempotent (running twice is harmless)
-- [x] Read pool connections have `query_only = ON`
-- [x] Advisory flock prevents dual-instance
-- [x] All row DTO↔domain conversions are lossless
-- [x] All integration tests pass using `tempfile::TempDir`
-- [x] No `unwrap()` in any `interact()` closure
+- [ ] `ServerManager` can be instantiated
+- [ ] VRAM ledger arithmetic is correct and synchronous (no `.await` over Mutex)
+- [ ] Broadcast channel provides subscribers correctly
+- [ ] GGUF header parser runs under `spawn_blocking` and produces correct metadata for fixture
+- [ ] Malformed GGUF returns `GgufError::Malformed` (no panic)
+- [ ] `compute_vram_estimate` is within 15% of measured allocation on the fixture; explicit override wins
+- [ ] Drain timeout formula matches design Section 6: 60s floor, ctx-scaled middle, 600s cap
+- [ ] Cumulative request warning latches at `i32::MAX/2` (fires exactly once per server lifetime)
 
 ### PR3 Creation Steps
 
 ```bash
-git checkout -b metrics/03-sqlite-setup main
-# ... implement tasks 3.1–3.9 ...
-git add -A && git commit -m "metrics: add SQLite setup, migrations, read pool, and advisory locking"
-git push -u origin metrics/03-sqlite-setup
-# Open PR: "Metrics & Storage PR3: SQLite Schema, Migrations & Read Pool"
-# Description: "Implements database infrastructure (design doc Section 2.6, 3.5).
-# Schema with 5 tables + indexes, rusqlite_migration, WAL mode PRAGMAs,
-# deadpool-sqlite read pool with query_only + pre_recycle, advisory flock.
-# Row DTOs with domain↔row conversions. 9 integration tests."
+git checkout -b server-manager/03-core-state main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: implement core state DashMap and VRAM ledger"
+git push -u origin server-manager/03-core-state
 ```
 
 ---
 
-## PR4: Writer Thread & Batch Collector
+## VC-1: Contracts & State Verification Checkpoint
 
-**Branch:** `metrics/04-writer`  
-**Base:** `metrics/03-sqlite-setup`  
-**Size:** Large (~500 lines)  
-**Estimated Time:** 10–14 hours (1.5–2 days — the async/sync boundary, batch collector timer semantics, and degradation state machine are each individually complex)
+**Gate:** PR1 + PR2 + PR3 merged. Data structures and basic logic in place.
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-1.1 | State Filtering | `running_servers()` correctly ignores Failed/Stopped/Starting. | Tests pass |
+| VC-1.2 | VRAM Math | Pre-spawn check correctly subtracts ledger from raw GPU free VRAM. | Tests pass |
+| VC-1.3 | Mutex Safety | `parking_lot::Mutex` for VRAM ledger is not held across `.await` points. | Manual code review |
+| VC-1.4 | VRAM Estimator | GGUF parser + estimator produce sane values within 15% of measured llama-server allocation on a fixture model. | Tests pass |
+| VC-1.5 | Convention Compliance | All public enums `#[non_exhaustive]`. All modules `pub(crate)` with explicit `pub use`. `GpuTelemetry` is NOT sealed. | `rg "pub mod" src/lib.rs` returns 0; manual audit |
+
+---
+
+## PR4: Process Execution & Server Task Shell
+
+**Branch:** `server-manager/04-process-exec`  
+**Base:** `server-manager/03-core-state`  
+**Size:** Large (~550 lines)  
+**Estimated Time:** 10–12 hours (1.5 days — the restart loop + cancellation-safe cleanup + `mock-llama` are each non-trivial)
 
 ### Purpose
 
-Implement the core write path: the synchronous writer thread that owns the single write connection (design doc Section 3.3), the async batch collector task that bridges Tokio channels to the writer (Section 3.2), and the `WriterCommand` dispatch loop. This is the most complex PR in the component — it crosses the async/sync boundary.
+Implement the main per-server Tokio task, process spawning, and child wait loop (Section 3.1 & 3.2).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 4.1 | Implement `writer_thread_main()` | `std::thread` entry point. Receives `Connection` + `std::sync::mpsc::Receiver<WriterCommand>` + relevant `MetricsConfig` values (`writer_failure_threshold`, `wal_checkpoint_interval_secs`). Match on commands: `InsertEvents` → batch INSERT in transaction, `InsertMetrics` → batch INSERT, `UpsertProcess` → INSERT OR REPLACE, `RemoveProcess` → DELETE, `InsertConfigSnapshot` → INSERT, `Prune` → DELETE WHERE created_at < cutoff (from BOTH `audit_events` AND `request_metrics` tables), `Checkpoint` → `PRAGMA wal_checkpoint(mode)`, `Shutdown` → **(a) drain ALL remaining commands from `cmd_rx` and process each, (b) run `PRAGMA wal_checkpoint(TRUNCATE)` for clean WAL state, (c) close connection, (d) break loop.** Each command: enter carried `tracing::Span`, execute, send reply via oneshot. | `src/sqlite/writer.rs` |
-| 4.2 | Implement `WriterMode` state tracking | Start `Healthy`. On INSERT/COMMIT failure: increment `consecutive_failures`. On success: reset `consecutive_failures` to 0 — but **do NOT exit Degraded mode** if already degraded. On reaching `writer_failure_threshold` (from `MetricsConfig`, default 10) consecutive failures: transition to `Degraded { since: Instant::now() }`. **This transition is irreversible within a single process lifetime — recovery requires restart** (per design doc Section 3.3). In Degraded mode: reject new write commands with `StoreError::Unavailable`, attempt `PRAGMA integrity_check` every 60s, log results. Track mode with `parking_lot::Mutex<WriterMode>` if shared, or direct field if writer thread is the sole accessor. | `src/sqlite/writer.rs` |
-| 4.3 | Implement prepared statement caching | Cache prepared statements for: `INSERT INTO audit_events`, `INSERT INTO request_metrics`, `INSERT OR REPLACE INTO managed_processes`, `DELETE FROM managed_processes WHERE pid = ?`, `INSERT INTO config_snapshots`, `DELETE FROM audit_events WHERE created_at < ?`, `DELETE FROM request_metrics WHERE created_at < ?`. Use `rusqlite::CachedStatement` via `conn.prepare_cached()`. | `src/sqlite/writer.rs` |
-| 4.4 | Implement periodic WAL checkpoint | Track `last_checkpoint: Instant` in writer thread. After each command, check if 60s elapsed → `PRAGMA wal_checkpoint(PASSIVE)`. Log result. | `src/sqlite/writer.rs` |
-| 4.5 | Implement batch collector task | `async fn batch_collector_main()`. Owns `tokio::sync::mpsc::Receiver` for both channels + `std::sync::mpsc::SyncSender<WriterCommand>`. Interval tick configured via `MetricsConfig::batch_flush_interval_ms` (default 100ms). Batch cap via `MetricsConfig::batch_flush_size` (default 100). **Phase 1:** drain audit channel fully (priority). For each `AuditRecord`, convert to BOTH an `AuditEvent` (via Task 4.7) AND a `RequestMetrics` (via Task 4.8). Collect events into `events_batch: Vec<AuditEvent>` and metrics into `metrics_batch: Vec<RequestMetrics>`. **Phase 2:** drain telemetry up to remaining batch capacity (batch cap minus events already collected). Convert each `TelemetryEvent` to `AuditEvent` (via Task 4.6), append to `events_batch`. **Phase 3:** if `events_batch` non-empty, send `WriterCommand::InsertEvents` via `try_send()`. **Phase 4:** if `metrics_batch` non-empty, send `WriterCommand::InsertMetrics` via `try_send()`. On `try_send` full for either: drop that batch, increment `CMD_CHANNEL_EVENTS_DROPPED` counter by batch size, log sampled warning. On sender disconnected: break loop. | `src/sqlite/batch_collector.rs` |
-| 4.6 | Implement `TelemetryEvent` → `AuditEvent` conversion | Map `TelemetryEventKind` to `event_kind` string and JSON payload. `event_type = EventType::Telemetry`. | `src/sqlite/batch_collector.rs` |
-| 4.7 | Implement `AuditRecord` → `AuditEvent` conversion | Map fields to `event_kind = "request_completed"` (or status-based), JSON payload with all billing fields. `event_type = EventType::Audit`. | `src/sqlite/batch_collector.rs` |
-| 4.8 | Implement `AuditRecord` → `RequestMetrics` conversion | Separate conversion: `AuditRecord` produces both an `AuditEvent` (for the event log) and a `RequestMetrics` (for the metrics table). Batch collector sends `InsertEvents` for the AuditEvent batch and `InsertMetrics` for the RequestMetrics batch. | `src/sqlite/batch_collector.rs` |
-| 4.9 | Implement test helper: `WriterTestHandle` | A test-only struct that owns `SyncSender<WriterCommand>` + `JoinHandle<()>`. `impl Drop`: sends `WriterCommand::Shutdown` and `join()`s the thread. This prevents zombie writer threads in tests. All PR4 tests use this handle. | `src/sqlite/writer.rs` (tests) |
-| 4.10 | Unit tests: writer command dispatch | Using a real tempdir SQLite DB + `WriterTestHandle`: (a) Send `InsertEvents` with 10 events → verify 10 rows in `audit_events`. (b) Send `InsertMetrics` with 5 records → verify 5 rows in `request_metrics`. (c) Send `UpsertProcess` → verify row in `managed_processes`. (d) Send `RemoveProcess` → verify row deleted. (e) Send `InsertConfigSnapshot` → verify row in `config_snapshots`. (f) Send `Prune` with old cutoff → verify old rows deleted, new rows kept. (g) Send `Checkpoint(Passive)` → verify no error. | `tests/writer_thread.rs` |
-| 4.11 | Unit tests: writer degradation | (a) Simulate `writer_failure_threshold` consecutive failures (use a corrupt DB or drop tables mid-flight) → verify `WriterMode::Degraded`. (b) In degraded mode: send a command → verify `StoreError::Unavailable` reply. (c) Verify degradation is irreversible: insert succeeds on a fresh table but mode remains `Degraded`. | `tests/writer_thread.rs` |
-| 4.12 | Unit tests: batch collector draining | Using `tokio::sync::mpsc::channel` in test: (a) Send 50 audit + 80 telemetry events. Verify batch collector drains audit first (all 50), then telemetry up to batch limit (50 more). (b) Verify batch size capped at `batch_flush_size`. (c) Verify empty channels produce no command. (d) Verify timer fires at configured interval. (e) **Verify AuditRecords produce BOTH InsertEvents AND InsertMetrics commands** — assert both commands are sent per tick when audit records are present. | `tests/batch_collector.rs` |
-| 4.13 | Unit tests: command channel full | Fill the `sync_channel(64)` with pending commands → batch collector `try_send` fails → verify batch dropped and counter incremented. | `tests/batch_collector.rs` |
+| [ ] 4.1 | Implement `start()` method | Iterates over configured servers, calls `spawn_server_task` for each. Collects per-server handles into a `JoinSet` owned by `ServerManager` for coordinated shutdown (design "Graceful Shutdown" cross-cutting concern). **Composition signature:** `start()` returns `Result<Arc<ServerManager>, ServerManagerError>` (bare manager, matching design Section 2.1). The composition root in `main.rs` wraps it: `let mgr = InstrumentedServerManager::new(ServerManager::start(...).await?);` — keeps `ServerManager` independently testable without the metrics decorator and keeps telemetry-out-of-domain (R26). Consumers (Smart Routing, Dispatch & Proxy) hold the wrapped `Arc<InstrumentedServerManager>` (which delegates by `Deref`). | `src/manager.rs` |
+| [ ] 4.2 | Implement `spawn_server_task` skeleton | `tokio::spawn` the per-server task. **Outer restart loop** owns spawn/restart cycles: `loop { parse_gguf_or_fallback → pre_spawn_vram_check → spawn child → run monitor_loop → if Failed or shutdown: break; else: backoff_sleep(restart_count); restart_count += 1; }`. After loop exits, run final cleanup (kill child if still alive, clear ledger, remove `managed_processes` row). **GGUF parse-failure handling** (uses `GgufError` from Task 3.2a): on first spawn, call `parse_gguf(model_path).await`. (a) `Ok(meta)` → cache `Arc<GgufMetadata>` on `ServerState`, proceed. (b) `Err(GgufError::Io(_))` (file missing/unreadable) → log ERROR `server.gguf_unreadable`, transition to `Failed`, break out of restart loop. (c) `Err(GgufError::Malformed)` or `Err(GgufError::UnsupportedVersion(_))` → if `config.estimated_vram_mb.is_some()`: log WARN `server.gguf_parse_failed` (include path + error), construct a placeholder `GgufMetadata::override_only(estimate_mb)` so the cache field still exists, proceed (estimate path uses the override anyway). Else: log ERROR `server.gguf_required`, transition to `Failed`, break. Cached metadata is reused on re-spawns; invalidated only when PR7 sees `model_path` change in a config diff. | `src/task.rs` |
+| [ ] 4.2a | Implement `monitor_loop` (inner `select!`) | Branches: `child.wait()` (Task 4.4), health/slots/metrics ticks (PR5), `shutdown_rx.cancelled()`. **The `shutdown_rx` branch MUST run cleanup before returning to the outer loop:** (a) send SIGTERM via `nix::sys::signal::kill(pid, SIGTERM)`, (b) `tokio::time::timeout(Duration::from_secs(10), child.wait())`, (c) if timeout: `kill(-pgid, SIGKILL)` (group kill), (d) await `child.wait()` to reap, (e) clear ledger reservation, (f) delete `managed_processes` row. Returning a sentinel result tells the outer loop to break (not restart). This is the cancellation-safety guarantee from design Section 9.1 — dropping the `Child` handle without an explicit kill leaves an orphan on Unix. | `src/task.rs` |
+| [ ] 4.3 | Implement `spawn_child_process` | Uses `tokio::process::Command::spawn`. Maps config options to `llama-server` CLI args. Sets `setsid()` via `CommandExt::process_group(0)` on Unix (enables `kill(-pgid, …)` for group SIGKILL on drain timeout). | `src/process.rs` |
+| [ ] 4.4 | Implement `child.wait()` loop branch | In `select!`, await `child.wait()`. On exit: (a) log `server.stopped` with exit code/signal, (b) **call `clear_vram_reservation(server_id)` immediately** (Ground Rule 6 — ledger entries removed on ANY exit, regardless of whether spawn-to-healthy completed), (c) remove `managed_processes` row, (d) transition to `Restarting` (or `Failed` if `restart_count >= max_restart_attempts`), (e) re-enter outer restart loop after backoff. | `src/task.rs` |
+| [ ] 4.5 | Implement `upsert_managed_process` | After spawn returns a PID, **`.await` `metrics_store.upsert_managed_process(ManagedProcess { pid, port, model_alias, server_id, started_at })` to completion before entering `monitor_loop`** — the SQLite row must be durable before the task can be killed, otherwise orphan recovery on next startup misses it. Delete on exit (Task 4.4) and on graceful shutdown (Task 4.2a cleanup). | `src/process.rs` |
+| [ ] 4.6 | Test helper: `mock-llama` binary | Per LlamaForge convention "Tests use `mock-llama`", build a minimal Rust test binary serving `/health`, `/slots`, `/metrics`. Configurable via env vars: `MOCK_PORT`, `MOCK_HEALTH_FAIL_AFTER=N` (return 500 after N successful health calls), `MOCK_HANG_AFTER=N` (stop incrementing `n_decoded` after N slots ticks), `MOCK_EXIT_AFTER_SECS=N` (process exits), `MOCK_MODEL_ALIAS` (echoed in `/health` JSON for orphan recovery tests), `MOCK_TPS` (synthetic tokens/sec for degradation tests). **Cargo target:** `[[bin]]` with `required-features = ["test-utils"]` so it's gated out of normal `cargo build` but `CARGO_BIN_EXE_mock-llama` env var IS populated for tests (which `[[example]]` would NOT do — that was the bug in earlier drafts). Concretely: <pre>[[bin]]<br>name = "mock-llama"<br>path = "src/bin/mock-llama.rs"<br>required-features = ["test-utils"]<br><br>[features]<br>test-utils = ["dep:axum", "dep:tower"]</pre> Tests run with `cargo test --features test-utils` (CI default) and locate the binary via `env!("CARGO_BIN_EXE_mock-llama")`. The `mock-llama.rs` file itself uses `#![cfg(feature = "test-utils")]` at the top so it compiles to nothing without the flag. | `crates/llamaforge-server-manager/src/bin/mock-llama.rs`, `crates/llamaforge-server-manager/Cargo.toml`, `tests/helpers/mod.rs` |
+| [ ] 4.7 | Unit tests: process lifecycle | Spawn task with `mock-llama`. (a) Send external kill signal → verify state → `Restarting` within 100ms and ledger cleared. (b) Cancel `shutdown_token` mid-run → verify child is SIGTERM'd then SIGKILL'd (no orphan PID survives task drop). (c) Verify `managed_processes` row written on spawn, removed on exit. | `tests/process_tests.rs` |
 
 ### PR4 Acceptance Criteria
 
-- [x] Writer thread processes all 8 `WriterCommand` variants correctly
-- [x] Batch INSERT uses a transaction (BEGIN/INSERT.../COMMIT) for atomicity
-- [x] Prepared statements are cached (not re-prepared per batch)
-- [x] WAL checkpoint fires every 60s during active writing
-- [x] Writer enters `Degraded` mode after 10 consecutive failures
-- [x] Batch collector drains audit before telemetry (priority ordering)
-- [x] Batch size capped at 100 events
-- [x] Command channel backpressure: batch dropped (not queued unboundedly)
-- [x] Tracing spans are entered from carried `Span` on each command
-- [x] `WriterTestHandle` sends Shutdown and joins thread on Drop (no zombie threads in tests)
-- [x] All 13 tests pass
+- [ ] `tokio::process::Command` successfully spawns the binary
+- [ ] `child.wait()` correctly detects process exit
+- [ ] VRAM ledger entries are reliably cleared on process exit
+- [ ] PID is persisted to SQLite via metrics store
+- [ ] `upsert_managed_process` is **awaited to completion before `monitor_loop` starts** — verified by code review (the `.await` appears textually before the monitor loop) AND by a unit test that starts the task, waits for the first health tick to arrive, then asserts `metrics_store.list_managed_processes()` already contains the row at that point
+- [ ] `shutdown_token` cancellation triggers explicit SIGTERM→SIGKILL of child before task exits (no orphans on cooperative shutdown)
+- [ ] Process group set via `process_group(0)` so `kill(-pgid, …)` is available
+- [ ] GGUF parse failure paths: `Io` → `Failed`; `Malformed`/`UnsupportedVersion` with `estimated_vram_mb` set → WARN + proceed; without override → `Failed`
+- [ ] `mock-llama` example binary builds and supports all 6 env-var knobs: `MOCK_PORT`, `MOCK_HEALTH_FAIL_AFTER`, `MOCK_HANG_AFTER`, `MOCK_EXIT_AFTER_SECS`, `MOCK_MODEL_ALIAS`, `MOCK_TPS`
 
 ### PR4 Creation Steps
 
 ```bash
-git checkout -b metrics/04-writer main
-# ... implement tasks 4.1–4.12 ...
-git add -A && git commit -m "metrics: implement writer thread, batch collector, and command dispatch"
-git push -u origin metrics/04-writer
-# Open PR: "Metrics & Storage PR4: Writer Thread & Batch Collector"
-# Description: "Implements the write path (design doc Sections 3.2, 3.3, 3.4).
-# Synchronous writer thread with WriterCommand dispatch, prepared statement caching,
-# periodic WAL checkpoint, and degradation tracking. Async batch collector task with
-# audit-priority draining, 100ms tick, 100-event batch cap, and bounded command channel.
-# TelemetryEvent/AuditRecord → AuditEvent/RequestMetrics conversions. 12 tests."
+git checkout -b server-manager/04-process-exec main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: implement process execution and tokio select loop"
+git push -u origin server-manager/04-process-exec
 ```
 
 ---
 
-## PR5: Read Path (SqliteMetricsStore Query Implementation)
+## PR5: Polling, Health Checks & Degradation
 
-**Branch:** `metrics/05-read-path`  
-**Base:** `metrics/04-writer`  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 5–6 hours  
-**Concurrency Note:** Query builder code and read pool logic can be developed in parallel with PR4, but integration tests (Tasks 5.11–5.14) require PR4 merged because they need a functioning writer thread to INSERT data before querying. If developing concurrently, branch from `metrics/03-sqlite-setup`, add unit tests for query builders, and defer integration tests until PR4 lands.
+**Branch:** `server-manager/05-polling`  
+**Base:** `server-manager/04-process-exec`  
+**Size:** Medium (~450 lines)  
+**Estimated Time:** 7–9 hours (1 day — rolling TPS + degradation guard takes most of it)
 
 ### Purpose
 
-Implement the read side of `SqliteMetricsStore`: all query methods from the storage traits using the `deadpool-sqlite` read pool. This includes filter-to-SQL translation, aggregate queries with GROUP BY, and statement timeout enforcement.
+Implement the periodic `/health`, `/slots`, and `/metrics` HTTP polling inside the server task (Section 3.1).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `SqliteMetricsStore` struct | Fields: `cmd_tx: std::sync::mpsc::SyncSender<WriterCommand>`, `read_pool: deadpool_sqlite::Pool`, `writer_join_handle: Option<std::thread::JoinHandle<()>>`. Constructor is `pub` so it can be instantiated in production (factory logic deferred to PR6). | `src/sqlite/store.rs` |
-| 5.2 | Implement `EventStore` for `SqliteMetricsStore` | `insert_events`: send `WriterCommand::InsertEvents` via `cmd_tx`, await oneshot reply. `query_events`: `pool.get().await` → `interact()` → build SQL WHERE from `EventFilter`, execute, map rows to `AuditEvent` via row DTOs. | `src/sqlite/store.rs` |
-| 5.3 | Implement `RequestMetricsStore` for `SqliteMetricsStore` | `insert_request_metrics`: send `WriterCommand::InsertMetrics`. `query_request_metrics`: filter → SQL. `aggregate_request_metrics`: build GROUP BY from `GroupByField` enum, compute COUNT, SUM, AVG. For p50/p99: use `NTILE` window function or collect and compute in Rust (SQLite lacks native percentiles). | `src/sqlite/store.rs` |
-| 5.4 | Implement `ProcessStore` for `SqliteMetricsStore` | `upsert_managed_process`: send `WriterCommand::UpsertProcess`. `remove_managed_process`: send `WriterCommand::RemoveProcess`. `list_managed_processes`: read pool query. | `src/sqlite/store.rs` |
-| 5.5 | Implement `StoreMaintenance` for `SqliteMetricsStore` | `insert_config_snapshot`: send `WriterCommand::InsertConfigSnapshot`. `prune_events_older_than`: send `WriterCommand::Prune`. `estimated_size_bytes`: read pool → `PRAGMA page_count * PRAGMA page_size`. | `src/sqlite/store.rs` |
-| 5.6 | Implement `wal_checkpoint()` inherent method | NOT a trait method — SQLite-specific. Sends `WriterCommand::Checkpoint`, returns `CheckpointResult`. | `src/sqlite/store.rs` |
-| 5.7 | Implement filter → SQL builder | `fn build_event_where(filter: &EventFilter) -> (String, Vec<Box<dyn ToSql>>)`. Dynamic WHERE clause construction. Parameterized (no SQL injection). Same for `build_metrics_where(filter: &MetricsFilter)`. | `src/sqlite/query_builder.rs` |
-| 5.8 | Implement GROUP BY SQL builder | `fn build_group_by(fields: &[GroupByField]) -> String`. Maps `GroupByField::Hour` → `strftime('%Y-%m-%d %H:00:00', created_at)`, `GroupByField::ServerId` → `server_id`, etc. | `src/sqlite/query_builder.rs` |
-| 5.9 | Implement percentile computation | Since SQLite lacks native percentile functions: fetch sorted `total_duration_ms` values in aggregate queries, compute p50/p99 in Rust. Limit to 10,000 rows for percentile computation (return `None` if more). | `src/sqlite/store.rs` |
-| 5.10 | Implement statement timeout | Wrap read pool `interact()` calls with `tokio::time::timeout(Duration::from_secs(30), ...)`. On timeout: return `StoreError::Timeout`. The underlying SQLite query continues on the blocking thread but result is dropped. | `src/sqlite/store.rs` |
-| 5.11 | Integration tests: event queries | Insert 100 events via writer → query with various filters: (a) by `server_id`, (b) by `event_type`, (c) by time range `since/until`, (d) by `request_id`, (e) with `limit` and `offset` pagination, (f) empty filter returns all. | `tests/event_queries.rs` |
-| 5.12 | Integration tests: metrics queries | Insert 50 request metrics → query: (a) by `requestor`, (b) by `model_name`, (c) by `status`, (d) aggregate by `ServerId` → verify COUNT and AVG, (e) aggregate by `Hour` → verify time bucketing. | `tests/metrics_queries.rs` |
-| 5.13 | Integration tests: process store | (a) Upsert 3 processes → list → verify 3 returned. (b) Remove 1 → list → verify 2. (c) Upsert same PID → verify update (not duplicate). | `tests/process_store.rs` |
-| 5.14 | Integration tests: estimated size | Insert data → `estimated_size_bytes()` → verify > 0 and reasonable (not wildly off from actual file size). | `tests/maintenance.rs` |
-| 5.15 | Unit tests: query builder | (a) Empty filter → no WHERE clause. (b) `server_id` filter → `WHERE server_id = ?`. (c) Time range → `WHERE created_at >= ? AND created_at <= ?`. (d) Multiple filters → AND combination. (e) GROUP BY `[ServerId, Hour]` → `GROUP BY server_id, strftime(...)`. | `tests/query_builder.rs` |
-| 5.16 | Implement VC-2 integration tests | All 8 checks from the VC-2 checkpoint below. Each as a separate `#[tokio::test]`. These test the composition of the write path (PR4) and read path (PR5) together using real SQLite. | `tests/vc2_write_read_pipeline.rs` |
+| [ ] 5.1 | Implement `reqwest` client | One long-lived `reqwest::Client` per server task (built once on spawn, recreated on restart). Connect timeout 1s, request timeout 5s for health, 10s for slots/metrics. | `src/health.rs` |
+| [ ] 5.2 | Implement `health_tick` | 2s `tokio::time::interval` (monotonic, design "Clock Assumptions") with random initial jitter 0–500ms to prevent synchronized bursts (design Section 3.5 invariant 6). GET `/health`. On HTTP 200 while `Starting`: (a) **call `clear_vram_reservation(server_id)`** — the ledger entry exists only during spawn-to-healthy (Ground Rule 6 + design Section 3.5 invariant 1), (b) transition lifecycle to `Running`, (c) record `first_health_ok_at = Some(Instant::now())`, (d) broadcast `ClientRefreshEvent { server_id, new_port: port }`, (e) reset `consecutive_health_failures = 0`. Health check validates HTTP 200 only — no JSON parsing (design Section 9 Open Question 2). | `src/task.rs` |
+| [ ] 5.3 | Implement `slots_tick` | 5s interval. GET `/slots`. Parse JSON into `Vec<SlotState>`. Update `DashMap` entry's `slots`. Also update `last_n_decoded` map (used by deadlock detection in PR6). On error: log debug, leave previous snapshot in place. | `src/task.rs` |
+| [ ] 5.4 | Implement `metrics_tick` | 10s interval. GET `/metrics` (Prometheus text format from llama-server). Lightweight line-based parser (no full Prometheus client dep) — extract `llamacpp:n_decode_total` (cumulative tokens decoded across all slots). Compute `current_tps = (n_decode_total - last_total_tokens_decoded).max(0) / 10.0` (clamp on counter reset, e.g. after restart). Update `last_total_tokens_decoded`. Send full Prometheus body via `MetricsIngest::send_telemetry`. Feed `current_tps` into the rolling TPS window (Task 5.5a) and invoke degradation check (Task 5.5b). | `src/task.rs` |
+| [ ] 5.5 | Implement health failure bounds | Track `consecutive_health_failures: u32`. Increment on each non-2xx or timeout. **On the 3rd consecutive failure** (i.e. `>= 3`, design Section 4.3 and FM table — *not* `> 3`), log `server.health_fail` WARN, transition to `Restarting`. A single transient timeout does NOT count as a failure relative to state (no transition) but DOES increment the counter; success resets to 0. | `src/task.rs` |
+| [ ] 5.5a | Implement rolling TPS window | Per design Section 9 ("Rolling TPS window (5 min)"), Section 1 ("performance degradation tracking"), Section 6 (`restart_on_degradation`), Section 7.2 (`server.performance_degraded` log event). New struct `RollingTpsWindow` with a fixed 50-sample ring buffer of `(Instant, f64)` token-per-second observations. API: `record(tps: f64)`, `mean_5min() -> Option<f64>`, `mean_lifetime() -> Option<f64>` (uses a separately tracked lifetime sum + count, not just the ring), `sample_count() -> usize`. Samples older than 5 minutes are pruned on `record()`. **Held inside the per-server task (not behind a lock)** — domain state, not observability. | `src/health.rs` |
+| [ ] 5.5b | Implement degradation detection (with cold-start guard) | Each `metrics_tick`: get `current_tps` (Task 5.4). **Skip the check entirely** if (a) `window.sample_count() < 30` (under 5 minutes of data — baseline isn't trustworthy yet) OR (b) any slot has `is_processing == true` AND `n_past < ctx_size / 10` (mid-prefill — TPS legitimately low). Otherwise: compare `current_tps < 0.5 * mean_lifetime()`. If true for **3 consecutive ticks** AND `server.config.restart_on_degradation == true`: log `server.performance_degraded` WARN with `current_tps` and `rolling_avg`, then transition to `Restarting` with reason `degradation`. If `restart_on_degradation == false`: log WARN only, no state change. Reset the consecutive counter on a single non-degraded tick or whenever the guard skips. | `src/task.rs` |
+| [ ] 5.6 | Mock HTTP via `mock-llama` | Reuse the `mock-llama` binary from PR4 task 4.6 — it already serves `/health`, `/slots`, `/metrics` with deterministic-failure env vars. No `httpmock` dependency. | `tests/helpers/mod.rs` |
+| [ ] 5.7 | Unit tests: state transitions | (a) Mock 200 OK while Starting → verify `Running`, `ClientRefreshEvent` broadcast, ledger entry cleared. (b) Mock 500 three times consecutively → verify state is `Restarting` exactly on the 3rd failure, not the 4th. (c) Two failures then one success → verify counter resets, no restart. (d) Verify health interval has initial jitter (two tasks started together don't tick at the same wall instant). | `tests/polling_tests.rs` |
+| [ ] 5.7a | Unit tests: degradation | (a) Rolling window: insert 50 samples, verify `mean_5min()` correct, prune past 5 min. (b) `current_tps < 0.5 * baseline` for 3 consecutive ticks + `restart_on_degradation=true` → state → `Restarting`. (c) Same conditions + `restart_on_degradation=false` → WARN logged, state unchanged. (d) Single recovery tick resets the consecutive counter. **(e) Cold-start guard: `sample_count=20` + low TPS → no restart, no WARN.** **(f) Prefill guard: any slot with `n_past < ctx_size/10` + low TPS → no restart.** | `tests/polling_tests.rs` |
 
 ### PR5 Acceptance Criteria
 
-- [ ] `SqliteMetricsStore` implements all 4 storage traits
-- [ ] Write methods send commands to writer thread, await reply
-- [ ] Read methods use read pool with `query_only = ON`
-- [ ] Filter-to-SQL produces parameterized queries (no SQL injection)
-- [ ] Aggregate queries produce correct COUNT, SUM, AVG, p50, p99
-- [ ] Statement timeout of 30s is enforced on read queries
-- [ ] `wal_checkpoint()` is an inherent method (not on any trait)
-- [ ] All 16 integration + unit tests pass (including VC-2 tests)
-- [ ] No `unwrap()` in any `interact()` closure
+- [ ] Ticks run independently using `tokio::time::interval` with initial jitter on health
+- [ ] State correctly transitions from `Starting` -> `Running` AND ledger reservation is cleared at that transition
+- [ ] `ClientRefreshEvent` is broadcasted upon reaching `Running`
+- [ ] Exactly 3 consecutive failures triggers `Restarting` (not 4)
+- [ ] Rolling TPS window prunes samples older than 5 min and reports correct means
+- [ ] `restart_on_degradation=true` triggers `Restarting` after 3 consecutive degraded ticks; `=false` only logs
+- [ ] Degradation check is skipped entirely while either guard holds (`sample_count < 30` OR any slot in prefill with `n_past < ctx_size/10`); only after both guards clear AND the 3-consecutive-tick rule fires does a restart happen
 
 ### PR5 Creation Steps
 
 ```bash
-git checkout -b metrics/05-read-path main
-# ... implement tasks 5.1–5.15 ...
-git add -A && git commit -m "metrics: implement SqliteMetricsStore with query builders and read pool"
-git push -u origin metrics/05-read-path
-# Open PR: "Metrics & Storage PR5: Read Path & SqliteMetricsStore"
-# Description: "Implements SqliteMetricsStore (design doc Sections 2.1, 3.5).
-# All 4 storage trait implementations: write via WriterCommand, read via deadpool
-# read pool. Dynamic filter→SQL query builder, GROUP BY builder, percentile
-# computation in Rust. 30s statement timeout on reads. 15 tests."
+git checkout -b server-manager/05-polling main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: implement health and slots polling"
+git push -u origin server-manager/05-polling
 ```
 
 ---
 
-## VC-2: Write + Read Path Verification Checkpoint
+## VC-2: Process + Polling Verification Checkpoint
 
-**Gate:** PR3 + PR4 + PR5 merged. Full write and read pipeline works.
+**Gate:** PR4 + PR5 merged. Per-server task can spawn, monitor, and reap a real process.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-2.1 | Write → read roundtrip | Insert 100 events via writer → query all → verify 100 returned with correct fields | All assertions pass |
-| VC-2.2 | Batch collector → writer → read | Send events through telemetry/audit channels → batch collector batches → writer inserts → read queries return them | Events visible in DB |
-| VC-2.3 | Audit priority | Send 50 audit + 200 telemetry events simultaneously → verify first batch contains all 50 audit events | Audit events processed first |
-| VC-2.4 | Filter accuracy | Insert events for 3 servers → filter by `server_id` → only matching events returned | Correct filtering |
-| VC-2.5 | Aggregate accuracy | Insert 100 metrics → aggregate by `ServerId` → verify SUM(tokens) matches manual sum | Math checks out |
-| VC-2.6 | Prune correctness | Insert old + new events → prune with cutoff → old gone, new preserved | Retention works |
-| VC-2.7 | WAL checkpoint | Insert 1000 events → trigger PASSIVE checkpoint → verify `pages_checkpointed > 0` | Checkpoint runs |
-| VC-2.8 | Concurrent read + write | Continuous writes + continuous reads for 5s → no `SQLITE_BUSY`, reads < 30s | WAL isolation works |
-
-**Integration test file:** `tests/vc2_write_read_pipeline.rs`
+| VC-2.1 | Lifecycle Transitions | `mock-llama` 200 OK → `Starting` → `Running` within 4s | Lifecycle matches; ledger cleared on `Running` |
+| VC-2.2 | Crash Detection | External `kill -9` of mock-llama → state → `Restarting` ≤100ms | `child.wait()` branch fires; ledger cleared |
+| VC-2.3 | Health Threshold | Mock returns 500 three times → state transitions on 3rd failure | Exactly 3 (not 2, not 4) |
+| VC-2.4 | Cancellation Safety | `shutdown_token.cancel()` mid-run → child SIGTERM'd, then SIGKILL'd, then reaped | No zombie / orphan PID survives |
+| VC-2.5 | Degradation | `restart_on_degradation=true` + 3 sub-baseline TPS ticks → state → `Restarting` | Triggers; log event recorded |
+| VC-2.6 | Upsert Ordering | Start a task, wait for first health tick to fire, then query `metrics_store.list_managed_processes()` | Row present at the moment monitor loop reaches first tick (i.e. upsert completed before monitor entry) |
 
 ---
 
-## PR6: MetricsIngest & Pipeline Assembly
+## PR6: Restart Coordinator, Deadlock Detection & Observability Decorator
 
-**Branch:** `metrics/06-ingest-pipeline`  
-**Base:** `metrics/05-read-path`  
-**Size:** Medium (~250 lines)  
-**Estimated Time:** 4–5 hours
+**Branch:** `server-manager/06-restart-deadlock`  
+**Base:** `server-manager/05-polling`  
+**Size:** Medium (~550 lines)  
+**Estimated Time:** 9–11 hours (1.5 days — full metrics surface + decorator wrapping is larger than the original "just backoff" estimate)
 
 ### Purpose
 
-Implement `MetricsIngest` (the producer-facing API, design doc Section 2.2) and `create_metrics_pipeline()` (the composition root, Section 3.5). After this PR, the entire pipeline can be constructed and used end-to-end.
+Implement the advanced reliability features: backoff with jitter, staggered spawns, and deadlock detection (Section 3.1 & 3.4).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 6.1 | Implement `MetricsIngest` | `Clone`-able struct with `telemetry_tx`, `audit_tx`, `audit_semaphore`. `send_telemetry()`: `try_send`, on `Full` → increment `TELEMETRY_EVENTS_DROPPED` static `AtomicU64` via `fetch_add(1, Ordering::Relaxed)`, use return value for sampled warn log (`if count % 100 == 1 { tracing::warn!(...) }`). `send_audit()`: `try_acquire` semaphore → `timeout(10s, audit_tx.send())` → on timeout/semaphore exhaustion → increment `AUDIT_EVENTS_DROPPED` AtomicU64. | `src/ingest.rs` |
-| 6.2 | Define static drop counters | `static TELEMETRY_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0)` and `static AUDIT_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0)`. Also `static CMD_CHANNEL_EVENTS_DROPPED: AtomicU64 = AtomicU64::new(0)` (used by batch collector in PR4). **Use `AtomicU64` (not Prometheus counters)** to avoid leaking `prometheus` dependency into `MetricsIngest`. Expose via `pub fn telemetry_drops() -> u64`, `pub fn audit_drops() -> u64`, `pub fn cmd_channel_drops() -> u64` for the Prometheus adapter (PR7) to read and export. | `src/ingest.rs` |
-| 6.3 | Implement `create_metrics_pipeline()` | Per design doc Section 3.5. **Parameters: `config: &MetricsConfig`** (NOT individual args — thread the full config struct). Returns `Result<MetricsPipeline, StoreError>`. Steps: (1) open_and_migrate at `config.db_path`, (2) create channels with capacities from config: `tokio::sync::mpsc::channel(config.telemetry_channel_capacity)`, `tokio::sync::mpsc::channel(config.audit_channel_capacity)`, `std::sync::mpsc::sync_channel(64)` for cmd, (3) spawn writer thread with `config.writer_failure_threshold` and `config.wal_checkpoint_interval_secs`, (4) spawn batch collector with `config.batch_flush_interval_ms` and `config.batch_flush_size`, (5) create read pool with `config.read_pool_size` and `config.read_statement_timeout_secs`, (6) create `audit_semaphore` with `config.audit_semaphore_permits`, (7) assemble `MetricsPipeline { ingest, store, batch_collector_handle }`. **No magic numbers — all from MetricsConfig.** | `src/sqlite/pipeline.rs` |
-| 6.4 | Implement `MetricsPipeline` struct | `pub ingest: MetricsIngest`, `pub store: SqliteMetricsStore`, `pub batch_collector_handle: JoinHandle<()>`. | `src/sqlite/pipeline.rs` |
-| 6.5 | Implement graceful shutdown on Drop | `impl Drop for SqliteMetricsStore`: (1) send `WriterCommand::Shutdown`, (2) `join_handle.take().map(|h| h.join())`. Log if join fails. The writer thread's Shutdown handler (PR4 Task 4.1) must: (a) drain ALL remaining commands from `cmd_rx` and process each, (b) run `PRAGMA wal_checkpoint(TRUNCATE)` for clean WAL state, (c) close connection, (d) break loop. **Shutdown ordering constraint** (per design doc Cross-Cutting Concerns): writer thread shutdown MUST happen after all detached audit `tokio::spawn` tasks have completed or timed out. The caller (composition root) must `audit_semaphore.close()` and wait for all permits to be returned before dropping `SqliteMetricsStore`. Document this in a `/// # Shutdown Ordering` doc comment on `MetricsPipeline`. | `src/sqlite/store.rs` |
-| 6.6 | Integration tests: full pipeline | (a) `create_metrics_pipeline()` → send telemetry event via `ingest.send_telemetry()` → wait 200ms (batch collector tick) → query events → verify event stored. (b) Same with audit record. (c) Send audit when channel is empty → returns Ok immediately. | `tests/pipeline_integration.rs` |
-| 6.7 | Integration tests: telemetry drop | Fill telemetry channel to 10,000 → next `send_telemetry()` returns `false` → verify `telemetry_drops()` incremented. | `tests/pipeline_integration.rs` |
-| 6.8 | Integration tests: audit timeout | Block writer thread (send a slow command) → fill audit channel → `send_audit()` times out after 10s → verify `AuditSendError::Timeout`. | `tests/pipeline_integration.rs` |
-| 6.9 | Integration tests: audit semaphore exhaustion | Acquire all 5,000 semaphore permits → `send_audit()` returns `SemaphoreExhausted` immediately. | `tests/pipeline_integration.rs` |
-| 6.10 | Integration tests: graceful shutdown | Create pipeline → send some events → drop `SqliteMetricsStore` → verify writer thread joins cleanly, data is committed. | `tests/pipeline_integration.rs` |
+| [ ] 6.1 | Implement Restart Coordinator | Track `restart_count`. Backoff formula uses the per-server `restart_cooldown_secs` config knob (design Section 6, default 10) as the **base**: `delay(n) = restart_cooldown_secs * 2^(n-1)` capped at `restart_cooldown_secs * 4`, then apply `±20%` jitter. With defaults this yields `10±2s, 20±4s, 40±8s, 40±8s, …` matching design Section 3.1. When `restart_count >= max_restart_attempts`: emit `server.failed` ERROR, transition permanently to `Failed`, do NOT remove from `servers` map (consumer queries still resolve, just see `Failed`); recovery requires operator config-reload. | `src/manager.rs` |
+| [ ] 6.2 | Implement per-GPU semaphore | `DashMap<GpuId, Arc<Semaphore::new(1)>>` (lazily inserted on first spawn touching a GPU). Acquire **before** `pre_spawn_vram_check` and hold until either spawn fails or health check passes (transition to `Running`). Prevents VRAM races and the FM-4 thundering herd. Also enforces `restart_stagger_secs` between releases for the same GPU. | `src/manager.rs` |
+| [ ] 6.3 | Implement `is_deadlocked()` | Per design Section 3.4. Four conditions: (1) active work (`is_processing` on any slot OR pending tracker > 0), (2) no decode progress (`n_decoded == last_n_decoded` for all slots), (3) GPU idle (`utilization_percent() < 10`, **with fallback to `process_cpu_usage() < 50` on `TelemetryError::Unavailable`** — design Section 3.4 explicitly specifies this fallback for Metal/CPU/Vulkan; on other telemetry errors return `false` to avoid false-positive kills), (4) `first_health_ok_at.is_some()` (previously healthy). All 4 must hold. | `src/health.rs` |
+| [ ] 6.4 | Integrate deadlock check | Call `is_deadlocked()` from health tick. If true: log `server.deadlock_detected` ERROR with slot state + GPU util + duration, send **SIGKILL** directly (not SIGTERM — design FM-2: deadlocked process can't handle signals), transition to `Restarting` with reason `deadlock`. | `src/task.rs` |
+| [ ] 6.5 | Implement full metrics surface | Per design Section 7.1 — all 9 metrics via the `metrics` facade crate: `llamaforge_server_status` (Gauge, label `server_id`, values 0/1/2/3), `llamaforge_server_restarts_total` (Counter, labels `server_id, reason` with `reason ∈ {crash, health_fail, degradation, deadlock, config}`), `llamaforge_server_uptime_seconds` (Gauge, label `server_id`), `llamaforge_vram_reserved_bytes` (Gauge, label `gpu_id`), `llamaforge_vram_free_bytes` (Gauge, label `gpu_id`), `llamaforge_gpu_utilization_pct` (Gauge, label `gpu_id`), `llamaforge_server_cumulative_requests` (Counter, label `server_id`), `llamaforge_pending_dispatches` (Gauge, label `server_id`), `llamaforge_health_check_duration_seconds` (Histogram, label `server_id`). Each registered with `describe_*!` once at startup. **File `src/observability.rs` (NOT `src/telemetry.rs`)** — `telemetry.rs` owns the `GpuTelemetry` FFI port from PR2; mixing GPU-FFI types and Prometheus registration is the same anti-pattern Metrics crate avoided with its `metrics_recording.rs` split. | `src/observability.rs` |
+| [ ] 6.5a | Implement `InstrumentedServerManager` decorator | Per CLAUDE.md project convention "Telemetry stays out of domain logic" (R26). Wrapper struct holding `inner: Arc<ServerManager>` that delegates all public methods, layering `#[instrument]` and `metrics::*!` calls at the adapter boundary. Domain code in `manager.rs` / `task.rs` stays free of telemetry except for genuine domain log events (`server.started`, `server.stopped`, etc., which are part of the contract per design Section 7.2). Mirrors `InstrumentedConfigHandle` in `llamaforge-config`. | `src/instrumented.rs` |
+| [ ] 6.6 | Unit tests: Deadlock logic | All 4 conditions met → true. Each condition independently flipped → false. **Specific test from design Section 8.4:** `is_processing=true, n_decoded=0, GPU util=95%` (legitimate prefill) → false. Telemetry `Unavailable` + low CPU → true (fallback path). Telemetry `Unavailable` + high CPU → false. Telemetry `FfiError` → false (don't kill). | `src/health.rs` (tests) |
+| [ ] 6.7 | Unit tests: Backoff math | (a) Attempt 1 delay ∈ [8s, 12s]. Attempt 2 ∈ [16s, 24s]. Attempt 3+ ∈ [32s, 48s]. (b) Monotonicity property: `backoff(n).mean <= backoff(n+1).mean`. (c) After `max_restart_attempts`: state → `Failed`, no further backoff invoked. | `src/manager.rs` (tests) |
+| [ ] 6.8 | Unit tests: per-GPU serialization | Two concurrent `pre_spawn` calls on `gpu:0` → second blocks until first reaches `Running` or fails. Calls on different GPUs proceed in parallel. | `tests/gpu_semaphore.rs` |
 
 ### PR6 Acceptance Criteria
 
-- [ ] `MetricsIngest` is `Clone` (cheap — Arc-backed)
-- [ ] `send_telemetry()` never blocks, never panics
-- [ ] `send_audit()` respects 10s timeout and semaphore bound
-- [ ] `create_metrics_pipeline()` assembles the full pipeline in one call
-- [ ] Drop on `SqliteMetricsStore` sends `Shutdown` and joins writer thread
-- [ ] All 5 integration test scenarios pass
-- [ ] Static drop counters are AtomicU64 (no Prometheus leak into ingest)
+- [ ] Consecutive restarts delay exponentially with 20% jitter, capped at 40±8s
+- [ ] Deadlock accurately identifies Xid 79 / command buffer hangs and uses CPU fallback when telemetry is `Unavailable`
+- [ ] GPU spawns are synchronized per-GPU via Semaphore; cross-GPU spawns parallel
+- [ ] Server enters `Failed` state once max restarts exceeded (permanent until config reload)
+- [ ] All 9 metrics from design Section 7.1 are emitted with correct labels
+- [ ] `InstrumentedServerManager` decorator carries all `#[instrument]` and `metrics::*!` calls; domain code in `manager.rs` / `task.rs` contains no `metrics::counter!` etc.
 
 ### PR6 Creation Steps
 
 ```bash
-git checkout -b metrics/06-ingest-pipeline main
-# ... implement tasks 6.1–6.10 ...
-git add -A && git commit -m "metrics: implement MetricsIngest and create_metrics_pipeline assembly"
-git push -u origin metrics/06-ingest-pipeline
-# Open PR: "Metrics & Storage PR6: MetricsIngest & Pipeline Assembly"
-# Description: "Implements producer API (design doc Section 2.2) and pipeline factory
-# (Section 3.5). MetricsIngest with lossy telemetry send and backpressured audit send.
-# create_metrics_pipeline() wires channels, writer thread, batch collector, and read pool.
-# Graceful shutdown via Drop. 5 integration test scenarios."
+git checkout -b server-manager/06-restart-deadlock main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: add restart coordinator and deadlock detection"
+git push -u origin server-manager/06-restart-deadlock
 ```
 
 ---
 
-## VC-3: End-to-End Pipeline Verification Checkpoint
+## PR7: Config Diffs, Graceful Shutdown & Orphan Recovery
 
-**Gate:** PR1–PR6 merged. Complete pipeline from producer to storage to query.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-3.1 | Producer → storage → query | `send_telemetry()` → wait 200ms → `query_events(matching filter)` → event found | Event persisted |
-| VC-3.2 | Audit → both tables | `send_audit()` → wait 200ms → event in `audit_events` AND record in `request_metrics` | Both tables populated |
-| VC-3.3 | Backpressure under load | Send 20,000 telemetry events in 1s → verify: (a) channel full events dropped, (b) batch collector batches correctly, (c) no OOM, (d) some events make it to DB | Graceful degradation |
-| VC-3.4 | Shutdown data safety | Send 100 events → immediately shutdown → restart with same DB → query returns all 100 | No data loss on graceful shutdown |
-| VC-3.5 | Dual-instance prevention | Start pipeline on DB → start second pipeline on same DB → second fails with `Unavailable` | Advisory lock works |
-| VC-3.6 | Process tracking roundtrip | `upsert_managed_process` → `list_managed_processes` → `remove_managed_process` → `list` returns empty | Full CRUD works |
-
-**Integration test file:** `tests/vc3_e2e_pipeline.rs`
-
----
-
-## PR7: MetricsFacadeRecorder & InstrumentedMetricsStore
-
-**Branch:** `metrics/07-observability`  
-**Base:** `metrics/06-ingest-pipeline`  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 4–6 hours
+**Branch:** `server-manager/07-config-shutdown`  
+**Base:** `server-manager/06-restart-deadlock`  
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 6–8 hours
 
 ### Purpose
 
-Implement the `MetricsFacadeRecorder` adapter (design doc Section 2.7) using the `metrics` facade crate (matching Config Manager's `InstrumentedConfigHandle` approach), and the `InstrumentedMetricsStore` decorator that adds tracing and metrics recording to storage operations. After this PR, all observability is wired up.
+Implement dynamic configuration reloading (Section 5) and the clean graceful shutdown sequence.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 7.1 | Verify `metrics` crate wired | `metrics = "0.22"` is already a workspace dependency (used by Config Manager's `InstrumentedConfigHandle`). Verify it's wired into `llamaforge-metrics/Cargo.toml`. Add `metrics-exporter-prometheus = "0.15"` to workspace deps for the exposition endpoint (used by Transport Layer, not by this crate directly — but needed for VC-4 tests). | `Cargo.toml`, `crates/llamaforge-metrics/Cargo.toml` |
-| 7.2 | Implement `MetricsFacadeRecorder` | Uses `metrics` crate macros (`counter!`, `histogram!`, `gauge!`, `describe_counter!`, `describe_histogram!`, `describe_gauge!`) — the same pattern as Config Manager's `InstrumentedConfigHandle`. On construction, call `describe_*!` for all metrics: `llamaforge_requests_total`, `llamaforge_request_duration_seconds`, `llamaforge_ttft_seconds`, `llamaforge_tokens_per_second`, `llamaforge_queue_depth`, `llamaforge_queue_wait_seconds`, `llamaforge_server_slots_active`, `llamaforge_server_slots_total`, `llamaforge_server_restarts_total`, `llamaforge_sqlite_wal_size_bytes`, `llamaforge_channel_pending`, `llamaforge_events_dropped_total`, `llamaforge_cmd_channel_events_dropped_total`, `llamaforge_sqlite_writes_total`, `llamaforge_sqlite_write_duration_seconds`, `llamaforge_sqlite_checkpoint_duration_seconds`, `llamaforge_sqlite_read_duration_seconds`, `llamaforge_sqlite_read_pool_active`, `llamaforge_prune_rows_deleted`, `llamaforge_config_reloads_total`. The `events_dropped_total` and `cmd_channel_events_dropped_total` metrics are exported by reading the static `AtomicU64` counters from `ingest.rs` (via `telemetry_drops()`, `audit_drops()`, `cmd_channel_drops()`). **Note:** the `metrics` facade is backend-agnostic — the actual Prometheus exporter is wired in `main.rs` by the Transport Layer component. | `src/metrics_recording.rs` |
-| 7.3 | No histogram bucket configuration needed | The `metrics` facade crate delegates bucket configuration to the exporter (e.g., `metrics-exporter-prometheus`). Document recommended buckets as constants or a `pub fn install_metrics_recorder()` helper that configures `PrometheusBuilder` with LLM-tuned buckets: `request_duration_seconds` exponential 0.1–300 (factor 2), `ttft_seconds` exponential 0.01–60 (factor 2), `tokens_per_second` linear [1, 5, 10, 20, 50, 100, 200], `write_duration_seconds` exponential 0.001–5, `checkpoint_duration_seconds` exponential 0.01–30, `read_duration_seconds` exponential 0.001–30. This helper will be called by `main.rs`. | `src/metrics_recording.rs` |
-| 7.4 | Implement `RequestMetricsRecorder` for `MetricsFacadeRecorder` | Each method: call `counter!("llamaforge_...", "label" => value).increment(1)` or `histogram!("llamaforge_...").record(duration)` or `gauge!("llamaforge_...").set(value)`. Matches the exact style of `InstrumentedConfigHandle` in Config Manager. | `src/metrics_recording.rs` |
-| 7.5 | Implement `StoreHealthRecorder` for `MetricsFacadeRecorder` | Each method: call appropriate `metrics` macro. | `src/metrics_recording.rs` |
-| 7.6 | Implement `AppMetrics` blanket | `impl AppMetrics for MetricsFacadeRecorder {}`. | `src/metrics_recording.rs` |
-| 7.7 | Expose `install_metrics_recorder()` helper | `pub fn install_metrics_recorder() -> Result<metrics_exporter_prometheus::PrometheusHandle, ...>`. Installs the global `metrics` recorder with LLM-tuned histogram buckets. Returns the `PrometheusHandle` which the Transport Layer uses for `/metrics` text exposition. This function is called once in `main.rs`. | `src/metrics_recording.rs` |
-| 7.8 | Implement `InstrumentedMetricsStore` | Wraps `SqliteMetricsStore` directly (not generic — follows Config Manager's `InstrumentedConfigHandle` which wraps `ConfigHandle` directly, not a generic `T: ConfigReader`). Implements all 4 storage traits + `private::Sealed`. Hot path methods (reads): minimal overhead — just delegate. Write/mutation methods: `#[instrument]` with `tracing::field::Empty` for late-recorded fields, record `histogram!` duration and `counter!` result labels. Match the exact style of `InstrumentedConfigHandle::reload()` and `::writeback()`. | `src/instrumented.rs` |
-| 7.9 | Implement liveness monitor task | `tokio::spawn` task that: (a) polls `writer_join_handle.is_finished()` every 2s — if finished: `tracing::error!("metrics.writer_panicked")`, set degraded flag; (b) polls channel capacities every 5s → `set_channel_pending()`; (c) polls WAL file size every 60s → `set_wal_size_bytes()` — **if WAL size exceeds `MetricsConfig::wal_oversize_threshold_mb`, emit `tracing::warn!("metrics.wal_oversize", metrics.wal_size_bytes = size)` and set degraded health flag** (per design doc Section 7.3/7.4). | `src/sqlite/liveness.rs` |
-| 7.10 | Implement periodic prune task | `tokio::spawn` task that runs once daily (or on a configurable interval). Each tick: reads `retention_days` from `ConfigReader::snapshot()` (hot-reloadable per design doc Section 6), computes `cutoff = Utc::now() - Duration::days(retention_days)`, sends `WriterCommand::Prune { cutoff }` via the store. Logs `metrics.prune_completed` with rows deleted. Also prunes `request_metrics` table with the same cutoff. **This is the integration point with Config Manager's hot-reloadable `retention_days`.** | `src/sqlite/prune.rs` |
-| 7.11 | Unit tests: MetricsFacadeRecorder | (a) Install a `metrics-util::debugging::DebuggingRecorder` in tests. (b) Create `MetricsFacadeRecorder` → call `record_request()` → snapshot → verify counter key exists and value incremented. (c) `observe_ttft()` → snapshot → verify histogram key has observation. (d) `set_queue_depth()` → snapshot → verify gauge value. **Note:** Use `metrics-util` dev-dep for test snapshots, NOT the global recorder (which can only be set once per process). | `tests/metrics_recording_tests.rs` |
-| 7.12 | Unit tests: InstrumentedMetricsStore | Using `InMemoryStore` (from PR2 Task 2.11) as the inner store: (a) `insert_events()` → verify inner called and events stored. (b) `query_events()` → verify inner called and results returned. Use `tracing_subscriber` with `TestWriter` or a capture layer to verify spans emitted (follow the same tracing test pattern from Config Manager's `InstrumentedConfigHandle` tests). | `tests/instrumented_store.rs` |
-| 7.13 | Unit tests: liveness monitor | Mock a pipeline where writer thread panics → verify monitor detects within 5s (2 poll intervals + margin). | `tests/liveness_monitor.rs` |
+| [ ] 7.1 | Implement `apply_config_diff` | Receive `ConfigDiff`. For each entry: `Added` → spawn task; `Removed` → signal shutdown; `Changed` with `requires_restart=true` (e.g. `devices`, `model_path`) → graceful stop + respawn; `Changed` with hot-reloadable fields only → update `ServerState` in place, no restart. Servers not mentioned in the diff are untouched (design Section 4.2 guarantee). Operations applied sequentially with `restart_stagger_secs` between sequential starts on the same GPU. The async snapshot is `.load()`ed once per call (CLAUDE.md hot-reload contract). | `src/manager.rs` |
+| [ ] 7.2 | Implement `stop_server` | Signal per-server `shutdown_rx`. Server task's shutdown branch (PR4 task 4.2a): (a) transition to `Draining`, (b) wait up to `resolve_drain_timeout(server)` (Task 3.2b — formula `max(60, min(ctx_size/30, 600))`) OR until `pending_dispatches(id) == 0` if available, whichever is sooner. **v1 simplification:** Dispatch & Proxy (component 06) is not yet built, so `pending_dispatches` always returns 0; the timeout path is the only effective gate. (`pending_dispatches` and the increment/decrement API were defined in PR3 Task 3.1a — Dispatch & Proxy will call them in component 06 without re-plumbing.) (c) send SIGTERM via `nix::sys::signal::kill(pid, SIGTERM)`, (d) wait 10s for exit (design Section 6 hardcoded timeout), (e) send SIGKILL group-wide via `kill(Pid::from_raw(-pgid), SIGKILL)`, (f) await `child.wait()` to reap, (g) cleanup as in PR4 task 4.2a. | `src/task.rs`, `src/manager.rs` |
+| [ ] 7.3 | Implement `shutdown_all` | Iterate over all servers, spawn `stop_server` concurrently using a `JoinSet`, await all. After all join: clear VRAM ledger (all entries), delete all rows from `managed_processes` (clean state for next startup, design "Graceful Shutdown" cross-cutting concern). | `src/manager.rs` |
+| [ ] 7.4 | Implement Orphan Recovery (FM-1) | On `start()`: query `metrics_store.list_managed_processes()`. For each row: (a) `kill(pid, 0)` to check liveness. If `Err(ESRCH)` → not alive → delete the row and continue. If alive: (b) **issue `GET http://localhost:{row.port}/health`** with a short timeout (1s). If 200 OK AND `row.model_alias` matches a configured server's model: log `server.orphan_reclaimed` INFO and adopt into `Running` state with the existing PID (skip spawn, skip VRAM ledger entry, set `first_health_ok_at = now()`, attach `child.wait()` via `nix::sys::wait::waitpid(pid, WNOHANG)` polling). (c) If liveness check passes but `/health` fails or model mismatches: log WARN `orphan_unowned`, **leave the process alone** (do NOT kill — could be unrelated; per design FM-1), delete the row so we don't try again. | `src/process.rs` |
+| [ ] 7.5 | Unit tests: config diffs | (a) Apply diff adding a server → verify task spawned. (b) Apply diff removing a server → verify graceful shutdown, untouched servers unaffected. (c) Apply diff with `requires_restart=false` change → verify no restart, state updated in place. **(d) FM-5: apply diff changing `devices` (gpu:0 → gpu:1) on a running server → verify old GPU ledger released, new GPU pre-spawn check runs, new server spawns on gpu:1, gpu:0 free VRAM increases.** | `tests/config_tests.rs` |
+| [ ] 7.6 | Unit tests: graceful shutdown | Verify drain timeout occurs before SIGTERM. Verify SIGKILL 10s after SIGTERM if still alive. Verify `managed_processes` rows deleted on `shutdown_all`. | `tests/process_tests.rs` |
+| [ ] 7.7 | Unit tests: orphan recovery | (a) Pre-populate `managed_processes` with PID of a running `mock-llama` serving matching model on its port → start manager → assert adopted into `Running`. (b) Pre-populate with a PID that is alive but `/health` fails → assert NOT adopted, row deleted, process left alone. (c) Pre-populate with a dead PID → assert row deleted, no adoption attempt. (d) Pre-populate with alive PID whose `/health` returns a different model_alias → assert `orphan_unowned` WARN, row deleted. | `tests/process_tests.rs` |
 
 ### PR7 Acceptance Criteria
 
-- [ ] `MetricsFacadeRecorder` uses `metrics` crate macros (`counter!`, `histogram!`, `gauge!`) — NOT `prometheus` crate directly
-- [ ] All metrics prefixed with `llamaforge_` (matching Config Manager's `llamaforge_config_*` prefix)
-- [ ] All label cardinality is bounded (no dynamic labels)
-- [ ] `install_metrics_recorder()` configures LLM-tuned histogram buckets via `metrics-exporter-prometheus`
-- [ ] `InstrumentedMetricsStore` wraps `SqliteMetricsStore` directly (not generic), follows `InstrumentedConfigHandle` pattern
-- [ ] Liveness monitor detects writer thread death within 5s
-- [ ] Channel depth and WAL size gauges are polled periodically
-- [ ] All unit tests pass
+- [ ] `shutdown_all` guarantees all processes are SIGKILL'd if they refuse to gracefully exit
+- [ ] `apply_config_diff` cleanly adds/removes running tasks without restarting unaffected servers
+- [ ] Orphan processes from previous crashes are adopted or reaped
+- [ ] Orphan `/health` verification: alive PIDs whose `/health` returns a non-matching `model_alias` are left running and `orphan_unowned` WARN is logged; their `managed_processes` row is deleted so the check is idempotent
+- [ ] FM-5: changing a server's `devices` field via config diff releases the old GPU ledger entry and runs `pre_spawn_vram_check` on the new GPU
+- [ ] `pending_dispatches`, `increment_pending`, `decrement_pending` are exposed as `pub` methods on `ServerManager` so the future Dispatch & Proxy crate can wire in without re-plumbing
 
 ### PR7 Creation Steps
 
 ```bash
-git checkout -b metrics/07-observability main
-# ... implement tasks 7.1–7.13 ...
-git add -A && git commit -m "metrics: add MetricsFacadeRecorder, InstrumentedMetricsStore, and liveness monitor"
-git push -u origin metrics/07-observability
-# Open PR: "Metrics & Storage PR7: Observability — metrics crate facade, Instrumented Decorator & Liveness"
-# Description: "Implements MetricsFacadeRecorder (design doc Section 2.7) using the `metrics`
-# facade crate (same pattern as Config Manager's InstrumentedConfigHandle). All metric
-# descriptors with `describe_*!` macros. LLM-tuned histogram bucket configuration via
-# install_metrics_recorder() helper for metrics-exporter-prometheus. InstrumentedMetricsStore
-# decorator wraps SqliteMetricsStore with tracing + metrics on write paths (zero overhead
-# on reads). Liveness monitor polls writer thread health, channel depths, and WAL size. 13 tests."
+git checkout -b server-manager/07-config-shutdown main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: implement config diff application and graceful shutdown"
+git push -u origin server-manager/07-config-shutdown
 ```
 
 ---
 
-## PR8: Property-Based Tests, VC Integration Tests & Public API
+## VC-3: Restart, Deadlock & Shutdown Verification Checkpoint
 
-**Branch:** `metrics/08-verification`  
-**Base:** `metrics/07-observability`  
-**Size:** Medium (~350 lines of tests + lib.rs re-exports)  
-**Estimated Time:** 5–7 hours
+**Gate:** PR6 + PR7 merged. Reliability features integrated.
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-3.1 | Backoff Schedule | Force 4 consecutive crashes under `tokio::time::pause()` + `tokio::time::advance()` (no real wall-clock waits — 110+s of real time would otherwise be needed) → measure inter-restart intervals | Match 10±2, 20±4, 40±8, 40±8 ranges |
+| VC-3.2 | Deadlock SIGKILL | Mock satisfies all 4 conditions → assert SIGKILL (not SIGTERM) sent | Direct SIGKILL; state → `Restarting` |
+| VC-3.3 | GPU Serialization | Two `pre_spawn` on `gpu:0` concurrently → measure overlap | Second waits; cross-GPU spawns are parallel |
+| VC-3.4 | Graceful Shutdown | `stop_server` with mock in-flight → drain → SIGTERM → SIGKILL | Order observed; child reaped |
+| VC-3.5 | Orphan `/health` Verification | Alive PID with wrong model_alias on `/health` → NOT adopted, left alone | `orphan_unowned` WARN; row deleted |
+| VC-3.6 | Metrics Completeness | Install `metrics_util::debugging::DebuggingRecorder` (or `PrometheusBuilder::build_recorder()`) **in-process** for the test, exercise a full scenario (spawn → run → restart → deadlock-kill → degradation), then snapshot the recorder. Server Manager has no HTTP `/metrics` endpoint of its own — Transport Layer (component 07) wraps it later. | All 9 metric names present with ≥1 observation; `restarts_total` carries exactly the 5 documented `reason` values from design Section 7.1 (`crash`, `health_fail`, `degradation`, `deadlock`, `config`); `server_id` / `gpu_id` labels match the test scenario |
+
+---
+
+## PR8: Verification, Tests & Public API
+
+**Branch:** `server-manager/08-verification`  
+**Base:** `server-manager/07-config-shutdown`  
+**Size:** Medium (~350 lines)  
+**Estimated Time:** 5–6 hours
 
 ### Purpose
 
-Final PR: property-based tests (design doc Section 8.3), all VC-3 and VC-4 integration tests, design doc Section 8.4 specific test cases, and clean public API re-exports. Pure test code + API polish.
+Finalize the component with property tests, complete E2E integration tests, and clean up the API exports.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 8.1 | Property test: insert → query roundtrip | `proptest! { fn roundtrip(event in arb_audit_event()) { insert → query(matching_filter) → assert event returned } }`. Implement `arb_audit_event()` strategy. | `tests/proptest_metrics.rs` |
-| 8.2 | Property test: retention correctness | `proptest! { fn retention(events in vec(arb_audit_event(), 1..50), cutoff in arb_datetime()) { insert all → prune(cutoff) → query → only events newer than cutoff remain } }`. | `tests/proptest_metrics.rs` |
-| 8.3 | Property test: ordering | `proptest! { fn ordering(events in vec(arb_audit_event(), 1..50)) { insert (shuffled) → query → returned in created_at order } }`. | `tests/proptest_metrics.rs` |
-| 8.4 | Property test: concurrent reads don't block writes | Under sustained write load (100 inserts/sec), concurrent reads complete within 30s. | `tests/proptest_metrics.rs` |
-| 8.5 | Implement VC-3 integration tests | All 6 checks from VC-3 above, each as `#[tokio::test]`. | `tests/vc3_e2e_pipeline.rs` |
-| 8.6 | Implement design doc Section 8.4 tests | All 9 specific test cases: `test_telemetry_channel_full_drops_event`, `test_audit_send_timeout`, `test_writer_thread_panic_detected`, `test_wal_checkpoint_passive`, `test_pre_recycle_rollback`, `test_concurrent_read_during_write`, `test_retention_prune`, `test_read_pool_statement_timeout`, `test_schema_migration_idempotent`. (Note: many of these are covered in other test files natively). | `tests/design_doc_tests.rs` |
-| 8.7 | Finalize public API re-exports in lib.rs | All modules remain `pub(crate) mod`. Add explicit `pub use` re-exports following the exact pattern from `llamaforge-config/src/lib.rs` — list every public type individually (NO glob `pub use types::*`). Key exports: `pub use types::{TelemetryEvent, AuditRecord, AuditEvent, RequestMetrics, ManagedProcess, ProcessId, RequestId, ...};`, `pub use error::{StoreError, AuditSendError};`, `pub use filter::{EventFilter, MetricsFilter, GroupByField, AggregatedMetrics};`, `pub use traits::{EventStore, RequestMetricsStore, ProcessStore, StoreMaintenance};`, `pub use ingest::MetricsIngest;`, `pub use sqlite::pipeline::{create_metrics_pipeline, MetricsPipeline};`, `pub use sqlite::store::SqliteMetricsStore;`, `pub use metrics_recording::{MetricsFacadeRecorder, RequestMetricsRecorder, StoreHealthRecorder, AppMetrics, install_metrics_recorder};`, `pub use instrumented::InstrumentedMetricsStore;`. | `src/lib.rs` |
-| 8.8 | Add `#[ignore]` slow tests | Tag property-based tests and concurrency stress tests with `#[ignore]`. | — |
-| 8.9 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`, `cargo doc --no-deps -p llamaforge-metrics`. | — |
+| [ ] 8.1 | Property test: Backoff | `∀ n: backoff(n).mean <= backoff(n+1).mean` modulo jitter; bounds `[0.8x, 1.2x]`. | `tests/proptest_manager.rs` |
+| [ ] 8.2 | Property test: Ledger | Under arbitrary spawn/exit/healthy sequences, assert ledger entries always == set of servers in spawn-to-healthy state (i.e. `Starting`). | `tests/proptest_manager.rs` |
+| [ ] 8.2a | Property test: Stagger | `∀ concurrent restarts on same GPU: time between starts >= restart_stagger_secs` (design Section 8.3). | `tests/proptest_manager.rs` |
+| [ ] 8.3 | Integration test: Full Lifecycle | `start()` -> Wait for `Running` via `mock-llama` -> Dispatch fake increments -> `stop_server()` -> verify drain → SIGTERM → SIGKILL → reaped → `managed_processes` row deleted. | `tests/e2e_lifecycle.rs` |
+| [ ] 8.4 | Integration test: Orphan recovery | (a) Pre-populate sqlite with running `mock-llama` PID + matching model_alias → start manager → assert adopted. (b) Same but wrong model_alias → assert NOT adopted, row deleted, process untouched. | `tests/e2e_lifecycle.rs` |
+| [ ] 8.5 | Finalize `lib.rs` exports | `pub use` for: `ServerManager`, `InstrumentedServerManager`, `ServerLifecycle`, `ServerStateSnapshot`, `SlotState`, `ServerCapabilities`, `SpeculativeMethod`, `ModelArchitecture`, `ClientRefreshEvent`, `ServerManagerError`, `GpuTelemetry`, `GpuDevice`, `TelemetryError`, `StubTelemetry`. **Internal-only (NOT re-exported):** `ServerState`, `GgufMetadata`, `GgufError`, `Quantization`, `RollingTpsWindow`. If `cargo-public-api` is installed, run `cargo public-api list --simplified`; otherwise a manual `rg '^pub ' src/lib.rs` review to confirm nothing else leaks. | `src/lib.rs` |
+| [ ] 8.6 | Tag slow tests | Add `#[ignore]` to tests containing actual process sleeps or HTTP timeouts. | `tests/*.rs` |
+| [ ] 8.7 | id_task overflow test | Per design Section 8.4: set `cumulative_requests` to `i32::MAX/2 - 1`, increment, assert warning logged exactly once (latch). | `tests/e2e_lifecycle.rs` |
 
 ### PR8 Acceptance Criteria
 
-- [x] All 4 property-based tests pass (256 cases each)
-- [x] All 6 VC-3 integration tests pass
-- [x] All 9 design doc Section 8.4 test cases pass
-- [x] Public API is cleanly re-exported from `lib.rs`
-- [x] `cargo doc --no-deps -p llamaforge-metrics` builds without warnings
-- [x] Explicitly owns the lock file lifecycle change (tying it to store lifetime instead of process lifetime) to fix tests without hanging
-- [x] `cargo test --workspace -- --ignored` passes
+- [ ] All property tests pass (256 cases)
+- [ ] E2E lifecycle tests successfully transition through all states
+- [ ] `cargo doc --no-deps -p llamaforge-server-manager` runs clean without warnings
 
 ### PR8 Creation Steps
 
 ```bash
-git checkout -b metrics/08-verification main
-# ... implement tasks 8.1–8.9 ...
-git add -A && git commit -m "metrics: add property tests, VC integration tests, design doc tests, and public API"
-git push -u origin metrics/08-verification
-# Open PR: "Metrics & Storage PR8: Property Tests, Full Verification & Public API"
-# Description: "Pure test + API PR. 4 proptest property-based tests (Section 8.3),
-# 6 VC-3 e2e integration tests, 9 design doc Section 8.4 test cases. Clean public
-# API re-exports from lib.rs.
-#
-# **Note on Design Shift:** This PR modifies the advisory lock lifecycle. Instead of
-# leaking the lock file descriptor to hold it for the process lifetime, it is now
-# returned from `open_and_migrate` and held in `SqliteMetricsStore`. This is required
-# so that when the pipeline drops (e.g., between integration tests), the file lock
-# is released, allowing subsequent tests to re-acquire the lock without failing."
+git checkout -b server-manager/08-verification main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: finalize verification and public API"
+git push -u origin server-manager/08-verification
 ```
 
 ---
 
 ## VC-4: Full Component Verification Checkpoint
 
-**Gate:** All 8 PRs merged. Metrics & Storage is feature-complete.
+**Gate:** All 8 PRs merged. Server Manager is feature-complete.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-4.1 | Full lifecycle | `create_metrics_pipeline()` → send telemetry+audit → batch collector batches → writer inserts → query returns events → prune old → checkpoint WAL → shutdown cleanly | All steps succeed |
-| VC-4.2 | Startup failure: unwritable DB path | `/nonexistent/path/db.sqlite` → `StoreError::Internal` with clear message | Error is descriptive |
-| VC-4.3 | Startup failure: locked DB | Start pipeline → start second pipeline on same DB → `StoreError::Unavailable` | Advisory lock blocks |
-| VC-4.4 | Writer degradation | Trigger 10 consecutive write failures → verify `WriterMode::Degraded` → verify `/health` reports degraded | Degradation surfaces |
-| VC-4.5 | Telemetry backpressure | 50,000 events in 1 second → verify: channel drops events, counter increments, system stays alive, some events persist | Graceful degradation |
-| VC-4.6 | Audit backpressure | Block writer → fill audit channel → `send_audit` times out at 10s → semaphore cap at 5,000 | Bounded memory usage |
-| VC-4.7 | Reader isolation | Long-running read (30s query) → concurrent writes succeed → query eventually times out | WAL isolation holds |
-| VC-4.8 | Retention enforcement | Insert 100 events with timestamps 60 days old → prune with 30-day retention → all 100 deleted | Prune works |
-| VC-4.9 | Metrics endpoint | Call `install_metrics_recorder()` → create `MetricsFacadeRecorder` → record some operations → render from `PrometheusHandle` → verify text format output contains expected metric names | Valid Prometheus text |
-| VC-4.10 | Memory bounds | Under sustained load (10K events/sec for 10s) → measure RSS → verify < 50MB above baseline | No memory leak |
-| VC-4.11 | Observability decorator | Query via `InstrumentedMetricsStore` → capture tracing output → verify spans present | Spans emitted |
-| VC-4.12 | Config integration | Read `metrics_db_path` and `retention_days` from `AppConfig` (via `ConfigReader`) → pipeline uses them | Config drives behavior |
-
-**Integration test file:** `tests/vc4_full_component.rs`
+| VC-4.1 | Lifecycle E2E | `start()` -> `/health` mock -> `stop_server()` | Transitions `Starting` -> `Running` -> `Draining` -> `Stopped` cleanly |
+| VC-4.2 | Deadlock Recovery | Trigger 4 deadlock conditions on running mock | SIGKILL sent, transitions to `Restarting` |
+| VC-4.3 | Config Hot-Reload | Send `ConfigDiff` removing server 1, adding server 2 | Server 1 Draining, Server 2 Starting. Server 3 untouched. |
+| VC-4.4 | VRAM Ledger E2E | End-to-end: spawn 3 servers on gpu:0 sequentially with `mock-llama`, force OOM on third → ledger correctly serialized, third returns `InsufficientVram`, gpu:0 free reflects actual reservations (E2E counterpart to VC-3.3's unit-level semaphore test) | No over-allocation; correct error returned |
+| VC-4.5 | Performance Degradation | Mock TPS drops to <50% of baseline for 3 ticks with `restart_on_degradation=true` | `server.performance_degraded` logged, restart triggered |
 
 ---
 
 ## VC-5: Final Sign-Off Checkpoint
 
-**Gate:** All VC-4 checks pass. Component ready for integration.
+**Gate:** VC-4 passes.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
 | VC-5.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
 | VC-5.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
-| VC-5.3 | Code coverage | `cargo llvm-cov --workspace` → `llamaforge-metrics` > 80% line coverage | Coverage report |
-| VC-5.4 | Public API audit | Review `lib.rs`. No internal types leak. `SqliteMetricsStore` only exposed for composition root. | Manual review |
-| VC-5.5 | Design doc compliance | Cross-check every Section in `02_METRICS_AND_STORAGE.md` against implementation | Checklist complete |
-| VC-5.6 | Documentation | `cargo doc --no-deps -p llamaforge-metrics` builds clean | No doc warnings |
-| VC-5.7 | Dependency audit | `cargo deny check` passes. No duplicate versions. | Clean |
-| VC-5.8 | No `unwrap()` audit | `rg 'unwrap\(\)' crates/llamaforge-metrics/src/` returns zero hits in production code | Zero matches |
-| VC-5.9 | No `expect()` audit | `rg 'expect\(' crates/llamaforge-metrics/src/` returns zero hits in production code | Zero matches |
+| VC-5.3 | Unwrap audit | `rg 'unwrap\(\)' crates/llamaforge-server-manager/src/` | Zero hits in production code |
+| VC-5.4 | Expect audit | `rg 'expect\(' crates/llamaforge-server-manager/src/` | Zero hits in production code |
+| VC-5.5a | No `metrics::*!` in domain code | `rg 'metrics::(counter\|gauge\|histogram\|describe)!' crates/llamaforge-server-manager/src/manager.rs crates/llamaforge-server-manager/src/task.rs crates/llamaforge-server-manager/src/health.rs crates/llamaforge-server-manager/src/process.rs` | Zero hits (only `src/observability.rs` and `src/instrumented.rs` may invoke metric macros) |
+| VC-5.5b | No `#[instrument]` in domain code | `rg '#\[instrument' crates/llamaforge-server-manager/src/manager.rs crates/llamaforge-server-manager/src/task.rs crates/llamaforge-server-manager/src/health.rs crates/llamaforge-server-manager/src/process.rs` | Zero hits (decorator owns spans) |
+| VC-5.5c | Tracing log events in domain are bounded | `rg 'tracing::(info\|warn\|error)!' crates/llamaforge-server-manager/src/manager.rs crates/llamaforge-server-manager/src/task.rs` | Each hit must correspond to a named event in design Section 7.2 (`server.started`, `server.stopped`, `server.health_fail`, `server.deadlock_detected`, `server.performance_degraded`, `server.vram_insufficient`, `server.restarting`, `server.failed`, `server.orphan_reclaimed`, `server.id_task_overflow_warning`, `orphan_unowned`) — manual audit |
+| VC-5.6 | Non-exhaustive audit | All public enums have `#[non_exhaustive]` | `rg '^pub enum' crates/llamaforge-server-manager/src/` cross-checked against attributes |
 
 ---
 
@@ -597,15 +489,15 @@ git push -u origin metrics/08-verification
 
 | PR | Key Files Created/Modified | LOC (est.) |
 |----|---------------------------|------------|
-| PR1 | `src/types.rs` (incl. MetricsConfig), `src/error.rs`, `src/filter.rs`, `src/lib.rs` (pub(crate) mods + pub use) | ~400 |
-| PR2 | `src/traits.rs` (sealed traits + dyn assertions), `src/metrics_recording.rs` (trait defs), `src/sqlite/commands.rs`, `src/sqlite/in_memory.rs` | ~300 |
-| PR3 | `src/sqlite/mod.rs`, `src/sqlite/migrations.rs`, `src/sqlite/pool.rs`, `src/sqlite/rows.rs` | ~300 |
-| PR4 | `src/sqlite/writer.rs`, `src/sqlite/batch_collector.rs` | ~500 |
-| PR5 | `src/sqlite/store.rs`, `src/sqlite/query_builder.rs`, `tests/vc2_write_read_pipeline.rs` | ~400 |
-| PR6 | `src/ingest.rs`, `src/sqlite/pipeline.rs` | ~250 |
-| PR7 | `src/metrics_recording.rs` (impl via `metrics` crate), `src/instrumented.rs`, `src/sqlite/liveness.rs`, `src/sqlite/prune.rs` | ~400 |
-| PR8 | `tests/proptest_metrics.rs`, `tests/vc3_*.rs`, `tests/design_doc_tests.rs`, `src/lib.rs` (finalize re-exports) | ~350 |
-| **Total** | | **~2,900** |
+| PR1 | `src/types.rs`, `src/error.rs`, `src/state.rs` (incl. internal `ServerState`), `src/lib.rs` (+ `SpeculativeMethod`, `ModelArchitecture`) | ~400 |
+| PR2 | `src/telemetry.rs` (Trait + Stub, **not sealed**) | ~200 |
+| PR3 | `src/manager.rs` (DashMap, VRAM Ledger), `src/vram_estimate.rs` (GGUF parser + estimator) | ~500 |
+| PR4 | `src/task.rs` (outer restart loop + monitor `select!`), `src/process.rs` (Spawn, wait, cancellation-safe cleanup), `src/bin/mock-llama.rs` (feature-gated `[[bin]]`) | ~550 |
+| PR5 | `src/health.rs` (rolling TPS), `src/task.rs` (Ticks + degradation) | ~450 |
+| PR6 | `src/manager.rs`, `src/health.rs` (Backoff, Deadlock w/ CPU fallback), `src/observability.rs` (full 9 metrics; separate from `telemetry.rs`), `src/instrumented.rs` | ~550 |
+| PR7 | `src/manager.rs`, `src/process.rs` (Diff, Shutdown, Orphan w/ `/health` check) | ~400 |
+| PR8 | `tests/proptest_*.rs`, `tests/e2e_*.rs`, `src/lib.rs` | ~350 |
+| **Total** | | **~3,400** |
 
 ---
 
@@ -613,16 +505,18 @@ git push -u origin metrics/08-verification
 
 | Day | Work | PRs |
 |-----|------|-----|
-| Day 1 | Domain types + MetricsConfig + traits + InMemoryStore | PR1, PR2 |
-| Day 2 | SQLite setup, migrations, read pool, row DTOs | PR3 |
-| Day 3 | Writer thread + command dispatch + degradation state machine | PR4 (part 1) |
-| Day 4 | Batch collector (dual-command flow) + type conversions | PR4 (part 2) |
-| Day 5 | Writer + batch collector tests | PR4 (part 3) |
-| Day 6 | Read path: queries, filters, aggregates, VC-2 tests | PR5 |
-| Day 7 | MetricsIngest + pipeline assembly + integration | PR6 |
-| Day 8 | MetricsFacadeRecorder + instrumented decorator + liveness + prune task | PR7 |
-| Day 9 | Property tests + VC tests + public API | PR8 |
-| Day 10–11 | VC-4, VC-5 verification, code review fixes, docs | — |
+| Day 1 | `ManagedProcess` pre-flight + Domain types (+ `ServerState`, `SpeculativeMethod`, `ModelArchitecture`) + Telemetry interfaces | PR1, PR2 |
+| Day 2 | Core state (DashMap) + VRAM ledger | PR3 (part 1) |
+| Day 3 | GGUF parser + VRAM estimator + drain timeout formula | PR3 (part 2) |
+| Day 4–5 | Process execution + restart loop + cancellation-safe cleanup + `mock-llama` + GGUF-failure handling | PR4 |
+| Day 6 | Health/Slots polling + 3-failure transition + ledger clear on Running | PR5 (part 1) |
+| Day 7 | Rolling TPS window + degradation detection + cold-start/prefill guards | PR5 (part 2) |
+| Day 8 | Restart coordination + GPU semaphore | PR6 (part 1) |
+| Day 9 | Deadlock detection (w/ CPU fallback) + full 9 metrics + `InstrumentedServerManager` | PR6 (part 2) |
+| Day 10 | Config diff application + `pending_dispatches` API | PR7 (part 1) |
+| Day 11 | Graceful shutdown + Orphan recovery with `/health` verification + FM-5 GPU change | PR7 (part 2) |
+| Day 12 | Integration + Property testing | PR8 |
+| Day 13–15 | Full verification (VC-3, VC-4, VC-5), docs | — |
 
 ---
 
@@ -630,94 +524,37 @@ git push -u origin metrics/08-verification
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| `deadpool-sqlite` API changes | Low | Medium | Pin version. Wrap in internal pool abstraction if needed. |
-| SQLite WAL grows unbounded under load | Medium | Medium | 60s passive checkpoint + oversize alert. Statement timeout prevents long reads. |
-| `std::sync::mpsc` contention from async context | Low | Low | `try_send` is brief. Profile. Fall back to `crossbeam::channel` if contention shows. |
-| Percentile computation in Rust is slow for large datasets | Medium | Low | Limit to 10,000 rows for percentile calc. Return `None` for larger sets. |
-| `rusqlite_migration` schema versioning conflicts | Low | Medium | Test idempotency. Pin migration version. Document schema evolution process. |
-| Writer thread panic leaves orphaned data | Low | High | Liveness monitor detects within 2s. Committed data survives. Channel data lost (bounded). |
-| Cross-platform `flock` differences | Low | Medium | `nix` crate abstracts. Test on Linux (CI) and macOS (dev). |
-| Batch collector timer drift under load | Low | Low | `tokio::time::interval` is monotonic. Acceptable — batches flush on size OR timer. |
+| Zombie Processes | Low | High | `child.wait()` is unconditionally awaited in `select!`. `setsid()` allows `-pgid` kill. Cooperative shutdown branch explicitly SIGTERM/SIGKILLs before task drop. |
+| VRAM Overallocation | Medium | Medium | Ledger strictly subtracts during `Starting` phase. Concurrent spawns blocked by GPU semaphore. |
+| Deadlock False Positive | Medium | High | Deadlock detection requires 4 distinct independent conditions before killing (Section 3.4). |
+| `reqwest` memory leak | Low | Low | One shared Client per server. Long-lived, no rapid re-instantiation. |
+| SQLite locking during orphan | Low | Low | DB accesses are fast. Retries handled by `deadpool-sqlite`. |
+| GGUF parse failure / corrupt header | Low | Medium | Defensive parser with bounded buffers (Task 3.2a). On error: fall back to operator-supplied `config.estimated_vram_mb`, or skip-check with WARN. No panics. |
+| Cold-start TPS misread as degradation | Medium | High (false restart) | Two-part guard in Task 5.5b: minimum `sample_count >= 30` AND no slot mid-prefill. Restart only after both pass and 3 consecutive degraded ticks. |
+| Metrics crate `ManagedProcess` missing required fields | Medium | High (blocks PR4 / PR7) | PR1 Task 1.0 pre-flight verifies `pid`, `port`, `model_alias`, `server_id`, `started_at` are present. If any missing, land an additive PR in `llamaforge-metrics` (extend struct + migration + row DTO) before PR4 begins. |
 
 ---
 
 ## Integration Points (for next components)
 
-After Metrics & Storage is complete, the following integration seams are ready:
+After Server Manager is complete:
 
-1. **Dispatch & Proxy** will use `MetricsIngest::send_telemetry()` (lossy, hot path) and spawn detached tasks calling `send_audit()` (backpressured, per-request).
-2. **Server Manager** will call `ProcessStore::upsert_managed_process()` before spawning and `remove_managed_process()` after reaping. Uses `list_managed_processes()` at startup for orphan detection.
-3. **Transport Layer** will:
-   - Expose `GET /metrics` using the `PrometheusHandle` from `install_metrics_recorder()` for Prometheus text exposition (the `metrics` facade crate + `metrics-exporter-prometheus` backend).
-   - Expose `GET /api/events`, `GET /api/metrics` using `EventStore::query_events()` and `RequestMetricsStore::query_request_metrics()`.
-   - Expose `POST /api/maintenance/wal-checkpoint` using `SqliteMetricsStore::wal_checkpoint()`.
-4. **Config Manager** integration: `StoreMaintenance::insert_config_snapshot()` called on every reload/writeback. `retention_days` read from `ConfigReader::snapshot().global.metrics_retention_days` (field already exists on `GlobalConfig` in the implemented Config Manager — see `types.rs`).
-5. **`main.rs`** will construct: `install_metrics_recorder()` → `create_metrics_pipeline(&metrics_config)` → wrap store in `InstrumentedMetricsStore::new(store)` → inject `MetricsIngest` to producers, `dyn EventStore` / `dyn RequestMetricsStore` to query consumers. The `MetricsConfig` struct (defined in `llamaforge-metrics`) is populated from `AppConfig::global.metrics_db_path` and `AppConfig::global.metrics_retention_days` (already present in `llamaforge-config`).
+1. **Smart Routing** will poll `ServerManager::slot_states()` to assign requests via prompt hash affinity.
+2. **Dispatch & Proxy** will call `ServerManager::server_state()` to verify the target server is `Running`, subscribe to `subscribe_client_refresh()` to swap `reqwest::Client` instances after a backend restart, and call `increment_pending(id)` / `decrement_pending(id)` around each dispatch so `stop_server` can drain in-flight requests (API surface defined in PR7 task 7.2; Server Manager exposes `pending_dispatches(id) -> u64`).
+3. **Transport Layer** will query `ServerManager::running_servers()` to expose overall gateway health.
 
 ---
 
 ## Cross-Component Dependency Diagram
 
 ```
-llamaforge-config (PR1–PR7 complete)
-        │
-        │ provides: ServerId, TaskTypeId, RequestorId,
-        │           AppConfig, ConfigReader
-        ▼
-llamaforge-metrics (this plan)
-        │
-        │ provides: MetricsIngest, EventStore, RequestMetricsStore,
-        │           ProcessStore, MetricsFacadeRecorder, RequestMetricsRecorder
-        ▼
-Server Manager, Dispatch & Proxy, Transport Layer (future components)
+llamaforge-config         llamaforge-metrics
+    (ConfigHandle)           (MetricsStore)
+          │                        │
+          ▼                        ▼
+    llamaforge-server-manager (this plan)
+          │
+          │ provides: ServerState, slot_states(), ClientRefreshEvent
+          ▼
+    Smart Routing, Dispatch & Proxy
 ```
-
----
-
-## Appendix: Adversarial Review Findings (Resolved)
-
-This plan was subjected to an adversarial review. All findings have been addressed. Summary of changes applied:
-
-| ID | Severity | Finding | Resolution |
-|----|----------|---------|------------|
-| F-1 | CRITICAL | Task 7.10 modified `llamaforge-config` from metrics PR — ownership violation | Removed. `MetricsConfig` defined in `llamaforge-metrics` (PR1 Task 1.11). Composition root extracts values. |
-| F-2 | CRITICAL | `create_metrics_pipeline()` accepted only 2 params, hardcoding 12 config knobs | Pipeline factory now takes `&MetricsConfig`. All values from config struct, no magic numbers. |
-| F-3 | CRITICAL | `WriterMode::Degraded` was recoverable — contradicts design doc's irreversible transition | Fixed. Degraded is now irreversible within process lifetime. `consecutive_failures` resets on success but mode stays Degraded. |
-| F-4 | CRITICAL | Batch collector only sent `InsertEvents` — missed `InsertMetrics` for AuditRecords | Fixed. Batch collector now sends BOTH `InsertEvents` and `InsertMetrics` when AuditRecords present. 4-phase algorithm. |
-| F-5 | HIGH | No periodic prune task anywhere in the plan | Added PR7 Task 7.10: periodic prune task reading `retention_days` from ConfigReader. |
-| F-6 | HIGH | `MetricsIngest` mixed Prometheus `.inc()` and AtomicU64 descriptions | Resolved. Consistently AtomicU64 everywhere. `fetch_add(1, Relaxed)` for counters, exposed via getter functions. |
-| F-7 | HIGH | PR4 tests had no way to cleanly shut down writer threads | Added Task 4.9: `WriterTestHandle` with Drop impl that sends Shutdown and joins. |
-| F-8 | HIGH | PR4/PR5 "can overlap" claim misleading — PR5 tests need PR4's writer | Clarified: code can be developed concurrently, integration tests require PR4 merged. |
-| F-9 | HIGH | `MetricsConfig` not defined in PR1 despite being needed by PR3/4/5/6 | Added PR1 Task 1.11 with all 12 fields, defaults, and serde annotations. |
-| F-10 | HIGH | `ConfigOverlay` struct had no field definitions | Added explicit fields to PR2 Task 2.5. |
-| F-11 | HIGH | Shutdown ordering incomplete — writer didn't drain/checkpoint on Shutdown | Fixed in PR4 Task 4.1 (drain + TRUNCATE checkpoint) and PR6 Task 6.5 (semaphore close ordering). |
-| F-12 | MEDIUM | `nix` crate missing from PR3 dependencies | Added to Task 3.1. |
-| F-13 | MEDIUM | Read pool PRAGMA assertion vs SET was ambiguous | Clarified in Task 3.5: assert mode is "wal", don't SET it. |
-| F-14 | MEDIUM | PR5 base branch inconsistent between header and creation steps | Added concurrency note explaining the nuance. |
-| F-15 | MEDIUM | `cmd_channel_events_dropped_total` missing from Prometheus metrics | Added to Task 7.2 field list. |
-| F-16 | MEDIUM | `InMemoryStore` mock referenced but never defined | Added PR2 Task 2.11. |
-| F-17 | MEDIUM | VC-2 test file had no implementation task | Added PR5 Task 5.16. |
-| F-18 | MEDIUM | PR4 estimate too low for complexity | Revised from 6–8 hours to 10–14 hours (1.5–2 days). |
-| F-19 | MEDIUM | WAL oversize alerting missing from liveness monitor | Added to Task 7.9: emit warn log + set degraded flag when WAL exceeds threshold. |
-
----
-
-## Appendix B: Config Manager Implementation Alignment (Post-Implementation Revision)
-
-This plan was updated after reading the implemented Config Manager codebase at `~/git/llama-forge`. The following changes were made to align with established conventions:
-
-| Area | Before | After | Rationale |
-|------|--------|-------|-----------|
-| Module visibility | `pub mod types;` etc. | `pub(crate) mod types;` + explicit `pub use` re-exports | Matches `llamaforge-config/src/lib.rs` pattern exactly |
-| Trait sealing | No sealed traits | All storage traits use `private::Sealed` pattern | Matches `ConfigSource` and `ConfigReader`/`ConfigWriter` |
-| Dyn assertions | Runtime `Arc<dyn T>` tests only | Static dispatch test coverage for `impl Trait` (relaxed from `const _` dyn safety assertions) | Match `llamaforge-config` implementation conventions where possible |
-| Enum extensibility | Some `#[non_exhaustive]` | ALL public enums `#[non_exhaustive]` | Matches `ConfigChange`, `ConfigLoadError`, etc. |
-| Metrics crate | `prometheus = "0.13"` crate | `metrics = "0.22"` facade crate with `counter!`/`histogram!` macros | Matches `InstrumentedConfigHandle` which uses `metrics` crate |
-| Prometheus struct | `PrometheusAppMetrics` | `MetricsFacadeRecorder` + `install_metrics_recorder()` helper | `metrics` crate separates recording from exporting |
-| Instrumented decorator | Generic `InstrumentedMetricsStore<S, M>` | Concrete `InstrumentedMetricsStore` wrapping `SqliteMetricsStore` | Matches `InstrumentedConfigHandle` wrapping `ConfigHandle` directly |
-| Sync mutex | `std::sync::Mutex` | `parking_lot::Mutex` (already in workspace) | Matches `InMemoryConfigSource` |
-| Test doubles | `pub struct InMemoryStore` | `pub(crate)` + `#[cfg_attr(not(test), allow(dead_code))]` | Matches `InMemoryConfigSource` visibility |
-| Async traits | Native async fn | `#[allow(async_fn_in_trait)]` annotation | Matches `ConfigWriter` trait |
-| File naming | `prometheus_metrics.rs` | `metrics_recording.rs` | Backend-agnostic naming since using `metrics` facade |
-| Codebase location | Not specified | `~/git/llama-forge` (documented in header) | Actual implementation location |
-| Workspace deps | Assumed from scratch | Documents already-available deps: `parking_lot`, `metrics`, `nix`, `anyhow`, `serde_json`, `typed-builder` | Avoids redundant workspace dep additions |
