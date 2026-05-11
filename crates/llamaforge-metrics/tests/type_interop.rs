@@ -44,8 +44,8 @@ fn test_type_interop() {
         server_id: server_id.clone(),
         started_at: chrono::Utc::now(),
         cmdline: "cmd".to_string(),
-            port: 8080,
-            model_alias: "test-model".to_string(),
+        port: 8080,
+        model_alias: "test-model".to_string(),
     };
     assert_eq!(process.server_id, server_id);
 }

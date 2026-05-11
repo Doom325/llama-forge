@@ -6,8 +6,9 @@ use rusqlite_migration::{Migrations, M};
 
 /// Return the ordered list of database migrations.
 pub fn get_migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(
-        r#"
+    Migrations::new(vec![
+        M::up(
+            r#"
         -- Event log for telemetry and audit records
         CREATE TABLE IF NOT EXISTS audit_events (
             event_id TEXT PRIMARY KEY,
@@ -84,11 +85,12 @@ pub fn get_migrations() -> Migrations<'static> {
             PRIMARY KEY (server_id, overlay_key)
         );
         "#,
-    ),
-    M::up(
-        r#"
+        ),
+        M::up(
+            r#"
         ALTER TABLE managed_processes ADD COLUMN port INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE managed_processes ADD COLUMN model_alias TEXT NOT NULL DEFAULT '';
         "#,
-    )])
+        ),
+    ])
 }
