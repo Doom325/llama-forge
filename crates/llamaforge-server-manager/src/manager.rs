@@ -310,6 +310,10 @@ mod tests {
 
         config.ctx_size = 40000;
         assert_eq!(resolve_drain_timeout(&config).as_secs(), 600);
+
+        // Explicit override wins
+        config.shutdown_drain_timeout_secs = Some(42);
+        assert_eq!(resolve_drain_timeout(&config).as_secs(), 42);
     }
 
     struct MockTelemetry {

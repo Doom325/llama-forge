@@ -18,7 +18,7 @@ use crate::vram_estimate::{parse_gguf, GgufError, GgufMetadata};
 
 pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, config: ServerConfig) {
     let mut restart_count = 0;
-    let max_restarts = 5; // Design typical value, could be config-driven
+    let max_restarts = config.max_restart_attempts;
 
     loop {
         // Parse GGUF or fallback
@@ -99,7 +99,15 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
             }
         };
 
-        let pid = child.id().expect("Child has no PID");
+        let pid = match child.id() {
+            Some(id) => id,
+            None => {
+                error!(server.id = %server_id, "Child has no PID immediately after spawn");
+                mgr.clear_vram_reservation(&server_id);
+                transition_to(&mgr, &server_id, ServerLifecycle::Failed);
+                break;
+            }
+        };
         let model_alias = config.alias.clone().unwrap_or_else(|| "default".to_string());
 
         if let Some(mut state) = mgr.servers.get_mut(&server_id) {
