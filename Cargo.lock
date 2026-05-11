@@ -1106,6 +1106,7 @@ version = "0.1.0-draft"
 name = "llamaforge-server-manager"
 version = "0.1.0-draft"
 dependencies = [
+ "async-trait",
  "axum",
  "chrono",
  "dashmap",
