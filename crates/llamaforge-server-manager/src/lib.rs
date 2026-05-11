@@ -16,6 +16,7 @@ pub(crate) mod vram_estimate;
 
 pub use error::ServerManagerError;
 pub use state::ServerStateSnapshot;
+pub use telemetry::{GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
 pub use types::{
     ClientRefreshEvent, ModelArchitecture, ServerCapabilities, ServerLifecycle, SlotState,
     SpeculativeMethod,

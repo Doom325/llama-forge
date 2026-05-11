@@ -32,6 +32,9 @@ serde_json = { workspace = true }
 
 [features]
 test-utils = ["dep:axum", "dep:tower"]
+gpu-nvml = []
+gpu-metal = []
+gpu-rocm = []
 
 [dependencies.axum]
 workspace = true
