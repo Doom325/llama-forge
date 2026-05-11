@@ -194,16 +194,22 @@ async fn test_orphan_recovery() {
     let mut cmd_a = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
     cmd_a.arg("--port").arg(port_a.to_string());
     cmd_a.kill_on_drop(true);
-    let child_a = cmd_a.spawn().unwrap();
+    let mut child_a = cmd_a.spawn().unwrap();
     let pid_a = child_a.id().unwrap();
+    tokio::spawn(async move {
+        let _ = child_a.wait().await;
+    });
 
     // (b) Health fails
     let port_b = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let mut cmd_b = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
     cmd_b.arg("--port").arg(port_b.to_string()).arg("--alias").arg("mock,health_fail_after=0");
     cmd_b.kill_on_drop(true);
-    let child_b = cmd_b.spawn().unwrap();
+    let mut child_b = cmd_b.spawn().unwrap();
     let pid_b = child_b.id().unwrap();
+    tokio::spawn(async move {
+        let _ = child_b.wait().await;
+    });
 
     // (c) Dead PID
     let port_c = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -214,8 +220,11 @@ async fn test_orphan_recovery() {
     let mut cmd_d = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
     cmd_d.arg("--port").arg(port_d.to_string()).arg("--alias").arg("wrong_model");
     cmd_d.kill_on_drop(true);
-    let child_d = cmd_d.spawn().unwrap();
+    let mut child_d = cmd_d.spawn().unwrap();
     let pid_d = child_d.id().unwrap();
+    tokio::spawn(async move {
+        let _ = child_d.wait().await;
+    });
 
     // Wait for them to start
     tokio::time::sleep(Duration::from_millis(500)).await;

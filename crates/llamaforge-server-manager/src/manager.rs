@@ -73,52 +73,56 @@ impl ServerManager {
         // Task 7.4: Orphan Recovery (FM-1)
         let mut adopted_pids = std::collections::HashMap::new();
         if let Ok(procs) = self.metrics_store.list_managed_processes().await {
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(1))
-                .build()
-                .unwrap();
-            for proc in procs {
-                #[cfg(unix)]
-                {
-                    use nix::sys::signal::kill;
-                    use nix::unistd::Pid;
-                    if kill(Pid::from_raw(proc.pid.0 as i32), None).is_err() {
-                        // Not alive, delete row
-                        let _ = self.metrics_store.remove_managed_process(proc.pid).await;
-                        continue;
-                    }
-                }
-
-                // Alive, check health
-                let url = format!("http://127.0.0.1:{}/health", proc.port);
-                let mut adopted = false;
-                if let Ok(resp) = client.get(&url).send().await {
-                    if resp.status().is_success() {
-                        // Verify it matches a configured server
-                        if let Some(server_config) = app_config.servers.get(&proc.server_id) {
-                            let expected_alias =
-                                server_config.alias.as_deref().unwrap_or("default");
-                            if expected_alias == proc.model_alias {
-                                tracing::info!(
-                                    server.id = %proc.server_id,
-                                    server.orphan_reclaimed = true,
-                                    pid = proc.pid.0,
-                                    "Adopted orphaned server process"
-                                );
-                                adopted_pids.insert(proc.server_id.clone(), proc.pid.0);
-                                adopted = true;
+            match reqwest::Client::builder().timeout(std::time::Duration::from_secs(1)).build() {
+                Ok(client) => {
+                    for proc in procs {
+                        #[cfg(unix)]
+                        {
+                            use nix::sys::signal::kill;
+                            use nix::unistd::Pid;
+                            if kill(Pid::from_raw(proc.pid.0 as i32), None).is_err() {
+                                // Not alive, delete row
+                                let _ = self.metrics_store.remove_managed_process(proc.pid).await;
+                                continue;
                             }
+                        }
+
+                        // Alive, check health
+                        let url = format!("http://127.0.0.1:{}/health", proc.port);
+                        let mut adopted = false;
+                        if let Ok(resp) = client.get(&url).send().await {
+                            if resp.status().is_success() {
+                                // Verify it matches a configured server
+                                if let Some(server_config) = app_config.servers.get(&proc.server_id)
+                                {
+                                    let expected_alias =
+                                        server_config.alias.as_deref().unwrap_or("default");
+                                    if expected_alias == proc.model_alias {
+                                        tracing::info!(
+                                            server.id = %proc.server_id,
+                                            server.orphan_reclaimed = true,
+                                            pid = proc.pid.0,
+                                            "Adopted orphaned server process"
+                                        );
+                                        adopted_pids.insert(proc.server_id.clone(), proc.pid.0);
+                                        adopted = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !adopted {
+                            tracing::warn!(
+                                server.id = %proc.server_id,
+                                pid = proc.pid.0,
+                                "orphan_unowned: Live process found but health check failed or model mismatched. Leaving untouched."
+                            );
+                            let _ = self.metrics_store.remove_managed_process(proc.pid).await;
                         }
                     }
                 }
-
-                if !adopted {
-                    tracing::warn!(
-                        server.id = %proc.server_id,
-                        pid = proc.pid.0,
-                        "orphan_unowned: Live process found but health check failed or model mismatched. Leaving untouched."
-                    );
-                    let _ = self.metrics_store.remove_managed_process(proc.pid).await;
+                Err(e) => {
+                    tracing::warn!("Failed to build reqwest client for orphan recovery: {}. Skipping orphan recovery.", e);
                 }
             }
         }

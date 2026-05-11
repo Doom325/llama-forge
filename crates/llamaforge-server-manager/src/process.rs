@@ -3,12 +3,6 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 use tokio::process::Command;
 
-#[cfg(unix)]
-use nix::{
-    sys::wait::{waitpid, WaitPidFlag, WaitStatus},
-    unistd::Pid,
-};
-
 /// A handle to a running server process, which might be a spawned child
 /// or an adopted orphan process.
 pub enum ProcessHandle {
@@ -30,28 +24,18 @@ impl ProcessHandle {
             ProcessHandle::Orphan(pid) => {
                 #[cfg(unix)]
                 {
+                    use nix::sys::signal::kill;
+                    use nix::unistd::Pid;
+                    use std::os::unix::process::ExitStatusExt;
+
                     loop {
-                        match waitpid(Pid::from_raw(*pid as i32), Some(WaitPidFlag::WNOHANG)) {
-                            Ok(WaitStatus::Exited(_, code)) => {
-                                #[cfg(unix)]
-                                use std::os::unix::process::ExitStatusExt;
-                                return Ok(ExitStatus::from_raw(code));
-                            }
-                            Ok(WaitStatus::Signaled(_, sig, _)) => {
-                                #[cfg(unix)]
-                                use std::os::unix::process::ExitStatusExt;
-                                return Ok(ExitStatus::from_raw(sig as i32));
-                            }
-                            Ok(WaitStatus::StillAlive) => {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
-                            }
+                        match kill(Pid::from_raw(*pid as i32), None) {
                             Ok(_) => {
+                                // Alive
                                 tokio::time::sleep(Duration::from_millis(100)).await;
                             }
-                            Err(nix::errno::Errno::ECHILD) => {
-                                // Process no longer exists
-                                #[cfg(unix)]
-                                use std::os::unix::process::ExitStatusExt;
+                            Err(nix::errno::Errno::ESRCH) => {
+                                // Dead
                                 return Ok(ExitStatus::from_raw(0));
                             }
                             Err(e) => {
