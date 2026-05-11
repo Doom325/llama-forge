@@ -63,6 +63,7 @@ estimated_vram_mb = 100
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_gpu_semaphore() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();

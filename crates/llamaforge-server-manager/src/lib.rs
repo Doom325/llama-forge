@@ -24,3 +24,9 @@ pub use types::{
     ClientRefreshEvent, ModelArchitecture, ServerCapabilities, ServerLifecycle, SlotState,
     SpeculativeMethod,
 };
+
+#[cfg(feature = "test-utils")]
+#[doc(hidden)]
+pub mod __test_exports {
+    pub use crate::task::compute_backoff_delay;
+}

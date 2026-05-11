@@ -78,6 +78,7 @@ async fn setup_manager(tmp: &TempDir, port: u16) -> (Arc<ServerManager>, Cancell
 static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18400);
 
 #[tokio::test]
+#[ignore]
 async fn test_apply_config_diff() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())

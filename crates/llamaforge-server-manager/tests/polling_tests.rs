@@ -95,6 +95,7 @@ async fn setup_manager(
 static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18100);
 
 #[tokio::test]
+#[ignore]
 async fn test_health_transition_and_refresh() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
@@ -124,6 +125,7 @@ async fn test_health_transition_and_refresh() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_consecutive_health_failures() {
     let _ = tracing_subscriber::fmt::try_init();
 

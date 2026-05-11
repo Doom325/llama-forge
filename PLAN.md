@@ -428,14 +428,14 @@ Finalize the component with property tests, complete E2E integration tests, and 
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| [ ] 8.1 | Property test: Backoff | `∀ n: backoff(n).mean <= backoff(n+1).mean` modulo jitter; bounds `[0.8x, 1.2x]`. | `tests/proptest_manager.rs` |
-| [ ] 8.2 | Property test: Ledger | Under arbitrary spawn/exit/healthy sequences, assert ledger entries always == set of servers in spawn-to-healthy state (i.e. `Starting`). | `tests/proptest_manager.rs` |
-| [ ] 8.2a | Property test: Stagger | `∀ concurrent restarts on same GPU: time between starts >= restart_stagger_secs` (design Section 8.3). | `tests/proptest_manager.rs` |
-| [ ] 8.3 | Integration test: Full Lifecycle | `start()` -> Wait for `Running` via `mock-llama` -> Dispatch fake increments -> `stop_server()` -> verify drain → SIGTERM → SIGKILL → reaped → `managed_processes` row deleted. | `tests/e2e_lifecycle.rs` |
-| [ ] 8.4 | Integration test: Orphan recovery | (a) Pre-populate sqlite with running `mock-llama` PID + matching model_alias → start manager → assert adopted. (b) Same but wrong model_alias → assert NOT adopted, row deleted, process untouched. | `tests/e2e_lifecycle.rs` |
-| [ ] 8.5 | Finalize `lib.rs` exports | `pub use` for: `ServerManager`, `InstrumentedServerManager`, `ServerLifecycle`, `ServerStateSnapshot`, `SlotState`, `ServerCapabilities`, `SpeculativeMethod`, `ModelArchitecture`, `ClientRefreshEvent`, `ServerManagerError`, `GpuTelemetry`, `GpuDevice`, `TelemetryError`, `StubTelemetry`. **Internal-only (NOT re-exported):** `ServerState`, `GgufMetadata`, `GgufError`, `Quantization`, `RollingTpsWindow`. If `cargo-public-api` is installed, run `cargo public-api list --simplified`; otherwise a manual `rg '^pub ' src/lib.rs` review to confirm nothing else leaks. | `src/lib.rs` |
-| [ ] 8.6 | Tag slow tests | Add `#[ignore]` to tests containing actual process sleeps or HTTP timeouts. | `tests/*.rs` |
-| [ ] 8.7 | id_task overflow test | Per design Section 8.4: set `cumulative_requests` to `i32::MAX/2 - 1`, increment, assert warning logged exactly once (latch). | `tests/e2e_lifecycle.rs` |
+| [x] 8.1 | Property test: Backoff | `∀ n: backoff(n).mean <= backoff(n+1).mean` modulo jitter; bounds `[0.8x, 1.2x]`. | `tests/proptest_manager.rs` |
+| [x] 8.2 | Property test: Ledger | Under arbitrary spawn/exit/healthy sequences, assert ledger entries always == set of servers in spawn-to-healthy state (i.e. `Starting`). | `tests/proptest_manager.rs` |
+| [x] 8.2a | Property test: Stagger | `∀ concurrent restarts on same GPU: time between starts >= restart_stagger_secs` (design Section 8.3). | `tests/proptest_manager.rs` |
+| [x] 8.3 | Integration test: Full Lifecycle | `start()` -> Wait for `Running` via `mock-llama` -> Dispatch fake increments -> `stop_server()` -> verify drain → SIGTERM → SIGKILL → reaped → `managed_processes` row deleted. | `tests/e2e_lifecycle.rs` |
+| [x] 8.4 | Integration test: Orphan recovery | (a) Pre-populate sqlite with running `mock-llama` PID + matching model_alias → start manager → assert adopted. (b) Same but wrong model_alias → assert NOT adopted, row deleted, process untouched. | `tests/e2e_lifecycle.rs` |
+| [x] 8.5 | Finalize `lib.rs` exports | `pub use` for: `ServerManager`, `InstrumentedServerManager`, `ServerLifecycle`, `ServerStateSnapshot`, `SlotState`, `ServerCapabilities`, `SpeculativeMethod`, `ModelArchitecture`, `ClientRefreshEvent`, `ServerManagerError`, `GpuTelemetry`, `GpuDevice`, `TelemetryError`, `StubTelemetry`. **Internal-only (NOT re-exported):** `ServerState`, `GgufMetadata`, `GgufError`, `Quantization`, `RollingTpsWindow`. If `cargo-public-api` is installed, run `cargo public-api list --simplified`; otherwise a manual `rg '^pub ' src/lib.rs` review to confirm nothing else leaks. | `src/lib.rs` |
+| [x] 8.6 | Tag slow tests | Add `#[ignore]` to tests containing actual process sleeps or HTTP timeouts. | `tests/*.rs` |
+| [x] 8.7 | id_task overflow test | Per design Section 8.4: set `cumulative_requests` to `i32::MAX/2 - 1`, increment, assert warning logged exactly once (latch). | `tests/e2e_lifecycle.rs` |
 
 ### PR8 Acceptance Criteria
 
