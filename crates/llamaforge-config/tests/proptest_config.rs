@@ -178,6 +178,7 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
                 shutdown_drain_timeout_secs: None,
                 speculative_method,
                 model_architecture,
+                max_restart_attempts: 3,
             },
         )
 }

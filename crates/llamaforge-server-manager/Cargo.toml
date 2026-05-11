@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "mock-llama"
+path = "src/bin/mock-llama.rs"
+required-features = ["test-utils"]
+
 [dependencies]
 llamaforge-config = { workspace = true }
 llamaforge-metrics = { workspace = true }
@@ -20,6 +25,7 @@ nix = { workspace = true, features = ["signal", "process"] }
 tokio-util = { workspace = true }
 metrics = { workspace = true }
 chrono = { workspace = true }
+rand = "0.8"
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -31,7 +37,7 @@ metrics-util = { workspace = true, features = ["debugging"] }
 serde_json = { workspace = true }
 
 [features]
-test-utils = ["dep:axum", "dep:tower"]
+test-utils = ["dep:axum", "dep:tower", "dep:serde_json"]
 gpu-nvml = []
 gpu-metal = []
 gpu-rocm = []
@@ -41,5 +47,9 @@ workspace = true
 optional = true
 
 [dependencies.tower]
+workspace = true
+optional = true
+
+[dependencies.serde_json]
 workspace = true
 optional = true

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use llamaforge_config::{ConfigHandle, GpuId, ServerConfig, ServerId};
+use llamaforge_config::{ConfigHandle, ConfigReader, GpuId, ServerConfig, ServerId};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -23,18 +23,19 @@ use crate::vram_estimate::{compute_vram_estimate, GgufMetadata};
 /// The main entry point for managing `llama-server` instances.
 #[allow(dead_code)]
 pub struct ServerManager {
-    servers: Arc<DashMap<ServerId, ServerState>>,
+    pub(crate) servers: Arc<DashMap<ServerId, ServerState>>,
     /// Protected by a synchronous `parking_lot::Mutex` per ground rule 2.
-    vram_ledger: Arc<parking_lot::Mutex<HashMap<GpuId, u64>>>,
-    gpu_telemetry: Arc<dyn GpuTelemetry>,
-    config: Arc<ConfigHandle>,
-    metrics_ingest: MetricsIngest,
-    metrics_store: Arc<llamaforge_metrics::InstrumentedMetricsStore>,
-    shutdown_token: CancellationToken,
-    client_refresh_tx: broadcast::Sender<ClientRefreshEvent>,
-    pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>,
+    pub(crate) vram_ledger: Arc<parking_lot::Mutex<HashMap<GpuId, u64>>>,
+    pub(crate) gpu_telemetry: Arc<dyn GpuTelemetry>,
+    pub(crate) config: Arc<ConfigHandle>,
+    pub(crate) metrics_ingest: MetricsIngest,
+    pub(crate) metrics_store: Arc<llamaforge_metrics::InstrumentedMetricsStore>,
+    pub(crate) shutdown_token: CancellationToken,
+    pub(crate) client_refresh_tx: broadcast::Sender<ClientRefreshEvent>,
+    pub(crate) pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>,
 
-    warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
+    pub(crate) warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
+    pub(crate) tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
 }
 
 impl ServerManager {
@@ -58,7 +59,54 @@ impl ServerManager {
             client_refresh_tx,
             pending_dispatches: Arc::new(DashMap::new()),
             warned_overflow: Arc::new(DashMap::new()),
+            tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
         }
+    }
+
+    // --- Task 4.1: Implementation of start() ---
+
+    pub async fn start(self: Arc<Self>) -> Result<Arc<Self>, ServerManagerError> {
+        let app_config = self.config.snapshot();
+
+        for (server_id, server_config) in &app_config.servers {
+            let srv = server_id.clone();
+            let cfg = server_config.clone();
+            let mgr = self.clone();
+
+            // Insert initial state
+            mgr.servers.insert(
+                srv.clone(),
+                ServerState {
+                    id: srv.clone(),
+                    lifecycle: ServerLifecycle::Starting, // Initially Starting as per spawn logic
+                    pid: None,
+                    port: cfg.port,
+                    model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
+                    parallel_slots: cfg.parallel_slots,
+                    ctx_size: cfg.ctx_size,
+                    slots: vec![],
+                    last_health_check: None,
+                    restart_count: 0,
+                    cumulative_requests: 0,
+                    capabilities: None,
+                    first_health_ok_at: None,
+                    last_n_decoded: std::collections::HashMap::new(),
+                    gpu_id: cfg
+                        .devices
+                        .first()
+                        .map(|d| d.gpu_id.clone())
+                        .unwrap_or_else(|| GpuId(0)),
+                    gguf_metadata: None,
+                    reserved_vram_bytes: 0,
+                },
+            );
+
+            self.tasks.lock().await.spawn(async move {
+                crate::task::spawn_server_task(mgr, srv, cfg).await;
+            });
+        }
+
+        Ok(self)
     }
 
     // --- Task 3.1a: pending_dispatches API surface ---
@@ -117,6 +165,7 @@ impl ServerManager {
         if free_vram_bytes == u64::MAX {
             // Unbounded fallback
             *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
+            drop(ledger);
             if let Some(mut server) = self.servers.get_mut(server_id) {
                 server.reserved_vram_bytes = needed_bytes;
             }
@@ -134,6 +183,7 @@ impl ServerManager {
         }
 
         *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
+        drop(ledger);
         if let Some(mut server) = self.servers.get_mut(server_id) {
             server.reserved_vram_bytes = needed_bytes;
         }
@@ -151,11 +201,17 @@ impl ServerManager {
 
     /// Clears the VRAM reservation for a server completely.
     pub fn clear_vram_reservation(&self, server_id: &ServerId) {
-        if let Some(mut server) = self.servers.get_mut(server_id) {
-            let gpu_id = server.gpu_id.clone();
-            let bytes = server.reserved_vram_bytes;
-            if bytes > 0 {
-                self.release_vram_reservation(&gpu_id, bytes);
+        let (gpu_id, bytes) = {
+            if let Some(server) = self.servers.get(server_id) {
+                (server.gpu_id.clone(), server.reserved_vram_bytes)
+            } else {
+                return;
+            }
+        };
+
+        if bytes > 0 {
+            self.release_vram_reservation(&gpu_id, bytes);
+            if let Some(mut server) = self.servers.get_mut(server_id) {
                 server.reserved_vram_bytes = 0;
             }
         }
@@ -254,6 +310,10 @@ mod tests {
 
         config.ctx_size = 40000;
         assert_eq!(resolve_drain_timeout(&config).as_secs(), 600);
+
+        // Explicit override wins
+        config.shutdown_drain_timeout_secs = Some(42);
+        assert_eq!(resolve_drain_timeout(&config).as_secs(), 42);
     }
 
     struct MockTelemetry {

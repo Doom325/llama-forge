@@ -379,6 +379,12 @@ pub struct ServerConfig {
     pub speculative_method: SpeculativeMethod,
     #[serde(default)]
     pub model_architecture: ModelArchitecture,
+    #[serde(default = "default_max_restart_attempts")]
+    pub max_restart_attempts: u32,
+}
+
+fn default_max_restart_attempts() -> u32 {
+    3
 }
 
 impl Default for ServerConfig {
@@ -400,6 +406,7 @@ impl Default for ServerConfig {
             shutdown_drain_timeout_secs: None,
             speculative_method: SpeculativeMethod::default(),
             model_architecture: ModelArchitecture::default(),
+            max_restart_attempts: default_max_restart_attempts(),
         }
     }
 }
@@ -615,6 +622,7 @@ mod tests {
                 shutdown_drain_timeout_secs: None,
                 speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
                 model_architecture: ModelArchitecture::Recurrent,
+                max_restart_attempts: 5,
             },
         );
 
