@@ -65,7 +65,7 @@ pub struct ServerCapabilities {
 
 /// The state of a single processing slot on the server.
 /// See design doc Section 2.3.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct SlotState {
     pub id: u32,
     pub is_processing: bool,

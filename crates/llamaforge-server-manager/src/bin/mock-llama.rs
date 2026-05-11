@@ -15,8 +15,19 @@ struct MockState {
 
 #[tokio::main]
 async fn main() {
-    let port =
-        std::env::var("MOCK_PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap();
+    let mut mock_port = std::env::var("MOCK_PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap();
+    
+    // Parse --port from args
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--port" {
+            if let Some(p) = args.next() {
+                mock_port = p.parse().unwrap();
+            }
+        }
+    }
+    
+    let port = mock_port;
     let health_fail_after =
         std::env::var("MOCK_HEALTH_FAIL_AFTER").ok().and_then(|v| v.parse::<u32>().ok());
     let hang_after = std::env::var("MOCK_HANG_AFTER").ok().and_then(|v| v.parse::<u32>().ok());
