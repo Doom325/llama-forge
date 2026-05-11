@@ -56,10 +56,17 @@ async fn test_writer_thread_panic_detected() {
     cmd_tx.send(WriterCommand::Shutdown).unwrap();
 
     // Give it a moment to exit
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut finished = false;
+    for _ in 0..50 {
+        if store.is_writer_finished() {
+            finished = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Now it should be finished
-    assert!(store.is_writer_finished());
+    assert!(finished, "Writer thread did not finish in time");
 
     // The liveness monitor loops every 2 seconds. Let's fast forward.
     tokio::time::pause();
