@@ -12,5 +12,6 @@ name = "llamaforge"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 clap = { workspace = true }
 llamaforge-config = { workspace = true }

@@ -1,3 +1,6 @@
+mod init;
+mod validate;
+
 use clap::Parser;
 use llamaforge_config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
 use std::env;
@@ -20,6 +23,41 @@ struct Cli {
     /// Writable state directory (overrides env var and default)
     #[arg(long)]
     state_dir: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(clap::Subcommand)]
+enum Commands {
+    /// Initialize default configuration files and state directory
+    Init {
+        /// Path to write llamaforge.toml
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// Path to write priority_rules.toml
+        #[arg(long)]
+        rules: Option<PathBuf>,
+
+        /// Writable state directory
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+
+        /// Overwrite existing files
+        #[arg(long)]
+        force: bool,
+    },
+    /// Validate configuration without starting the server
+    Validate {
+        /// Path to llamaforge.toml
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Path to priority_rules.toml
+        #[arg(long)]
+        rules: Option<PathBuf>,
+    },
 }
 
 fn xdg_config_home() -> PathBuf {
@@ -100,14 +138,13 @@ fn print_state_dir_error(path: &Path) {
     eprintln!("Or pass --state-dir <other-path> / set $LLAMAFORGE_STATE_DIR.");
 }
 
-fn handle_config_error(err: ConfigLoadError) -> ! {
+pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
     match err {
         ConfigLoadError::NotFound { path } => {
             eprintln!("error: config file not found: {}", path.display());
             eprintln!();
             eprintln!("To get started:");
-            eprintln!("  1. Copy the example config from the repo:");
-            eprintln!("       cp examples/llamaforge.toml {}", path.display());
+            eprintln!("  1. Run `llamaforge init` to generate a default config");
             eprintln!("  2. Edit `model_path`, `port`, `ctx_size` for your llama-server instances");
             eprintln!("  3. Re-run llamaforge");
             eprintln!();
@@ -128,7 +165,7 @@ fn handle_config_error(err: ConfigLoadError) -> ! {
             eprintln!("Recovery:");
             eprintln!("  1. Restore the file from version control (it should be checked in)");
             eprintln!("  2. Or restore from your most recent backup");
-            eprintln!("  3. Or copy examples/llamaforge.toml as a starting point and re-edit");
+            eprintln!("  3. Or run `llamaforge init --force` to generate a new default config");
         }
         ConfigLoadError::ParseError { path, source } => {
             eprintln!("error: failed to parse {}:", path.display());
@@ -172,23 +209,40 @@ fn handle_config_error(err: ConfigLoadError) -> ! {
 fn main() {
     let cli = Cli::parse();
 
-    let config_path = cli.config.unwrap_or_else(find_config);
-    let rules_path = cli.priority_rules.unwrap_or_else(find_rules);
-    let state_dir = cli.state_dir.unwrap_or_else(find_state_dir);
-
-    check_state_dir(&state_dir);
-
-    let paths = ConfigPaths::new(config_path, rules_path, state_dir);
-    let source = Arc::new(TomlFileConfigSource::new(paths));
-
-    match ConfigHandle::load(source) {
-        Ok(_handle) => {
-            // Keep the stub message from Phase 0 or indicate success.
-            // As there's no actual long-running process yet, we just print and exit.
-            println!("llamaforge: skeleton — see IMPLEMENTATION_PLAN.md Phase 0");
+    match cli.command {
+        Some(Commands::Init { out, rules, state_dir, force }) => {
+            let out_path =
+                out.unwrap_or_else(|| xdg_config_home().join("llamaforge").join("llamaforge.toml"));
+            let rules_path =
+                rules.unwrap_or_else(|| out_path.with_file_name("priority_rules.toml"));
+            let s_dir = state_dir.unwrap_or_else(find_state_dir);
+            init::run(&out_path, Some(&rules_path), &s_dir, force);
         }
-        Err(err) => {
-            handle_config_error(err);
+        Some(Commands::Validate { config, rules }) => {
+            let config_path = config.unwrap_or_else(find_config);
+            let rules_path = rules.unwrap_or_else(find_rules);
+            validate::run(&config_path, &rules_path, handle_config_error);
+        }
+        None => {
+            let config_path = cli.config.unwrap_or_else(find_config);
+            let rules_path = cli.priority_rules.unwrap_or_else(find_rules);
+            let state_dir = cli.state_dir.unwrap_or_else(find_state_dir);
+
+            check_state_dir(&state_dir);
+
+            let paths = ConfigPaths::new(config_path, rules_path, state_dir);
+            let source = Arc::new(TomlFileConfigSource::new(paths));
+
+            match ConfigHandle::load(source) {
+                Ok(_handle) => {
+                    // Keep the stub message from Phase 0 or indicate success.
+                    // As there's no actual long-running process yet, we just print and exit.
+                    println!("llamaforge: skeleton — see IMPLEMENTATION_PLAN.md Phase 0");
+                }
+                Err(err) => {
+                    handle_config_error(err);
+                }
+            }
         }
     }
 }
