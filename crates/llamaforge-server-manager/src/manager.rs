@@ -35,6 +35,7 @@ pub struct ServerManager {
     pub(crate) pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>,
 
     pub(crate) warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
+    pub(crate) gpu_semaphores: Arc<DashMap<GpuId, Arc<tokio::sync::Semaphore>>>,
     pub(crate) tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
 }
 
@@ -59,6 +60,7 @@ impl ServerManager {
             client_refresh_tx,
             pending_dispatches: Arc::new(DashMap::new()),
             warned_overflow: Arc::new(DashMap::new()),
+            gpu_semaphores: Arc::new(DashMap::new()),
             tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
         }
     }
@@ -218,6 +220,10 @@ impl ServerManager {
     }
 
     // --- Task 3.3: State accessors ---
+
+    pub fn vram_ledger(&self) -> HashMap<GpuId, u64> {
+        self.vram_ledger.lock().clone()
+    }
 
     /// Returns a snapshot of a specific server.
     pub fn server_state(&self, id: &ServerId) -> Option<ServerStateSnapshot> {

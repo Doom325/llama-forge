@@ -383,6 +383,8 @@ pub struct ServerConfig {
     pub max_restart_attempts: u32,
     #[serde(default = "default_restart_on_degradation")]
     pub restart_on_degradation: bool,
+    #[serde(default = "default_restart_cooldown_secs")]
+    pub restart_cooldown_secs: u64,
 }
 
 fn default_max_restart_attempts() -> u32 {
@@ -391,6 +393,10 @@ fn default_max_restart_attempts() -> u32 {
 
 fn default_restart_on_degradation() -> bool {
     true
+}
+
+fn default_restart_cooldown_secs() -> u64 {
+    10
 }
 
 impl Default for ServerConfig {
@@ -414,6 +420,7 @@ impl Default for ServerConfig {
             model_architecture: ModelArchitecture::default(),
             max_restart_attempts: default_max_restart_attempts(),
             restart_on_degradation: default_restart_on_degradation(),
+            restart_cooldown_secs: default_restart_cooldown_secs(),
         }
     }
 }
@@ -631,6 +638,7 @@ mod tests {
                 model_architecture: ModelArchitecture::Recurrent,
                 max_restart_attempts: 5,
                 restart_on_degradation: true,
+                restart_cooldown_secs: 10,
             },
         );
 
