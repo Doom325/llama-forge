@@ -175,6 +175,7 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
                 flash_attn,
                 lora_adapters,
                 estimated_vram_mb,
+                shutdown_drain_timeout_secs: None,
                 speculative_method,
                 model_architecture,
             },

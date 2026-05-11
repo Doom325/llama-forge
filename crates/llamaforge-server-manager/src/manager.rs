@@ -12,8 +12,7 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-/// Local definition for now since the real one doesn't exist in a unified way.
-pub trait MetricsStore: Send + Sync + 'static {}
+use llamaforge_metrics::MetricsIngest;
 
 use crate::error::ServerManagerError;
 use crate::state::{ServerState, ServerStateSnapshot};
@@ -29,8 +28,8 @@ pub struct ServerManager {
     vram_ledger: Arc<parking_lot::Mutex<HashMap<GpuId, u64>>>,
     gpu_telemetry: Arc<dyn GpuTelemetry>,
     config: Arc<ConfigHandle>,
-    // metrics_ingest will go here
-    metrics_store: Arc<dyn MetricsStore>,
+    metrics_ingest: MetricsIngest,
+    metrics_store: Arc<llamaforge_metrics::InstrumentedMetricsStore>,
     shutdown_token: CancellationToken,
     client_refresh_tx: broadcast::Sender<ClientRefreshEvent>,
     pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>,
@@ -43,7 +42,8 @@ impl ServerManager {
     pub fn new(
         gpu_telemetry: Arc<dyn GpuTelemetry>,
         config: Arc<ConfigHandle>,
-        metrics_store: Arc<dyn MetricsStore>,
+        metrics_ingest: MetricsIngest,
+        metrics_store: Arc<llamaforge_metrics::InstrumentedMetricsStore>,
         shutdown_token: CancellationToken,
     ) -> Self {
         let (client_refresh_tx, _) = broadcast::channel(32);
@@ -52,6 +52,7 @@ impl ServerManager {
             vram_ledger: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             gpu_telemetry,
             config,
+            metrics_ingest,
             metrics_store,
             shutdown_token,
             client_refresh_tx,
@@ -94,12 +95,11 @@ impl ServerManager {
         gpu_id: &GpuId,
         meta: &GgufMetadata,
     ) -> Result<(), ServerManagerError> {
-        let needed_mb = compute_vram_estimate(server_config, meta) / (1024 * 1024);
+        let needed_bytes = compute_vram_estimate(server_config, meta);
 
         let mut ledger = self.vram_ledger.lock();
 
         let reserved_bytes = ledger.get(gpu_id).copied().unwrap_or(0);
-        let reserved_mb = reserved_bytes / (1024 * 1024);
 
         let free_vram_bytes = match self.gpu_telemetry.free_vram_bytes(gpu_id) {
             Ok(bytes) => bytes,
@@ -115,23 +115,20 @@ impl ServerManager {
 
         if free_vram_bytes == u64::MAX {
             // Unbounded fallback
-            let needed_bytes = needed_mb * 1024 * 1024;
             *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
             return Ok(());
         }
 
-        let free_vram_mb = free_vram_bytes / (1024 * 1024);
-        let effective_free_mb = free_vram_mb.saturating_sub(reserved_mb);
+        let effective_free_bytes = free_vram_bytes.saturating_sub(reserved_bytes);
 
-        if needed_mb > effective_free_mb {
+        if needed_bytes > effective_free_bytes {
             return Err(ServerManagerError::InsufficientVram {
                 gpu: gpu_id.clone(),
-                needed_mb,
-                free_mb: effective_free_mb,
+                needed_mb: needed_bytes / (1024 * 1024),
+                free_mb: effective_free_bytes / (1024 * 1024),
             });
         }
 
-        let needed_bytes = needed_mb * 1024 * 1024;
         *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
 
         Ok(())
@@ -169,23 +166,17 @@ impl ServerManager {
     }
 
     /// Returns snapshots of all currently running servers.
-    pub fn running_servers(&self) -> Vec<ServerStateSnapshot> {
+    pub fn running_servers(&self) -> Vec<(ServerId, ServerStateSnapshot)> {
         self.servers
             .iter()
             .filter(|s| s.lifecycle == ServerLifecycle::Running)
-            .map(|s| s.to_snapshot())
+            .map(|s| (s.id.clone(), s.to_snapshot()))
             .collect()
     }
 
-    /// Returns the states of all slots across all servers.
-    pub fn slot_states(&self) -> Vec<(ServerId, crate::types::SlotState)> {
-        let mut all_slots = Vec::new();
-        for server in self.servers.iter() {
-            for slot in &server.slots {
-                all_slots.push((server.id.clone(), slot.clone()));
-            }
-        }
-        all_slots
+    /// Returns the states of all slots for a specific server.
+    pub fn slot_states(&self, id: &ServerId) -> Option<Vec<crate::types::SlotState>> {
+        self.servers.get(id).map(|s| s.slots.clone())
     }
 
     // --- Task 3.4: Cumulative requests ---
@@ -232,10 +223,9 @@ impl ServerManager {
 /// Design Section 6: `Auto: max(60, min(ctx_size/30, 600))`.
 #[allow(dead_code)]
 pub fn resolve_drain_timeout(config: &ServerConfig) -> Duration {
-    // If we had a config field for it, we'd use it:
-    // if let Some(secs) = config.shutdown_drain_timeout_secs {
-    //     return Duration::from_secs(secs);
-    // }
+    if let Some(secs) = config.shutdown_drain_timeout_secs {
+        return Duration::from_secs(secs);
+    }
 
     let ctx = config.ctx_size as u64;
     let computed = ctx / 30;
@@ -286,34 +276,37 @@ mod tests {
         }
     }
 
-    struct MockMetricsStore;
-    impl super::MetricsStore for MockMetricsStore {}
-
     use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
     use tempfile::TempDir;
 
-    fn get_test_config() -> Arc<ConfigHandle> {
-        let tmp = TempDir::new().unwrap();
+    fn get_test_config(tmp: &TempDir) -> Arc<ConfigHandle> {
         let main_path = tmp.path().join("llamaforge.toml");
+        let state_dir = tmp.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
         std::fs::write(&main_path, b"[metrics]\n").unwrap();
-        let paths = ConfigPaths::new(
-            main_path,
-            tmp.path().join("priority_rules.toml"),
-            tmp.path().join("state"),
-        );
+        let paths = ConfigPaths::new(main_path, tmp.path().join("priority_rules.toml"), state_dir);
         let source = Arc::new(TomlFileConfigSource::new(paths));
         Arc::new(ConfigHandle::load(source).unwrap())
     }
 
-    #[test]
-    fn test_vram_ledger() {
+    #[tokio::test]
+    async fn test_vram_ledger() {
+        let _tmp_db = tempfile::TempDir::new().unwrap();
         let telemetry =
             Arc::new(MockTelemetry { free_vram: 10 * 1024 * 1024 * 1024, is_unavailable: false });
-        let config = get_test_config();
-        let metrics = Arc::new(MockMetricsStore);
+        let config = get_test_config(&_tmp_db);
+
+        let db_path = _tmp_db.path().join("metrics.db");
+        let pipeline = llamaforge_metrics::create_metrics_pipeline(
+            &llamaforge_metrics::MetricsConfig { db_path, ..Default::default() },
+            config.clone(),
+        )
+        .unwrap();
+        let metrics = pipeline.store;
+        let ingest = pipeline.ingest;
         let token = CancellationToken::new();
 
-        let manager = ServerManager::new(telemetry, config, metrics, token);
+        let manager = ServerManager::new(telemetry, config, ingest, metrics, token);
         let server_config = ServerConfig::default();
         let gpu = GpuId(0);
         let meta = GgufMetadata {
@@ -326,9 +319,7 @@ mod tests {
             file_size_bytes: 4_000_000_000,
         };
 
-        let est = compute_vram_estimate(&server_config, &meta);
-        let needed_mb = est / (1024 * 1024);
-        let expected_bytes = needed_mb * 1024 * 1024;
+        let expected_bytes = compute_vram_estimate(&server_config, &meta);
 
         assert!(manager.pre_spawn_vram_check(&server_config, &gpu, &meta).is_ok());
         assert_eq!(*manager.vram_ledger.lock().get(&gpu).unwrap(), expected_bytes);
@@ -337,14 +328,22 @@ mod tests {
         assert_eq!(*manager.vram_ledger.lock().get(&gpu).unwrap(), 0);
     }
 
-    #[test]
-    fn test_accessors_and_requests() {
+    #[tokio::test]
+    async fn test_accessors_and_requests() {
         let telemetry = Arc::new(MockTelemetry { free_vram: 0, is_unavailable: true });
-        let config = get_test_config();
-        let metrics = Arc::new(MockMetricsStore);
+        let _tmp_db = tempfile::TempDir::new().unwrap();
+        let config = get_test_config(&_tmp_db);
+        let db_path = _tmp_db.path().join("metrics2.db");
+        let pipeline = llamaforge_metrics::create_metrics_pipeline(
+            &llamaforge_metrics::MetricsConfig { db_path, ..Default::default() },
+            config.clone(),
+        )
+        .unwrap();
+        let metrics = pipeline.store;
+        let ingest = pipeline.ingest;
         let token = CancellationToken::new();
 
-        let manager = ServerManager::new(telemetry, config, metrics, token);
+        let manager = ServerManager::new(telemetry, config, ingest, metrics, token);
         let srv_id = ServerId("srv1".into());
 
         manager.servers.insert(
@@ -366,6 +365,7 @@ mod tests {
                 last_n_decoded: HashMap::new(),
                 gpu_id: GpuId(0),
                 gguf_metadata: None,
+                reserved_vram_bytes: 0,
             },
         );
 

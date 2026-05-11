@@ -11,6 +11,7 @@ pub enum GgufError {
     Malformed,
     #[error("I/O Error: {0}")]
     Io(#[from] std::io::Error),
+    #[allow(dead_code)]
     #[error("Unsupported GGUF version: {0}")]
     UnsupportedVersion(u32),
 }
@@ -52,35 +53,9 @@ pub async fn parse_gguf(path: &Path) -> Result<GgufMetadata, GgufError> {
 }
 
 #[allow(dead_code)]
-fn sync_parse(path: &Path) -> Result<GgufMetadata, GgufError> {
-    use std::fs::File;
-    use std::io::Read;
-
-    let mut file = File::open(path)?;
-    let file_size_bytes = file.metadata()?.len();
-
-    let mut header = [0u8; 8];
-    let bytes_read = file.read(&mut header)?;
-
-    if bytes_read < 8 || &header[0..4] != b"GGUF" {
-        return Err(GgufError::Malformed);
-    }
-
-    let version = u32::from_le_bytes(header[4..8].try_into().unwrap());
-    if version != 2 && version != 3 {
-        return Err(GgufError::UnsupportedVersion(version));
-    }
-
-    // This is a minimal stub for now.
-    Ok(GgufMetadata {
-        architecture: ModelArchitecture::Llama,
-        block_count: 32,
-        embedding_length: 4096,
-        head_count: 32,
-        head_count_kv: 8,
-        quantization: Quantization::Q4_K_M,
-        file_size_bytes,
-    })
+fn sync_parse(_path: &Path) -> Result<GgufMetadata, GgufError> {
+    // Stubbed until real KV parser is implemented in a future PR
+    Err(GgufError::Malformed)
 }
 
 pub fn compute_vram_estimate(config: &ServerConfig, meta: &GgufMetadata) -> u64 {
@@ -180,7 +155,9 @@ mod tests {
 
         let ok_path = make_tiny_gguf(&tmp, "llama", "Q4_K_M");
         let result = parse_gguf(&ok_path).await;
-        assert!(result.is_ok());
+        // Due to PR3 reviewer feedback, parse_gguf is hard-stubbed to return Malformed
+        // so downstream can't consume fake data until a real parser lands.
+        assert!(matches!(result, Err(GgufError::Malformed)));
 
         let malformed_path = make_malformed_gguf(&tmp);
         let result = parse_gguf(&malformed_path).await;
@@ -188,6 +165,7 @@ mod tests {
 
         let unsupported_path = make_unsupported_gguf(&tmp);
         let result = parse_gguf(&unsupported_path).await;
-        assert!(matches!(result, Err(GgufError::UnsupportedVersion(1))));
+        // Stubbed function doesn't check versions anymore.
+        assert!(matches!(result, Err(GgufError::Malformed)));
     }
 }

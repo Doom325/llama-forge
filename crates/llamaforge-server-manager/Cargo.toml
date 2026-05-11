@@ -29,7 +29,6 @@ tracing-subscriber = { workspace = true }
 typed-builder = { workspace = true }
 metrics-util = { workspace = true, features = ["debugging"] }
 serde_json = { workspace = true }
-async-trait = "0.1"
 
 [features]
 test-utils = ["dep:axum", "dep:tower"]

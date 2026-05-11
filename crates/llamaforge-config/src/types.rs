@@ -374,6 +374,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub estimated_vram_mb: Option<u64>,
     #[serde(default)]
+    pub shutdown_drain_timeout_secs: Option<u64>,
+    #[serde(default)]
     pub speculative_method: SpeculativeMethod,
     #[serde(default)]
     pub model_architecture: ModelArchitecture,
@@ -395,6 +397,7 @@ impl Default for ServerConfig {
             flash_attn: FlashAttnMode::default(),
             lora_adapters: Vec::new(),
             estimated_vram_mb: None,
+            shutdown_drain_timeout_secs: None,
             speculative_method: SpeculativeMethod::default(),
             model_architecture: ModelArchitecture::default(),
         }
@@ -609,6 +612,7 @@ mod tests {
                     scale: 0.5,
                 }],
                 estimated_vram_mb: Some(1024),
+                shutdown_drain_timeout_secs: None,
                 speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
                 model_architecture: ModelArchitecture::Recurrent,
             },

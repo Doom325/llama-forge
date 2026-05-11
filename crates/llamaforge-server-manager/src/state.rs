@@ -52,6 +52,8 @@ pub(crate) struct ServerState {
     pub gpu_id: GpuId,
     /// Cached metadata to avoid re-parsing on restarts.
     pub gguf_metadata: Option<Arc<crate::vram_estimate::GgufMetadata>>,
+    /// Amount of VRAM reserved for this server in bytes.
+    pub reserved_vram_bytes: u64,
 }
 
 impl ServerState {
@@ -104,6 +106,7 @@ mod tests {
             last_n_decoded: HashMap::new(),
             gpu_id: GpuId(0),
             gguf_metadata: None,
+            reserved_vram_bytes: 0,
         };
 
         let snapshot = state.to_snapshot();
