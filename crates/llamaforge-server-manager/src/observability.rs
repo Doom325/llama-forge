@@ -70,54 +70,40 @@ where
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         struct Visitor {
             server_id: Option<String>,
-            health_fail: bool,
-            degraded: bool,
-            deadlock: bool,
-            stopped: bool,
+            restarted: bool,
+            reason: Option<String>,
         }
 
         impl tracing::field::Visit for Visitor {
             fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
                 if field.name() == "server.id" {
                     self.server_id = Some(value.to_string());
+                } else if field.name() == "reason" {
+                    self.reason = Some(value.to_string());
                 }
             }
             fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
                 if field.name() == "server.id" {
                     self.server_id = Some(format!("{:?}", value));
+                } else if field.name() == "reason" {
+                    self.reason = Some(format!("{:?}", value));
                 }
             }
             fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
-                match field.name() {
-                    "server.health_fail" => self.health_fail = value,
-                    "server.performance_degraded" => self.degraded = value,
-                    "server.deadlock_detected" => self.deadlock = value,
-                    "server.stopped" => self.stopped = value,
-                    _ => {}
+                if field.name() == "server.restarted" {
+                    self.restarted = value;
                 }
             }
         }
 
-        let mut visitor = Visitor {
-            server_id: None,
-            health_fail: false,
-            degraded: false,
-            deadlock: false,
-            stopped: false,
-        };
+        let mut visitor = Visitor { server_id: None, restarted: false, reason: None };
         event.record(&mut visitor);
 
         if let Some(id) = visitor.server_id {
             // In the PR6 requirements: reason ∈ {crash, health_fail, degradation, deadlock, config}
-            if visitor.deadlock {
-                metrics::counter!("llamaforge_server_restarts_total", "server_id" => id, "reason" => "deadlock").increment(1);
-            } else if visitor.degraded {
-                metrics::counter!("llamaforge_server_restarts_total", "server_id" => id, "reason" => "degradation").increment(1);
-            } else if visitor.health_fail {
-                metrics::counter!("llamaforge_server_restarts_total", "server_id" => id, "reason" => "health_fail").increment(1);
-            } else if visitor.stopped {
-                // If it stopped and we restart it, we can call it a crash
-                metrics::counter!("llamaforge_server_restarts_total", "server_id" => id, "reason" => "crash").increment(1);
+            if visitor.restarted {
+                let reason = visitor.reason.unwrap_or_else(|| "crash".to_string());
+                metrics::counter!("llamaforge_server_restarts_total", "server_id" => id, "reason" => reason).increment(1);
             }
         }
     }
@@ -133,20 +119,19 @@ pub fn spawn_metrics_poller(mgr: Arc<ServerManager>) {
             interval.tick().await;
 
             // Gather metrics from DashMaps
-            for state in mgr.running_servers() {
-                let s_id = state.0.to_string();
-                let status_val = match state.1.lifecycle {
+            for state in mgr.servers.iter() {
+                let s_id = state.id.to_string();
+                let status_val = match state.lifecycle {
                     ServerLifecycle::Stopped => 0.0,
-                    ServerLifecycle::Starting => 1.0,
-                    ServerLifecycle::Running => 2.0,
-                    ServerLifecycle::Draining | ServerLifecycle::Restarting => 1.5,
+                    ServerLifecycle::Starting | ServerLifecycle::Restarting => 1.0,
+                    ServerLifecycle::Running | ServerLifecycle::Draining => 2.0,
                     ServerLifecycle::Failed => 3.0,
                 };
                 metrics::gauge!("llamaforge_server_status", "server_id" => s_id.clone())
                     .set(status_val);
 
                 // Uptime
-                if let Some(started) = state.1.last_health_check {
+                if let Some(started) = state.first_health_ok_at {
                     let uptime = started.elapsed().as_secs_f64();
                     metrics::gauge!("llamaforge_server_uptime_seconds", "server_id" => s_id)
                         .set(uptime);

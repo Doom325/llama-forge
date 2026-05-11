@@ -17,6 +17,18 @@ use crate::types::ServerLifecycle;
 use crate::types::SlotState;
 use crate::vram_estimate::{parse_gguf, GgufError, GgufMetadata};
 
+pub(crate) fn compute_backoff_delay(restart_count: u32, cooldown_base: f64) -> f64 {
+    let max_delay = cooldown_base * 4.0;
+    let mut base_delay = cooldown_base * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
+    if base_delay > max_delay {
+        base_delay = max_delay;
+    }
+
+    let jitter_range = base_delay * 0.2;
+    let jitter = (rand::random::<f64>() * 2.0 * jitter_range) - jitter_range;
+    (base_delay + jitter).max(1.0)
+}
+
 pub(crate) fn release_permit_with_stagger(
     permit: tokio::sync::OwnedSemaphorePermit,
     stagger_secs: u64,
@@ -104,6 +116,8 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
                 .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)));
             entry.value().clone()
         };
+        // INVARIANT: The Arc<Semaphore> is owned by the DashMap which has the same lifetime as ServerManager.
+        // We only insert and acquire, never close the semaphore.
         let mut permit = Some(gpu_semaphore.acquire_owned().await.expect("Semaphore closed"));
 
         if let Err(e) = mgr.pre_spawn_vram_check(&server_id, &config, &gpu_id, &meta_ref) {
@@ -197,7 +211,7 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         }
 
         restart_count += 1;
-        if restart_count > max_restarts {
+        if restart_count >= max_restarts {
             error!(server.id = %server_id, "Max restarts exceeded");
             transition_to(&mgr, &server_id, ServerLifecycle::Failed);
             break;
@@ -206,15 +220,7 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         info!(server.id = %server_id, "Backing off before restart {}", restart_count);
 
         let cooldown_base = config.restart_cooldown_secs as f64;
-        let max_delay = cooldown_base * 4.0;
-        let mut base_delay = cooldown_base * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
-        if base_delay > max_delay {
-            base_delay = max_delay;
-        }
-
-        let jitter_range = base_delay * 0.2;
-        let jitter = (rand::random::<f64>() * 2.0 * jitter_range) - jitter_range;
-        let delay_secs = (base_delay + jitter).max(1.0);
+        let delay_secs = compute_backoff_delay(restart_count, cooldown_base);
 
         sleep(Duration::from_secs_f64(delay_secs)).await;
     }
@@ -346,15 +352,19 @@ async fn monitor_loop(
             // Health tick
             _ = health_interval.tick() => {
                 let mut is_dl = false;
-                if let Some(state) = mgr.servers.get(server_id) {
+                let dl_args = mgr.servers.get(server_id).map(|s| {
+                    (s.slots.clone(), s.last_n_decoded.clone(), s.first_health_ok_at, s.gpu_id.clone())
+                });
+
+                if let Some((slots, last_n_decoded, first_health_ok_at, gpu_id)) = dl_args {
                     is_dl = crate::health::is_deadlocked(
                         pid,
                         mgr.pending_dispatches(server_id),
-                        &state.slots,
-                        &state.last_n_decoded,
-                        state.first_health_ok_at,
+                        &slots,
+                        &last_n_decoded,
+                        first_health_ok_at,
                         &*mgr.gpu_telemetry,
-                        &state.gpu_id,
+                        &gpu_id,
                     ).await;
                 }
 
@@ -403,6 +413,7 @@ async fn monitor_loop(
                             if consecutive_health_failures >= 3 {
                                 warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
                                 transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
                                 return true; // Restart
                             }
                         }
@@ -413,6 +424,7 @@ async fn monitor_loop(
                         if consecutive_health_failures >= 3 {
                             warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
                             transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                            info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
                             return true; // Restart
                         }
                     }
@@ -486,6 +498,7 @@ async fn monitor_loop(
                                         "Server performance significantly degraded, restarting."
                                     );
                                     transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                    info!(server.id = %server_id, server.restarted = true, reason = "degradation", "Server restarting");
                                     return true;
                                 }
                                 DegradationAction::WarnOnly => {
@@ -600,5 +613,34 @@ mod tests {
             check_degradation(8.0, 50, Some(10.0), &[normal_slot], 4096, true, &mut consec);
         assert!(matches!(action, DegradationAction::None));
         assert_eq!(consec, 0);
+    }
+
+    #[test]
+    fn test_backoff_math() {
+        let base = 10.0;
+
+        // Attempt 1
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(1, base);
+            assert!((8.0..=12.0).contains(&delay));
+        }
+
+        // Attempt 2
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(2, base);
+            assert!((16.0..=24.0).contains(&delay));
+        }
+
+        // Attempt 3
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(3, base);
+            assert!((32.0..=48.0).contains(&delay));
+        }
+
+        // Attempt 4 (capped)
+        for _ in 0..100 {
+            let delay = compute_backoff_delay(4, base);
+            assert!((32.0..=48.0).contains(&delay));
+        }
     }
 }
