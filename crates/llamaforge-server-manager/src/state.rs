@@ -54,6 +54,8 @@ pub(crate) struct ServerState {
     pub gguf_metadata: Option<Arc<crate::vram_estimate::GgufMetadata>>,
     /// Amount of VRAM reserved for this server in bytes.
     pub reserved_vram_bytes: u64,
+    /// Token used to signal this specific server task to shutdown.
+    pub task_shutdown_token: tokio_util::sync::CancellationToken,
 }
 
 impl ServerState {
@@ -107,6 +109,7 @@ mod tests {
             gpu_id: GpuId(0),
             gguf_metadata: None,
             reserved_vram_bytes: 0,
+            task_shutdown_token: tokio_util::sync::CancellationToken::new(),
         };
 
         let snapshot = state.to_snapshot();

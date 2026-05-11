@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use llamaforge_config::{ConfigHandle, ConfigReader, GpuId, ServerConfig, ServerId};
+use llamaforge_config::{ConfigDiff, ConfigHandle, ConfigReader, GpuId, ServerConfig, ServerId};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use llamaforge_metrics::MetricsIngest;
+use llamaforge_metrics::{MetricsIngest, ProcessStore};
 
 use crate::error::ServerManagerError;
 use crate::state::{ServerState, ServerStateSnapshot};
@@ -70,18 +70,80 @@ impl ServerManager {
     pub async fn start(self: Arc<Self>) -> Result<Arc<Self>, ServerManagerError> {
         let app_config = self.config.snapshot();
 
+        // Task 7.4: Orphan Recovery (FM-1)
+        let mut adopted_pids = std::collections::HashMap::new();
+        if let Ok(procs) = self.metrics_store.list_managed_processes().await {
+            match reqwest::Client::builder().timeout(std::time::Duration::from_secs(1)).build() {
+                Ok(client) => {
+                    for proc in procs {
+                        #[cfg(unix)]
+                        {
+                            use nix::sys::signal::kill;
+                            use nix::unistd::Pid;
+                            if kill(Pid::from_raw(proc.pid.0 as i32), None).is_err() {
+                                // Not alive, delete row
+                                let _ = self.metrics_store.remove_managed_process(proc.pid).await;
+                                continue;
+                            }
+                        }
+
+                        // Alive, check health
+                        let url = format!("http://127.0.0.1:{}/health", proc.port);
+                        let mut adopted = false;
+                        if let Ok(resp) = client.get(&url).send().await {
+                            if resp.status().is_success() {
+                                // Verify it matches a configured server
+                                if let Some(server_config) = app_config.servers.get(&proc.server_id)
+                                {
+                                    let expected_alias =
+                                        server_config.alias.as_deref().unwrap_or("default");
+                                    if expected_alias == proc.model_alias {
+                                        tracing::info!(
+                                            server.id = %proc.server_id,
+                                            server.orphan_reclaimed = true,
+                                            pid = proc.pid.0,
+                                            "Adopted orphaned server process"
+                                        );
+                                        adopted_pids.insert(proc.server_id.clone(), proc.pid.0);
+                                        adopted = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if !adopted {
+                            tracing::warn!(
+                                server.id = %proc.server_id,
+                                pid = proc.pid.0,
+                                "orphan_unowned: Live process found but health check failed or model mismatched. Leaving untouched."
+                            );
+                            let _ = self.metrics_store.remove_managed_process(proc.pid).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to build reqwest client for orphan recovery: {}. Skipping orphan recovery.", e);
+                }
+            }
+        }
+
         for (server_id, server_config) in &app_config.servers {
             let srv = server_id.clone();
             let cfg = server_config.clone();
             let mgr = self.clone();
+            let orphan_pid = adopted_pids.get(&srv).copied();
 
             // Insert initial state
             mgr.servers.insert(
                 srv.clone(),
                 ServerState {
                     id: srv.clone(),
-                    lifecycle: ServerLifecycle::Starting, // Initially Starting as per spawn logic
-                    pid: None,
+                    lifecycle: if orphan_pid.is_some() {
+                        ServerLifecycle::Running
+                    } else {
+                        ServerLifecycle::Starting
+                    },
+                    pid: orphan_pid,
                     port: cfg.port,
                     model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
                     parallel_slots: cfg.parallel_slots,
@@ -91,7 +153,11 @@ impl ServerManager {
                     restart_count: 0,
                     cumulative_requests: 0,
                     capabilities: None,
-                    first_health_ok_at: None,
+                    first_health_ok_at: if orphan_pid.is_some() {
+                        Some(std::time::Instant::now())
+                    } else {
+                        None
+                    },
                     last_n_decoded: std::collections::HashMap::new(),
                     gpu_id: cfg
                         .devices
@@ -100,15 +166,173 @@ impl ServerManager {
                         .unwrap_or_else(|| GpuId(0)),
                     gguf_metadata: None,
                     reserved_vram_bytes: 0,
+                    task_shutdown_token: tokio_util::sync::CancellationToken::new(),
                 },
             );
 
             self.tasks.lock().await.spawn(async move {
-                crate::task::spawn_server_task(mgr, srv, cfg).await;
+                crate::task::spawn_server_task(mgr, srv, cfg, orphan_pid).await;
             });
         }
 
         Ok(self)
+    }
+
+    // --- Task 7.1: Implement apply_config_diff ---
+
+    pub async fn apply_config_diff(self: &Arc<Self>, diff: &ConfigDiff) {
+        let app_config = self.config.snapshot();
+
+        // Removed servers
+        for server_id in diff.servers_removed() {
+            self.stop_server(server_id).await;
+            loop {
+                let state = self.servers.get(server_id).map(|s| s.lifecycle);
+                if state == Some(ServerLifecycle::Stopped) || state.is_none() {
+                    self.servers.remove(server_id);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+
+        // Changed servers
+        for (server_id, srv_diff) in diff.servers_changed() {
+            if srv_diff.requires_restart() {
+                self.stop_server(server_id).await;
+                loop {
+                    let state = self.servers.get(server_id).map(|s| s.lifecycle);
+                    if state == Some(ServerLifecycle::Stopped) || state.is_none() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+
+                if let Some(server_config) = app_config.servers.get(server_id) {
+                    let srv = server_id.clone();
+                    let cfg = server_config.clone();
+                    let mgr = self.clone();
+
+                    mgr.servers.insert(
+                        srv.clone(),
+                        ServerState {
+                            id: srv.clone(),
+                            lifecycle: ServerLifecycle::Starting,
+                            pid: None,
+                            port: cfg.port,
+                            model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
+                            parallel_slots: cfg.parallel_slots,
+                            ctx_size: cfg.ctx_size,
+                            slots: vec![],
+                            last_health_check: None,
+                            restart_count: 0,
+                            cumulative_requests: 0,
+                            capabilities: None,
+                            first_health_ok_at: None,
+                            last_n_decoded: std::collections::HashMap::new(),
+                            gpu_id: cfg
+                                .devices
+                                .first()
+                                .map(|d| d.gpu_id.clone())
+                                .unwrap_or_else(|| GpuId(0)),
+                            gguf_metadata: None,
+                            reserved_vram_bytes: 0,
+                            task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                        },
+                    );
+
+                    self.tasks.lock().await.spawn(async move {
+                        crate::task::spawn_server_task(mgr, srv, cfg, None).await;
+                    });
+                }
+            } else if srv_diff.hot_reloadable() {
+                if let Some(server_config) = app_config.servers.get(server_id) {
+                    if let Some(mut state) = self.servers.get_mut(server_id) {
+                        state.model_alias =
+                            server_config.alias.clone().unwrap_or_else(|| "default".to_string());
+                    }
+                }
+            }
+        }
+
+        // Added servers
+        for server_id in diff.servers_added() {
+            if let Some(server_config) = app_config.servers.get(server_id) {
+                let srv = server_id.clone();
+                let cfg = server_config.clone();
+                let mgr = self.clone();
+
+                mgr.servers.insert(
+                    srv.clone(),
+                    ServerState {
+                        id: srv.clone(),
+                        lifecycle: ServerLifecycle::Starting,
+                        pid: None,
+                        port: cfg.port,
+                        model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
+                        parallel_slots: cfg.parallel_slots,
+                        ctx_size: cfg.ctx_size,
+                        slots: vec![],
+                        last_health_check: None,
+                        restart_count: 0,
+                        cumulative_requests: 0,
+                        capabilities: None,
+                        first_health_ok_at: None,
+                        last_n_decoded: std::collections::HashMap::new(),
+                        gpu_id: cfg
+                            .devices
+                            .first()
+                            .map(|d| d.gpu_id.clone())
+                            .unwrap_or_else(|| GpuId(0)),
+                        gguf_metadata: None,
+                        reserved_vram_bytes: 0,
+                        task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                    },
+                );
+
+                self.tasks.lock().await.spawn(async move {
+                    crate::task::spawn_server_task(mgr, srv, cfg, None).await;
+                });
+            }
+        }
+    }
+
+    // --- Task 7.2: Implement stop_server ---
+
+    pub async fn stop_server(&self, server_id: &ServerId) {
+        if let Some(state) = self.servers.get(server_id) {
+            state.task_shutdown_token.cancel();
+        }
+    }
+
+    // --- Task 7.3: Implement shutdown_all ---
+
+    pub async fn shutdown_all(&self) {
+        let server_ids: Vec<ServerId> = self.servers.iter().map(|s| s.id.clone()).collect();
+
+        for id in server_ids {
+            // We can't clone self easily here if we take &self. We'll cancel all tokens.
+            if let Some(state) = self.servers.get(&id) {
+                state.task_shutdown_token.cancel();
+            }
+        }
+
+        // Cancel the global shutdown token too
+        self.shutdown_token.cancel();
+
+        // Wait for all tasks to finish
+        let mut tasks = self.tasks.lock().await;
+        while tasks.join_next().await.is_some() {}
+
+        // Clear VRAM ledger completely
+        self.vram_ledger.lock().clear();
+
+        // Delete all rows from managed_processes
+        if let Ok(procs) = self.metrics_store.list_managed_processes().await {
+            for proc in procs {
+                let _ = self.metrics_store.remove_managed_process(proc.pid).await;
+            }
+        }
     }
 
     // --- Task 3.1a: pending_dispatches API surface ---
@@ -220,6 +444,10 @@ impl ServerManager {
     }
 
     // --- Task 3.3: State accessors ---
+
+    pub fn config(&self) -> Arc<ConfigHandle> {
+        self.config.clone()
+    }
 
     pub fn vram_ledger(&self) -> HashMap<GpuId, u64> {
         self.vram_ledger.lock().clone()
@@ -408,9 +636,10 @@ mod tests {
                 capabilities: None,
                 first_health_ok_at: None,
                 last_n_decoded: HashMap::new(),
-                gpu_id: gpu.clone(),
+                gpu_id: GpuId(0),
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
+                task_shutdown_token: tokio_util::sync::CancellationToken::new(),
             },
         );
 
@@ -461,6 +690,7 @@ mod tests {
                 gpu_id: GpuId(0),
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
+                task_shutdown_token: tokio_util::sync::CancellationToken::new(),
             },
         );
 
