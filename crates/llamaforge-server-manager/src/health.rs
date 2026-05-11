@@ -5,12 +5,11 @@ use reqwest::Client;
 use std::time::{Duration, Instant};
 
 /// Creates a new long-lived reqwest client for a server task.
-pub fn create_health_client() -> Client {
+pub fn create_health_client() -> Result<Client, reqwest::Error> {
     Client::builder()
         .connect_timeout(Duration::from_secs(1))
         .timeout(Duration::from_secs(10)) // Max timeout across endpoints
         .build()
-        .expect("Failed to build reqwest client")
 }
 
 /// A fixed-size ring buffer for tracking token-per-second (TPS) observations.

@@ -15,27 +15,49 @@ struct MockState {
 
 #[tokio::main]
 async fn main() {
-    let mut mock_port = std::env::var("MOCK_PORT").unwrap_or_else(|_| "8080".to_string()).parse::<u16>().unwrap();
-    
-    // Parse --port from args
+    let mut mock_port = 8080;
+    let mut health_fail_after: Option<u32> = None;
+    let mut hang_after: Option<u32> = None;
+    let mut exit_after_secs: Option<u64> = None;
+    let mut model_alias = "mock".to_string();
+    let mut tps = 10.0;
+
+    // Parse --port and --alias from args
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        if arg == "--port" {
-            if let Some(p) = args.next() {
-                mock_port = p.parse().unwrap();
+        match arg.as_str() {
+            "--port" => {
+                if let Some(p) = args.next() {
+                    mock_port = p.parse().unwrap();
+                }
             }
+            "--alias" => {
+                if let Some(a) = args.next() {
+                    // For tests, we pack mock config into the alias field separated by commas
+                    // Format: "alias_name,health_fail_after=1,tps=0.1"
+                    let parts: Vec<&str> = a.split(',').collect();
+                    if !parts.is_empty() {
+                        model_alias = parts[0].to_string();
+                    }
+                    for part in parts.iter().skip(1) {
+                        let kv: Vec<&str> = part.split('=').collect();
+                        if kv.len() == 2 {
+                            match kv[0] {
+                                "health_fail_after" => health_fail_after = kv[1].parse().ok(),
+                                "hang_after" => hang_after = kv[1].parse().ok(),
+                                "exit_after_secs" => exit_after_secs = kv[1].parse().ok(),
+                                "tps" => tps = kv[1].parse().ok().unwrap_or(10.0),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
-    
-    let port = mock_port;
-    let health_fail_after =
-        std::env::var("MOCK_HEALTH_FAIL_AFTER").ok().and_then(|v| v.parse::<u32>().ok());
-    let hang_after = std::env::var("MOCK_HANG_AFTER").ok().and_then(|v| v.parse::<u32>().ok());
-    let exit_after_secs =
-        std::env::var("MOCK_EXIT_AFTER_SECS").ok().and_then(|v| v.parse::<u64>().ok());
-    let model_alias = std::env::var("MOCK_MODEL_ALIAS").unwrap_or_else(|_| "mock".to_string());
-    let tps = std::env::var("MOCK_TPS").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(10.0);
 
+    let port = mock_port;
     let state = Arc::new(MockState::default());
 
     if let Some(secs) = exit_after_secs {

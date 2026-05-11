@@ -32,13 +32,14 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
         r#"
 [servers.srv_test]
 model_path = "{}"
+alias = "mock"
 port = {}
 ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
         env!("CARGO_BIN_EXE_mock-llama"),
-        mock_port
+        mock_port,
     ));
 
     std::fs::write(&main_path, config_str).unwrap();
@@ -47,11 +48,14 @@ estimated_vram_mb = 100
     Arc::new(ConfigHandle::load(source).unwrap())
 }
 
+static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18200);
+
 #[tokio::test]
 async fn test_process_lifecycle_external_kill() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
-    let config = get_test_config(&tmp, 18080);
+    let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let config = get_test_config(&tmp, port);
     let db_path = tmp.path().join("metrics.db");
 
     let pipeline = create_metrics_pipeline(
@@ -120,18 +124,16 @@ async fn test_process_lifecycle_external_kill() {
 
     // The ledger should be cleared on exit
     let _gpu = llamaforge_config::GpuId(0);
-    // Note: The ledger might be immediately re-reserved by the next start attempt,
-    // but we can check if the row was removed before the next start.
-    // It's hard to definitively check a transient state like ledger cleared between restarts without injecting delays.
-    // Instead we can just check if row was removed.
     let procs_after = pipeline.store.list_managed_processes().await.unwrap();
     assert!(!procs_after.iter().any(|p| p.pid.0 == pid), "managed_processes row was not removed");
 }
 
 #[tokio::test]
 async fn test_process_lifecycle_shutdown() {
+    let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
-    let config = get_test_config(&tmp, 18081);
+    let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let config = get_test_config(&tmp, port);
     let db_path = tmp.path().join("metrics2.db");
 
     let pipeline = create_metrics_pipeline(
