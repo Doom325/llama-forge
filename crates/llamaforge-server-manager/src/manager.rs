@@ -508,6 +508,13 @@ impl ServerManager {
     pub fn subscribe_client_refresh(&self) -> broadcast::Receiver<ClientRefreshEvent> {
         self.client_refresh_tx.subscribe()
     }
+
+    #[cfg(feature = "test-utils")]
+    pub fn set_cumulative_requests_for_test(&self, id: &ServerId, count: u64) {
+        if let Some(mut state) = self.servers.get_mut(id) {
+            state.cumulative_requests = count;
+        }
+    }
 }
 
 // --- Task 3.2b: resolve_drain_timeout ---

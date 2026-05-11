@@ -153,3 +153,91 @@ async fn test_e2e_lifecycle() {
 
     token.cancel();
 }
+
+#[derive(Clone)]
+struct SharedWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+    type Writer = SharedWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+#[tokio::test]
+async fn test_id_task_overflow() {
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = SharedWriter(output.clone());
+
+    let subscriber = tracing_subscriber::fmt().with_writer(writer).finish();
+
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let tmp = TempDir::new().unwrap();
+    let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+    let config = get_test_config(&tmp, port);
+    let db_path = tmp.path().join(format!("metrics_{}.db", port));
+
+    let pipeline = create_metrics_pipeline(
+        &llamaforge_metrics::MetricsConfig { db_path: db_path.clone(), ..Default::default() },
+        config.clone(),
+    )
+    .unwrap();
+
+    let token = CancellationToken::new();
+    let manager = ServerManager::new(
+        Arc::new(MockTelemetry),
+        config.clone(),
+        pipeline.ingest,
+        pipeline.store.clone(),
+        token.clone(),
+    );
+
+    let mgr = Arc::new(manager);
+    let mgr_started = mgr.clone().start().await.unwrap();
+
+    let srv_id = ServerId("srv_e2e".into());
+
+    // Wait for Running
+    let mut is_running = false;
+    for _ in 0..50 {
+        if let Some(state) = mgr_started.server_state(&srv_id) {
+            if state.lifecycle == ServerLifecycle::Running {
+                is_running = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(is_running);
+
+    let threshold = (i32::MAX / 2) as u64;
+
+    // Set to threshold - 1
+    mgr_started.set_cumulative_requests_for_test(&srv_id, threshold - 1);
+
+    // Increment 3 times across the threshold
+    mgr_started.increment_requests(&srv_id); // Reaches threshold -> WARN
+    mgr_started.increment_requests(&srv_id); // threshold + 1 -> No WARN
+    mgr_started.increment_requests(&srv_id); // threshold + 2 -> No WARN
+
+    assert_eq!(mgr_started.cumulative_requests(&srv_id), threshold + 2);
+
+    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    let count = logs.matches("Consider a rolling restart soon").count();
+    assert_eq!(count, 1, "Warning should be emitted exactly once, but got {} matches", count);
+
+    token.cancel();
+}
