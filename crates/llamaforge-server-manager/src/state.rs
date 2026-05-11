@@ -2,6 +2,7 @@
 //! See design doc Section 2.3.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use llamaforge_config::{GpuId, ServerId};
@@ -49,8 +50,10 @@ pub(crate) struct ServerState {
     pub last_n_decoded: HashMap<u32, u32>,
     /// The GPU assigned to this server.
     pub gpu_id: GpuId,
-    // Cached metadata to avoid re-parsing on restarts (added in PR3).
-    // pub gguf_metadata: Option<Arc<crate::vram_estimate::GgufMetadata>>,
+    /// Cached metadata to avoid re-parsing on restarts.
+    pub gguf_metadata: Option<Arc<crate::vram_estimate::GgufMetadata>>,
+    /// Amount of VRAM reserved for this server in bytes.
+    pub reserved_vram_bytes: u64,
 }
 
 impl ServerState {
@@ -102,6 +105,8 @@ mod tests {
             first_health_ok_at: Some(Instant::now()),
             last_n_decoded: HashMap::new(),
             gpu_id: GpuId(0),
+            gguf_metadata: None,
+            reserved_vram_bytes: 0,
         };
 
         let snapshot = state.to_snapshot();
