@@ -357,18 +357,18 @@ Finalize the component with property tests, complete E2E integration tests, and 
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| [ ] 8.1 | Property test: Backoff | Ensure `forall n: backoff(n) <= backoff(n+1)` modulo jitter. | `tests/proptest_manager.rs` |
-| [ ] 8.2 | Property test: Ledger | Assert `VRAM ledger entries == servers in Starting state` under arbitrary spawn/exit sequences. | `tests/proptest_manager.rs` |
-| [ ] 8.3 | Integration test: Full Lifecycle | `start()` -> Wait for `Running` via mock health -> Dispatch -> `stop_server()` -> verify exit. | `tests/e2e_lifecycle.rs` |
-| [ ] 8.4 | Integration test: Orphan recovery | Pre-populate sqlite with running PID. Start manager, assert adopted. | `tests/e2e_lifecycle.rs` |
-| [ ] 8.5 | Finalize `lib.rs` exports | Ensure `ServerManager`, `ServerLifecycle`, `ClientRefreshEvent`, and `GpuTelemetry` are clean `pub use`. | `src/lib.rs` |
-| [ ] 8.6 | Tag slow tests | Add `#[ignore]` to tests containing actual process sleeps or HTTP timeouts. | `tests/*.rs` |
+| [x] 8.1 | Property test: Backoff | Ensure `forall n: backoff(n) <= backoff(n+1)` modulo jitter. | `tests/proptest_manager.rs` |
+| [x] 8.2 | Property test: Ledger | Assert `VRAM ledger entries == servers in Starting state` under arbitrary spawn/exit sequences. | `tests/proptest_manager.rs` |
+| [x] 8.3 | Integration test: Full Lifecycle | `start()` -> Wait for `Running` via mock health -> Dispatch -> `stop_server()` -> verify exit. | `tests/e2e_lifecycle.rs` |
+| [x] 8.4 | Integration test: Orphan recovery | Pre-populate sqlite with running PID. Start manager, assert adopted. | `tests/e2e_lifecycle.rs` |
+| [x] 8.5 | Finalize `lib.rs` exports | Ensure `ServerManager`, `ServerLifecycle`, `ClientRefreshEvent`, and `GpuTelemetry` are clean `pub use`. | `src/lib.rs` |
+| [x] 8.6 | Tag slow tests | Add `#[ignore]` to tests containing actual process sleeps or HTTP timeouts. | `tests/*.rs` |
 
 ### PR8 Acceptance Criteria
 
-- [ ] All property tests pass (256 cases)
-- [ ] E2E lifecycle tests successfully transition through all states
-- [ ] `cargo doc --no-deps -p llamaforge-server-manager` runs clean without warnings
+- [x] All property tests pass (256 cases)
+- [x] E2E lifecycle tests successfully transition through all states
+- [x] `cargo doc --no-deps -p llamaforge-server-manager` runs clean without warnings
 
 ### PR8 Creation Steps
 
