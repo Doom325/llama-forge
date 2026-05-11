@@ -91,6 +91,7 @@ impl ServerManager {
     /// Checks if sufficient VRAM is available and records a reservation if successful.
     pub fn pre_spawn_vram_check(
         &self,
+        server_id: &ServerId,
         server_config: &ServerConfig,
         gpu_id: &GpuId,
         meta: &GgufMetadata,
@@ -116,6 +117,9 @@ impl ServerManager {
         if free_vram_bytes == u64::MAX {
             // Unbounded fallback
             *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
+            if let Some(mut server) = self.servers.get_mut(server_id) {
+                server.reserved_vram_bytes = needed_bytes;
+            }
             return Ok(());
         }
 
@@ -130,6 +134,9 @@ impl ServerManager {
         }
 
         *ledger.entry(gpu_id.clone()).or_insert(0) += needed_bytes;
+        if let Some(mut server) = self.servers.get_mut(server_id) {
+            server.reserved_vram_bytes = needed_bytes;
+        }
 
         Ok(())
     }
@@ -144,16 +151,12 @@ impl ServerManager {
 
     /// Clears the VRAM reservation for a server completely.
     pub fn clear_vram_reservation(&self, server_id: &ServerId) {
-        // Find the server to get its GPU and metadata
-        if let Some(server) = self.servers.get(server_id) {
-            let _gpu_id = server.gpu_id.clone();
-            if let Some(_meta) = &server.gguf_metadata {
-                // Need ServerConfig to compute the estimate. We fetch it from the snapshot if possible.
-                // For now, this is a placeholder. Proper logic would find the config.
-                // It's usually easier to just let `release_vram_reservation` be called manually
-                // with the exact bytes computed earlier. This method handles it if config is known.
-                let _bytes = 0; // compute_vram_estimate(&config, meta);
-                                // self.release_vram_reservation(&gpu_id, bytes);
+        if let Some(mut server) = self.servers.get_mut(server_id) {
+            let gpu_id = server.gpu_id.clone();
+            let bytes = server.reserved_vram_bytes;
+            if bytes > 0 {
+                self.release_vram_reservation(&gpu_id, bytes);
+                server.reserved_vram_bytes = 0;
             }
         }
     }
@@ -321,11 +324,37 @@ mod tests {
 
         let expected_bytes = compute_vram_estimate(&server_config, &meta);
 
-        assert!(manager.pre_spawn_vram_check(&server_config, &gpu, &meta).is_ok());
-        assert_eq!(*manager.vram_ledger.lock().get(&gpu).unwrap(), expected_bytes);
+        let srv_id = ServerId("srv_vram".into());
+        manager.servers.insert(
+            srv_id.clone(),
+            ServerState {
+                id: srv_id.clone(),
+                lifecycle: ServerLifecycle::Starting,
+                pid: None,
+                port: 8080,
+                model_alias: "test".into(),
+                parallel_slots: 1,
+                ctx_size: 100,
+                slots: vec![],
+                last_health_check: None,
+                restart_count: 0,
+                cumulative_requests: 0,
+                capabilities: None,
+                first_health_ok_at: None,
+                last_n_decoded: HashMap::new(),
+                gpu_id: gpu.clone(),
+                gguf_metadata: None,
+                reserved_vram_bytes: 0,
+            },
+        );
 
-        manager.release_vram_reservation(&gpu, expected_bytes);
+        assert!(manager.pre_spawn_vram_check(&srv_id, &server_config, &gpu, &meta).is_ok());
+        assert_eq!(*manager.vram_ledger.lock().get(&gpu).unwrap(), expected_bytes);
+        assert_eq!(manager.servers.get(&srv_id).unwrap().reserved_vram_bytes, expected_bytes);
+
+        manager.clear_vram_reservation(&srv_id);
         assert_eq!(*manager.vram_ledger.lock().get(&gpu).unwrap(), 0);
+        assert_eq!(manager.servers.get(&srv_id).unwrap().reserved_vram_bytes, 0);
     }
 
     #[tokio::test]
