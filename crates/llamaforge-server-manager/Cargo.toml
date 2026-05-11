@@ -26,6 +26,7 @@ tokio-util = { workspace = true }
 metrics = { workspace = true }
 chrono = { workspace = true }
 rand = "0.8"
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
@@ -34,10 +35,9 @@ tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 typed-builder = { workspace = true }
 metrics-util = { workspace = true, features = ["debugging"] }
-serde_json = { workspace = true }
 
 [features]
-test-utils = ["dep:axum", "dep:tower", "dep:serde_json"]
+test-utils = ["dep:axum", "dep:tower"]
 gpu-nvml = []
 gpu-metal = []
 gpu-rocm = []
@@ -47,9 +47,5 @@ workspace = true
 optional = true
 
 [dependencies.tower]
-workspace = true
-optional = true
-
-[dependencies.serde_json]
 workspace = true
 optional = true

@@ -381,10 +381,16 @@ pub struct ServerConfig {
     pub model_architecture: ModelArchitecture,
     #[serde(default = "default_max_restart_attempts")]
     pub max_restart_attempts: u32,
+    #[serde(default = "default_restart_on_degradation")]
+    pub restart_on_degradation: bool,
 }
 
 fn default_max_restart_attempts() -> u32 {
     3
+}
+
+fn default_restart_on_degradation() -> bool {
+    true
 }
 
 impl Default for ServerConfig {
@@ -407,6 +413,7 @@ impl Default for ServerConfig {
             speculative_method: SpeculativeMethod::default(),
             model_architecture: ModelArchitecture::default(),
             max_restart_attempts: default_max_restart_attempts(),
+            restart_on_degradation: default_restart_on_degradation(),
         }
     }
 }
@@ -623,6 +630,7 @@ mod tests {
                 speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
                 model_architecture: ModelArchitecture::Recurrent,
                 max_restart_attempts: 5,
+                restart_on_degradation: true,
             },
         );
 

@@ -179,6 +179,7 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
                 speculative_method,
                 model_architecture,
                 max_restart_attempts: 3,
+                restart_on_degradation: true,
             },
         )
 }
