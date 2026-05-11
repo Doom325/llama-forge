@@ -162,7 +162,13 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         }
 
         info!(server.id = %server_id, "Backing off before restart {}", restart_count);
-        sleep(Duration::from_secs(2u64.pow(restart_count))).await;
+        
+        let base_delay = 10.0 * 2.0_f64.powi(restart_count.saturating_sub(1) as i32);
+        let jitter_range = base_delay * 0.2;
+        let jitter = (rand::random::<f64>() * 2.0 * jitter_range) - jitter_range;
+        let delay_secs = (base_delay + jitter).max(1.0);
+        
+        sleep(Duration::from_secs_f64(delay_secs)).await;
     }
 }
 

@@ -1,3 +1,5 @@
+#![cfg(feature = "test-utils")]
+
 use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
 use llamaforge_metrics::{create_metrics_pipeline, ProcessStore};
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
