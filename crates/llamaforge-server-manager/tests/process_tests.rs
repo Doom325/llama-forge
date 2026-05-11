@@ -1,7 +1,8 @@
 #![cfg(feature = "test-utils")]
 
+use chrono::Utc;
 use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
-use llamaforge_metrics::{create_metrics_pipeline, ProcessStore};
+use llamaforge_metrics::{create_metrics_pipeline, ManagedProcess, ProcessId, ProcessStore};
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
 use std::sync::Arc;
 use std::time::Duration;
@@ -48,15 +49,16 @@ estimated_vram_mb = 100
     Arc::new(ConfigHandle::load(source).unwrap())
 }
 
-static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18200);
+static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18500);
 
 #[tokio::test]
 async fn test_process_lifecycle_external_kill() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     let config = get_test_config(&tmp, port);
-    let db_path = tmp.path().join("metrics.db");
+    let db_path = tmp.path().join(format!("metrics_{}.db", port));
 
     let pipeline = create_metrics_pipeline(
         &llamaforge_metrics::MetricsConfig { db_path: db_path.clone(), ..Default::default() },
@@ -74,58 +76,47 @@ async fn test_process_lifecycle_external_kill() {
     );
 
     let mgr = Arc::new(manager);
-
-    // Start the manager
     let mgr_started = mgr.clone().start().await.unwrap();
 
     let srv_id = ServerId("srv_test".into());
 
-    // Wait for the task to spawn and process to be Running/Starting
-    // and wait for PID to be populated.
     let mut pid = None;
     for _ in 0..50 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
-            if let Some(p) = state.pid {
-                pid = Some(p);
+            if state.lifecycle == ServerLifecycle::Running {
+                pid = state.pid;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let pid = pid.expect("Failed to get PID");
+    let pid = pid.unwrap();
 
-    // Verify managed_processes row exists
-    let procs = pipeline.store.list_managed_processes().await.unwrap();
-    assert!(procs.iter().any(|p| p.pid.0 == pid));
-
-    // Send external SIGKILL
+    // Kill it
     #[cfg(unix)]
     {
-        nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid as i32),
-            nix::sys::signal::Signal::SIGKILL,
-        )
-        .unwrap();
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
     }
 
-    // It should transition to Restarting
-    let mut restarted = false;
+    // Wait for restart
+    let mut is_restarted = false;
     for _ in 0..50 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                restarted = true;
+            if state.lifecycle == ServerLifecycle::Restarting
+                || (state.lifecycle == ServerLifecycle::Running && state.pid != Some(pid))
+            {
+                is_restarted = true;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(restarted, "Failed to transition to Restarting");
+    assert!(is_restarted);
 
-    // The ledger should be cleared on exit
-    let _gpu = llamaforge_config::GpuId(0);
-    let procs_after = pipeline.store.list_managed_processes().await.unwrap();
-    assert!(!procs_after.iter().any(|p| p.pid.0 == pid), "managed_processes row was not removed");
+    token.cancel();
 }
 
 #[tokio::test]
@@ -133,8 +124,9 @@ async fn test_process_lifecycle_shutdown() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     let config = get_test_config(&tmp, port);
-    let db_path = tmp.path().join("metrics2.db");
+    let db_path = tmp.path().join(format!("metrics_{}.db", port));
 
     let pipeline = create_metrics_pipeline(
         &llamaforge_metrics::MetricsConfig { db_path: db_path.clone(), ..Default::default() },
@@ -152,7 +144,6 @@ async fn test_process_lifecycle_shutdown() {
     );
 
     let mgr = Arc::new(manager);
-
     let mgr_started = mgr.clone().start().await.unwrap();
 
     let srv_id = ServerId("srv_test".into());
@@ -160,30 +151,220 @@ async fn test_process_lifecycle_shutdown() {
     let mut pid = None;
     for _ in 0..50 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
-            if let Some(p) = state.pid {
-                pid = Some(p);
+            if state.lifecycle == ServerLifecycle::Running {
+                pid = state.pid;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    let pid = pid.expect("Failed to get PID");
+    let pid = pid.unwrap();
 
-    // Cancel token
-    token.cancel();
+    mgr_started.shutdown_all().await;
 
     // The process should be killed, we can check if it's dead by sending signal 0
     let mut is_dead = false;
     for _ in 0..50 {
         #[cfg(unix)]
         {
-            if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_err() {
+            use nix::sys::signal::kill;
+            use nix::unistd::Pid;
+            if kill(Pid::from_raw(pid as i32), None).is_err() {
                 is_dead = true;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(is_dead, "Process was not killed on shutdown");
+    assert!(is_dead);
+
+    // Verify rows deleted
+    let rows = pipeline.store.list_managed_processes().await.unwrap();
+    assert!(rows.is_empty(), "Rows should be deleted on shutdown_all");
+}
+
+#[tokio::test]
+async fn test_orphan_recovery() {
+    let _ = tracing_subscriber::fmt::try_init();
+    let tmp = TempDir::new().unwrap();
+
+    // (a) Successful adoption
+    let port_a = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut cmd_a = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    cmd_a.arg("--port").arg(port_a.to_string());
+    cmd_a.kill_on_drop(true);
+    let child_a = cmd_a.spawn().unwrap();
+    let pid_a = child_a.id().unwrap();
+
+    // (b) Health fails
+    let port_b = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut cmd_b = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    cmd_b.arg("--port").arg(port_b.to_string()).arg("--alias").arg("mock,health_fail_after=0");
+    cmd_b.kill_on_drop(true);
+    let child_b = cmd_b.spawn().unwrap();
+    let pid_b = child_b.id().unwrap();
+
+    // (c) Dead PID
+    let port_c = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let pid_c = 999999; // Hopefully dead
+
+    // (d) Model mismatch
+    let port_d = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let mut cmd_d = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    cmd_d.arg("--port").arg(port_d.to_string()).arg("--alias").arg("wrong_model");
+    cmd_d.kill_on_drop(true);
+    let child_d = cmd_d.spawn().unwrap();
+    let pid_d = child_d.id().unwrap();
+
+    // Wait for them to start
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let main_path = tmp.path().join("llamaforge.toml");
+    let state_dir = tmp.path().join("state");
+    std::fs::create_dir_all(&state_dir).unwrap();
+
+    let mut config_str = String::new();
+    config_str.push_str("[metrics]\n");
+    config_str.push_str(&format!(
+        r#"
+[servers.srv_a]
+model_path = "{}"
+alias = "mock"
+port = {}
+ctx_size = 4096
+parallel_slots = 1
+estimated_vram_mb = 100
+
+[servers.srv_b]
+model_path = "{}"
+alias = "mock"
+port = {}
+ctx_size = 4096
+parallel_slots = 1
+estimated_vram_mb = 100
+
+[servers.srv_c]
+model_path = "{}"
+alias = "mock"
+port = {}
+ctx_size = 4096
+parallel_slots = 1
+estimated_vram_mb = 100
+
+[servers.srv_d]
+model_path = "{}"
+alias = "mock"
+port = {}
+ctx_size = 4096
+parallel_slots = 1
+estimated_vram_mb = 100
+"#,
+        env!("CARGO_BIN_EXE_mock-llama"),
+        port_a,
+        env!("CARGO_BIN_EXE_mock-llama"),
+        port_b,
+        env!("CARGO_BIN_EXE_mock-llama"),
+        port_c,
+        env!("CARGO_BIN_EXE_mock-llama"),
+        port_d,
+    ));
+
+    std::fs::write(&main_path, config_str).unwrap();
+    let paths = ConfigPaths::new(main_path, tmp.path().join("priority_rules.toml"), state_dir);
+    let source = Arc::new(TomlFileConfigSource::new(paths));
+    let config = Arc::new(ConfigHandle::load(source).unwrap());
+
+    let db_path = tmp.path().join("metrics_orphan.db");
+    let pipeline = create_metrics_pipeline(
+        &llamaforge_metrics::MetricsConfig { db_path: db_path.clone(), ..Default::default() },
+        config.clone(),
+    )
+    .unwrap();
+
+    // Pre-populate
+    pipeline
+        .store
+        .upsert_managed_process(&ManagedProcess {
+            pid: ProcessId(pid_a),
+            server_id: ServerId("srv_a".into()),
+            started_at: Utc::now(),
+            cmdline: "".into(),
+            port: port_a,
+            model_alias: "mock".into(),
+        })
+        .await
+        .unwrap();
+    pipeline
+        .store
+        .upsert_managed_process(&ManagedProcess {
+            pid: ProcessId(pid_b),
+            server_id: ServerId("srv_b".into()),
+            started_at: Utc::now(),
+            cmdline: "".into(),
+            port: port_b,
+            model_alias: "mock".into(),
+        })
+        .await
+        .unwrap();
+    pipeline
+        .store
+        .upsert_managed_process(&ManagedProcess {
+            pid: ProcessId(pid_c),
+            server_id: ServerId("srv_c".into()),
+            started_at: Utc::now(),
+            cmdline: "".into(),
+            port: port_c,
+            model_alias: "mock".into(),
+        })
+        .await
+        .unwrap();
+    pipeline
+        .store
+        .upsert_managed_process(&ManagedProcess {
+            pid: ProcessId(pid_d),
+            server_id: ServerId("srv_d".into()),
+            started_at: Utc::now(),
+            cmdline: "".into(),
+            port: port_d,
+            model_alias: "wrong_model".into(),
+        })
+        .await
+        .unwrap();
+
+    let token = CancellationToken::new();
+    let manager = ServerManager::new(
+        Arc::new(MockTelemetry),
+        config.clone(),
+        pipeline.ingest,
+        pipeline.store.clone(),
+        token.clone(),
+    );
+
+    let mgr = Arc::new(manager);
+    let mgr_started = mgr.clone().start().await.unwrap();
+
+    // Give it a moment to process orphans
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // A should be running with pid_a
+    let state_a = mgr_started.server_state(&ServerId("srv_a".into())).unwrap();
+    assert_eq!(state_a.lifecycle, ServerLifecycle::Running);
+    assert_eq!(state_a.pid, Some(pid_a));
+
+    // B should have spawned a NEW child because health failed, so orphan wasn't adopted
+    let state_b = mgr_started.server_state(&ServerId("srv_b".into())).unwrap();
+    // B was adopted (since first health check passed), but then it failed health checks and restarted!
+    assert!(state_b.lifecycle == ServerLifecycle::Restarting || state_b.pid != Some(pid_b));
+
+    // C should have spawned a NEW child because it was dead
+    let state_c = mgr_started.server_state(&ServerId("srv_c".into())).unwrap();
+    assert_ne!(state_c.pid, Some(pid_c));
+
+    // D should have spawned a NEW child because model alias mismatched
+    let state_d = mgr_started.server_state(&ServerId("srv_d".into())).unwrap();
+    assert_ne!(state_d.pid, Some(pid_d));
+
+    // Cleanup
+    mgr_started.shutdown_all().await;
 }

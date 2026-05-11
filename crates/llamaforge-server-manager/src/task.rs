@@ -43,7 +43,12 @@ pub(crate) fn release_permit_with_stagger(
     }
 }
 
-pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, config: ServerConfig) {
+pub async fn spawn_server_task(
+    mgr: Arc<ServerManager>,
+    server_id: ServerId,
+    config: ServerConfig,
+    mut orphan_pid: Option<u32>,
+) {
     let mut restart_count = 0;
     let max_restarts = config.max_restart_attempts;
 
@@ -109,62 +114,77 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
             None => break,
         };
 
-        let gpu_semaphore = {
-            let entry = mgr
-                .gpu_semaphores
-                .entry(gpu_id.clone())
-                .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)));
-            entry.value().clone()
-        };
-        // INVARIANT: The Arc<Semaphore> is owned by the DashMap which has the same lifetime as ServerManager.
-        // We only insert and acquire, never close the semaphore.
-        let mut permit = Some(gpu_semaphore.acquire_owned().await.expect("Semaphore closed"));
+        let mut child;
+        let pid;
+        let mut permit: Option<tokio::sync::OwnedSemaphorePermit> = None;
 
-        if let Err(e) = mgr.pre_spawn_vram_check(&server_id, &config, &gpu_id, &meta_ref) {
-            error!(server.id = %server_id, "Insufficient VRAM: {}", e);
-            let stagger = mgr.config.snapshot().global.restart_stagger_secs;
-            if let Some(p) = permit.take() {
-                release_permit_with_stagger(p, stagger);
+        if let Some(opid) = orphan_pid.take() {
+            pid = opid;
+            child = crate::process::ProcessHandle::Orphan(pid);
+            if let Some(mut state) = mgr.servers.get_mut(&server_id) {
+                state.pid = Some(pid);
+                state.lifecycle = ServerLifecycle::Running;
+                state.first_health_ok_at = Some(std::time::Instant::now());
             }
-            transition_to(&mgr, &server_id, ServerLifecycle::Failed);
-            break;
+        } else {
+            let gpu_semaphore = {
+                let entry = mgr
+                    .gpu_semaphores
+                    .entry(gpu_id.clone())
+                    .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)));
+                entry.value().clone()
+            };
+            // INVARIANT: The Arc<Semaphore> is owned by the DashMap which has the same lifetime as ServerManager.
+            // We only insert and acquire, never close the semaphore.
+            permit = Some(gpu_semaphore.acquire_owned().await.expect("Semaphore closed"));
+
+            if let Err(e) = mgr.pre_spawn_vram_check(&server_id, &config, &gpu_id, &meta_ref) {
+                error!(server.id = %server_id, "Insufficient VRAM: {}", e);
+                let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+                if let Some(p) = permit.take() {
+                    release_permit_with_stagger(p, stagger);
+                }
+                transition_to(&mgr, &server_id, ServerLifecycle::Failed);
+                break;
+            }
+
+            // Spawn child
+            child = match crate::process::spawn_child_process(&config) {
+                Ok(c) => c,
+                Err(e) => {
+                    error!(server.id = %server_id, "Failed to spawn process: {}", e);
+                    mgr.clear_vram_reservation(&server_id);
+                    let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+                    if let Some(p) = permit.take() {
+                        release_permit_with_stagger(p, stagger);
+                    }
+                    transition_to(&mgr, &server_id, ServerLifecycle::Failed);
+                    break;
+                }
+            };
+
+            pid = match child.id() {
+                Some(id) => id,
+                None => {
+                    error!(server.id = %server_id, "Child has no PID immediately after spawn");
+                    mgr.clear_vram_reservation(&server_id);
+                    let stagger = mgr.config.snapshot().global.restart_stagger_secs;
+                    if let Some(p) = permit.take() {
+                        release_permit_with_stagger(p, stagger);
+                    }
+                    transition_to(&mgr, &server_id, ServerLifecycle::Failed);
+                    break;
+                }
+            };
+
+            if let Some(mut state) = mgr.servers.get_mut(&server_id) {
+                state.pid = Some(pid);
+                state.restart_count = restart_count;
+                state.lifecycle = ServerLifecycle::Starting;
+            }
         }
 
-        // Spawn child
-        let mut child = match crate::process::spawn_child_process(&config) {
-            Ok(c) => c,
-            Err(e) => {
-                error!(server.id = %server_id, "Failed to spawn process: {}", e);
-                mgr.clear_vram_reservation(&server_id);
-                let stagger = mgr.config.snapshot().global.restart_stagger_secs;
-                if let Some(p) = permit.take() {
-                    release_permit_with_stagger(p, stagger);
-                }
-                transition_to(&mgr, &server_id, ServerLifecycle::Failed);
-                break;
-            }
-        };
-
-        let pid = match child.id() {
-            Some(id) => id,
-            None => {
-                error!(server.id = %server_id, "Child has no PID immediately after spawn");
-                mgr.clear_vram_reservation(&server_id);
-                let stagger = mgr.config.snapshot().global.restart_stagger_secs;
-                if let Some(p) = permit.take() {
-                    release_permit_with_stagger(p, stagger);
-                }
-                transition_to(&mgr, &server_id, ServerLifecycle::Failed);
-                break;
-            }
-        };
         let model_alias = config.alias.clone().unwrap_or_else(|| "default".to_string());
-
-        if let Some(mut state) = mgr.servers.get_mut(&server_id) {
-            state.pid = Some(pid);
-            state.restart_count = restart_count;
-            state.lifecycle = ServerLifecycle::Starting;
-        }
 
         // Upsert to SQLite BEFORE entering monitor loop
         let process_record = ManagedProcess {
@@ -207,6 +227,7 @@ pub async fn spawn_server_task(mgr: Arc<ServerManager>, server_id: ServerId, con
         }
 
         if !should_restart {
+            transition_to(&mgr, &server_id, ServerLifecycle::Stopped);
             break;
         }
 
@@ -276,7 +297,7 @@ async fn monitor_loop(
     mgr: &ServerManager,
     server_id: &ServerId,
     config: &ServerConfig,
-    child: &mut tokio::process::Child,
+    child: &mut crate::process::ProcessHandle,
     pid: u32,
     _permit: &mut Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> bool {
@@ -315,12 +336,56 @@ async fn monitor_loop(
     let mut metrics_interval = interval(Duration::from_secs(10));
     metrics_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    let task_shutdown_token =
+        mgr.servers.get(server_id).map(|s| s.task_shutdown_token.clone()).unwrap_or_default();
+
     loop {
         tokio::select! {
             // Cancellation / Shutdown
             _ = mgr.shutdown_token.cancelled() => {
                 info!(server.id = %server_id, "Shutdown requested, draining");
                 transition_to(mgr, server_id, ServerLifecycle::Draining);
+
+                // Drain logic per design Section 6 and PR7 Task 7.2
+                let drain_timeout = crate::manager::resolve_drain_timeout(config);
+                let _ = timeout(drain_timeout, async {
+                    loop {
+                        if mgr.pending_dispatches(server_id) == 0 {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }).await;
+
+                #[cfg(unix)]
+                {
+                    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
+                }
+
+                // Wait up to 10 seconds for graceful exit
+                if timeout(Duration::from_secs(10), child.wait()).await.is_err() {
+                    warn!(server.id = %server_id, "Child did not exit gracefully, SIGKILLing process group");
+                    #[cfg(unix)]
+                    {
+                        let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+                    }
+                }
+
+                return false; // Do not restart
+            }
+            _ = task_shutdown_token.cancelled() => {
+                info!(server.id = %server_id, "Server task shutdown requested, draining");
+                transition_to(mgr, server_id, ServerLifecycle::Draining);
+
+                let drain_timeout = crate::manager::resolve_drain_timeout(config);
+                let _ = timeout(drain_timeout, async {
+                    loop {
+                        if mgr.pending_dispatches(server_id) == 0 {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }).await;
 
                 #[cfg(unix)]
                 {
@@ -400,6 +465,11 @@ async fn monitor_loop(
                                     // Drop dashmap lock before calling clear_vram_reservation
                                     drop(state);
                                     mgr.clear_vram_reservation(server_id);
+
+                                    let stagger = mgr.config().snapshot().global.restart_stagger_secs;
+                                    if let Some(p) = _permit.take() {
+                                        release_permit_with_stagger(p, stagger);
+                                    }
 
                                     if let Some(mut state2) = mgr.servers.get_mut(server_id) {
                                         state2.lifecycle = ServerLifecycle::Running;
