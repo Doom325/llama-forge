@@ -41,6 +41,8 @@ async fn test_process_store() {
                 server_id: ServerId(format!("s{}", i)),
                 started_at: Utc::now(),
                 cmdline: "cmd".to_string(),
+            port: 8080,
+            model_alias: "test-model".to_string(),
             })
             .await
             .unwrap();
@@ -65,7 +67,9 @@ async fn test_process_store() {
             pid: ProcessId(1),
             server_id: ServerId("s1-updated".to_string()),
             started_at: Utc::now(),
-            cmdline: "cmd2".to_string(),
+            cmdline: "cmd".to_string(),
+            port: 8080,
+            model_alias: "test-model".to_string(),
         })
         .await
         .unwrap();

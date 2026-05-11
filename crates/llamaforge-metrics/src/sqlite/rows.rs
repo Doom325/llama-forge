@@ -197,6 +197,8 @@ pub struct ManagedProcessRow {
     pub server_id: String,
     pub started_at: String,
     pub cmdline: String,
+    pub port: u16,
+    pub model_alias: String,
 }
 
 impl TryFrom<ManagedProcessRow> for ManagedProcess {
@@ -208,6 +210,8 @@ impl TryFrom<ManagedProcessRow> for ManagedProcess {
             server_id: ServerId(row.server_id),
             started_at: DateTime::parse_from_rfc3339(&row.started_at)?.with_timezone(&Utc),
             cmdline: row.cmdline,
+            port: row.port,
+            model_alias: row.model_alias,
         })
     }
 }
@@ -219,6 +223,8 @@ impl From<ManagedProcess> for ManagedProcessRow {
             server_id: p.server_id.0,
             started_at: p.started_at.to_rfc3339(),
             cmdline: p.cmdline,
+            port: p.port,
+            model_alias: p.model_alias,
         }
     }
 }

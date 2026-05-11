@@ -145,6 +145,8 @@ pub struct ManagedProcess {
     pub server_id: ServerId,
     pub started_at: DateTime<Utc>,
     pub cmdline: String,
+    pub port: u16,
+    pub model_alias: String,
 }
 
 /// What triggered a configuration snapshot to be saved.

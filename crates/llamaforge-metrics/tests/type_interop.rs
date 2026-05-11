@@ -43,7 +43,9 @@ fn test_type_interop() {
         pid: ProcessId(100),
         server_id: server_id.clone(),
         started_at: chrono::Utc::now(),
-        cmdline: "./llama-server".to_string(),
+        cmdline: "cmd".to_string(),
+            port: 8080,
+            model_alias: "test-model".to_string(),
     };
     assert_eq!(process.server_id, server_id);
 }

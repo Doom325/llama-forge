@@ -109,6 +109,8 @@ async fn test_writer_command_dispatch() {
         server_id: ServerId("s1".to_string()),
         started_at: Utc::now(),
         cmdline: "cmd".to_string(),
+            port: 8080,
+            model_alias: "test-model".to_string(),
     };
     writer
         .tx

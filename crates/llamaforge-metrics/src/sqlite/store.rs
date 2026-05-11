@@ -458,7 +458,7 @@ impl ProcessStore for SqliteMetricsStore {
     async fn list_managed_processes(&self) -> Result<Vec<ManagedProcess>, StoreError> {
         self.interact_with_timeout(move |conn| {
             let mut stmt = conn
-                .prepare_cached("SELECT pid, server_id, started_at, cmdline FROM managed_processes")
+                .prepare_cached("SELECT pid, server_id, started_at, cmdline, port, model_alias FROM managed_processes")
                 .map_err(|e| StoreError::Internal { source: Box::new(e) })?;
 
             let rows = stmt
@@ -468,6 +468,8 @@ impl ProcessStore for SqliteMetricsStore {
                         server_id: row.get(1)?,
                         started_at: row.get(2)?,
                         cmdline: row.get(3)?,
+                        port: row.get(4)?,
+                        model_alias: row.get(5)?,
                     })
                 })
                 .map_err(|e| StoreError::Internal { source: Box::new(e) })?;

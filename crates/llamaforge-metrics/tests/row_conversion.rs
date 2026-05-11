@@ -78,7 +78,9 @@ fn test_managed_process_roundtrip() {
         pid: ProcessId(12345),
         server_id: ServerId("s2".to_string()),
         started_at: Utc::now(),
-        cmdline: "./llama-server --model x".to_string(),
+        cmdline: "cmd".to_string(),
+            port: 8080,
+            model_alias: "test-model".to_string(),
     };
 
     let row = ManagedProcessRow::from(proc.clone());
