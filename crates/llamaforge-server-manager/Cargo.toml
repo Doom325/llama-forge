@@ -1,0 +1,42 @@
+[package]
+name = "llamaforge-server-manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+llamaforge-config = { workspace = true }
+llamaforge-metrics = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["process", "sync", "signal", "macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+reqwest = { workspace = true }
+parking_lot = { workspace = true }
+nix = { workspace = true, features = ["signal", "process"] }
+tokio-util = { workspace = true }
+metrics = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }
+typed-builder = { workspace = true }
+metrics-util = { workspace = true, features = ["debugging"] }
+serde_json = { workspace = true }
+
+[features]
+test-utils = ["dep:axum", "dep:tower"]
+
+[dependencies.axum]
+workspace = true
+optional = true
+
+[dependencies.tower]
+workspace = true
+optional = true
