@@ -123,6 +123,16 @@ impl FlatPriorityQueue {
         Some(pos)
     }
 
+    pub(crate) fn snapshot_for_starvation(&self) -> Vec<(RequestId, tokio::time::Instant, u32)> {
+        let mut snapshot = Vec::with_capacity(self.total_depth as usize);
+        for deque in self.queue.values() {
+            for req in deque.iter() {
+                snapshot.push((req.id, req.enqueued_at, req.base_priority));
+            }
+        }
+        snapshot
+    }
+
     pub(crate) fn depth_info(&self) -> QueueDepthInfo {
         let mut by_tier = HashMap::new();
         let mut by_model = HashMap::new();
@@ -143,6 +153,26 @@ impl FlatPriorityQueue {
             by_tier,
             by_model,
         }
+    }
+    pub(crate) fn maintenance_sweep(&mut self) -> Vec<QueuedRequest> {
+        let mut to_remove = Vec::new();
+        let now = tokio::time::Instant::now();
+
+        for deque in self.queue.values() {
+            for req in deque.iter() {
+                if req.cancel_token.is_cancelled() || now.duration_since(req.enqueued_at) > req.queue_timeout {
+                    to_remove.push(req.id);
+                }
+            }
+        }
+
+        let mut removed = Vec::with_capacity(to_remove.len());
+        for id in to_remove {
+            if let Some(req) = self.remove_by_id(id) {
+                removed.push(req);
+            }
+        }
+        removed
     }
 }
 
@@ -298,6 +328,20 @@ impl DispatchQueue {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let clamped_priority = new_priority.min(crate::types::PRIORITY_CEILING);
         inner.re_key(id, clamped_priority);
+    }
+
+    pub fn sweep(&self) -> Vec<QueuedRequest> {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let removed = inner.maintenance_sweep();
+        if !removed.is_empty() {
+            self.dispatch_epoch.send_modify(|v| *v += 1);
+        }
+        removed
+    }
+
+    pub fn snapshot_for_starvation(&self) -> Vec<(RequestId, tokio::time::Instant, u32)> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.snapshot_for_starvation()
     }
 
     pub fn position(&self, id: RequestId) -> Option<u32> {
