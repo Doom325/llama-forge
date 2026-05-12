@@ -1,0 +1,86 @@
+use std::fmt;
+use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+pub mod traits;
+
+/// A unique identifier for a single request.
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RequestId(pub Uuid);
+
+impl fmt::Display for RequestId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// A unique identifier for a `llama-server` process.
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ServerId(pub Uuid);
+
+impl fmt::Display for ServerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Identifies the caller or user making a request.
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RequestorId(pub Arc<str>);
+
+impl fmt::Display for RequestorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// The class of a requestor, used to lookup policy (e.g. rate limits).
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct RequestorClass(pub Arc<str>);
+
+impl fmt::Display for RequestorClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// The short name or alias of a model (e.g., "llama-3-8b-instruct").
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ModelAlias(pub Arc<str>);
+
+impl fmt::Display for ModelAlias {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Target model requirements for a request.
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModelTarget {
+    Exact(ModelAlias),
+    AnyOf(Vec<ModelAlias>),
+    AnyWithCapability(Capability),
+}
+
+/// A capability requirement for a model.
+///
+/// See design doc Section 2.3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Capability {
+    CodeGeneration,
+    Chat,
+    Embedding,
+}
