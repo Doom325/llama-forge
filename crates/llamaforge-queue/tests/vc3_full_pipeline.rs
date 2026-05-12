@@ -30,7 +30,7 @@ impl ServerSelector for MockServerSelector {
         &self,
         _: &dyn llamaforge_routing::RequestView,
     ) -> Result<RoutingDecision, llamaforge_routing::RoutingError> {
-        Ok(RoutingDecision::new(ServerId::new(uuid::Uuid::now_v7())))
+        Ok(RoutingDecision::new_for_test(ServerId::new(uuid::Uuid::now_v7())))
     }
 }
 

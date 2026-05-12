@@ -17,3 +17,5 @@ dashmap = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tracing-test = "0.2.6"
+uuid = { workspace = true, features = ["v7"] }
