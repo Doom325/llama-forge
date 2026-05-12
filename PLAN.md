@@ -245,45 +245,45 @@ Implement the `DispatchQueue` — the priority-ordered buffer with flat `BTreeMa
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 4.1 | Implement `FlatPriorityQueue` | `queue: BTreeMap<Reverse<u32>, VecDeque<QueuedRequest>>`, `index: HashMap<RequestId, u32>`, `total_depth: u32`. Internal struct (not public). | `src/queue.rs` |
-| 4.2 | Implement `FlatPriorityQueue::insert()` | Insert at `Reverse(effective_priority)`. Push to VecDeque back (FIFO within priority). Update index. Increment `total_depth`. | `src/queue.rs` |
-| 4.3 | Implement `FlatPriorityQueue::remove_by_id()` | Lookup priority from index. Find in VecDeque at that priority key. Remove. If VecDeque empty, remove BTreeMap entry. Decrement `total_depth`. Update index. | `src/queue.rs` |
-| 4.4 | Implement `FlatPriorityQueue::try_dispatch_scan()` | Two-phase: iterate BTreeMap in priority order. For each request, call `capacity.has_capacity(model)`. On first hit, record `(priority, index)`, break. Drop iterator. Remove at recorded coordinates. Return `DispatchCandidate`. Track `scan_depth` for metrics. Design doc Section 3.4 borrow checker pattern. | `src/queue.rs` |
-| 4.5 | Implement `FlatPriorityQueue::re_key()` | Remove request at old priority, insert at new priority. Used by starvation boost. Skip if `new_priority == current_priority` (preserve FIFO). | `src/queue.rs` |
-| 4.6 | Implement `FlatPriorityQueue::position()` | Count requests ahead of given `RequestId` in priority order. Compute model-specific position for `Exact` targets. | `src/queue.rs` |
-| 4.7 | Implement `FlatPriorityQueue::depth_info()` | Build `QueueDepthInfo` with per-tier and per-model breakdowns. | `src/queue.rs` |
-| 4.8 | Implement `DispatchQueue` struct | `inner: std::sync::Mutex<FlatPriorityQueue>`, `config: Arc<ConfigHandle>`, `dispatch_notify: tokio::sync::Notify`, `queue_depth: Arc<AtomicU32>`, `dispatch_epoch: tokio::sync::watch::Sender<u64>`, `model_dispatch_rate: std::sync::Mutex<HashMap<ModelAlias, SlidingWindowRate>>`. | `src/queue.rs` |
-| 4.9 | Implement `DispatchQueue::enqueue()` | Lock queue. Insert `AdmittedRequest` → `QueuedRequest` conversion. Notify scheduler. Epoch increment. Return `QueuePosition`. | `src/queue.rs` |
-| 4.10 | Implement `DispatchQueue::try_dispatch()` | Lock queue. Delegate to `FlatPriorityQueue::try_dispatch_scan()`. On success: epoch increment, record model dispatch rate (after releasing queue lock). Return `DispatchCandidate`. **Note:** `record_dequeue(Dispatched)` is NOT called here — it is called by the scheduler coordinator (PR5, task 5.8) after `try_dispatch` returns `Some`, so that admission accounting happens at the orchestration layer. | `src/queue.rs` |
-| 4.11 | Implement `DispatchQueue::cancel()` | Lock queue. Remove by ID. Send `DispatchResult::Cancelled` via `response_tx`. Epoch increment. Return removed request. | `src/queue.rs` |
-| 4.12 | Implement `DispatchQueue::boost()` | Lock queue. Re-key to new priority (clamped to `PRIORITY_CEILING`). | `src/queue.rs` |
-| 4.13 | Implement `DispatchQueue::position()` and `depth()` | Delegate to `FlatPriorityQueue`. | `src/queue.rs` |
-| 4.14 | Implement `DispatchQueue::subscribe_dispatch_epoch()` | Return `watch::Receiver<u64>`. | `src/queue.rs` |
-| 4.15 | Implement `wait_for_dispatch_signal()` and `notify_slot_available()` | `wait_for_dispatch_signal` awaits on `dispatch_notify.notified()`. `notify_slot_available` calls `dispatch_notify.notify_one()`. | `src/queue.rs` |
-| 4.16 | Implement `SlotNotifier` trait for `DispatchQueue` | Delegate to `notify_slot_available()`. | `src/queue.rs` |
-| 4.17 | Implement `SlidingWindowRate` | `timestamps: VecDeque<Instant>`, `window_size: Duration`. `record()` evicts expired entries (and oldest if at `MAX_ENTRIES`). `rate()` returns `Option<f64>` (None if < 5 dispatches). | `src/queue.rs` |
-| 4.18 | Add dispatch metrics | `llamaforge_queue_depth` gauge, `llamaforge_queue_wait_seconds` histogram, `llamaforge_dispatch_scan_depth` histogram, `llamaforge_dispatch_duration_seconds` histogram, `llamaforge_queue_depth_by_model` gauge, `llamaforge_dispatch_rate_per_second` gauge. | `src/queue.rs` |
-| 4.19 | Unit tests: FIFO within same priority | Insert 5 requests at priority 600. Dispatch all 5 → assert insertion order. | tests |
-| 4.20 | Unit tests: priority ordering | Insert at priorities 100, 600, 300. Dispatch → assert 600 first, 300 second, 100 third. | tests |
-| 4.21 | Unit tests: model-aware dispatch (no HOL blocking) | Queue: [High-prio ModelA, Low-prio ModelB]. Capacity: ModelA=0, ModelB=1. Assert ModelB dispatched. | tests |
-| 4.22 | Unit tests: cancel removes and sends result | Enqueue, cancel by ID → assert removed, `response_tx` received `Cancelled`. | tests |
-| 4.23 | Unit tests: boost clamps to ceiling | Boost to 5000 → assert effective priority == `PRIORITY_CEILING` (1500). | tests |
-| 4.24 | Unit tests: boost skip if same priority | Boost that doesn't change effective priority → assert FIFO position preserved. | tests |
-| 4.25 | Unit tests: SlidingWindowRate | Record 10 dispatches over 10s → `rate() == Some(1.0)`. Cold start (< 5) → `rate() == None`. Cap at `MAX_ENTRIES`. | tests |
-| 4.26 | Unit tests: dispatch epoch increments | Subscribe. Dispatch → epoch +1. Cancel → epoch +1. Verify coalescing (10 rapid dispatches → receiver sees latest, not all 10). | tests |
-| 4.27 | Unit tests: estimated wait time | Exact model with known rate → verify `estimated_wait_secs`. AnyOf → verify `None`. Cold model → verify `None`. | tests |
-| 4.28 | Unit tests: index consistency | Insert, remove, re-key sequences → assert `index.len() == total VecDeque lengths`. | tests |
+| [x] 4.1 | Implement `FlatPriorityQueue` | `queue: BTreeMap<Reverse<u32>, VecDeque<QueuedRequest>>`, `index: HashMap<RequestId, u32>`, `total_depth: u32`. Internal struct (not public). | `src/queue.rs` |
+| [x] 4.2 | Implement `FlatPriorityQueue::insert()` | Insert at `Reverse(effective_priority)`. Push to VecDeque back (FIFO within priority). Update index. Increment `total_depth`. | `src/queue.rs` |
+| [x] 4.3 | Implement `FlatPriorityQueue::remove_by_id()` | Lookup priority from index. Find in VecDeque at that priority key. Remove. If VecDeque empty, remove BTreeMap entry. Decrement `total_depth`. Update index. | `src/queue.rs` |
+| [x] 4.4 | Implement `FlatPriorityQueue::try_dispatch_scan()` | Two-phase: iterate BTreeMap in priority order. For each request, call `capacity.has_capacity(model)`. On first hit, record `(priority, index)`, break. Drop iterator. Remove at recorded coordinates. Return `DispatchCandidate`. Track `scan_depth` for metrics. Design doc Section 3.4 borrow checker pattern. | `src/queue.rs` |
+| [x] 4.5 | Implement `FlatPriorityQueue::re_key()` | Remove request at old priority, insert at new priority. Used by starvation boost. Skip if `new_priority == current_priority` (preserve FIFO). | `src/queue.rs` |
+| [x] 4.6 | Implement `FlatPriorityQueue::position()` | Count requests ahead of given `RequestId` in priority order. Compute model-specific position for `Exact` targets. | `src/queue.rs` |
+| [x] 4.7 | Implement `FlatPriorityQueue::depth_info()` | Build `QueueDepthInfo` with per-tier and per-model breakdowns. | `src/queue.rs` |
+| [x] 4.8 | Implement `DispatchQueue` struct | `inner: std::sync::Mutex<FlatPriorityQueue>`, `config: Arc<ConfigHandle>`, `dispatch_notify: tokio::sync::Notify`, `queue_depth: Arc<AtomicU32>`, `dispatch_epoch: tokio::sync::watch::Sender<u64>`, `model_dispatch_rate: std::sync::Mutex<HashMap<ModelAlias, SlidingWindowRate>>`. | `src/queue.rs` |
+| [x] 4.9 | Implement `DispatchQueue::enqueue()` | Lock queue. Insert `AdmittedRequest` → `QueuedRequest` conversion. Notify scheduler. Epoch increment. Return `QueuePosition`. | `src/queue.rs` |
+| [x] 4.10 | Implement `DispatchQueue::try_dispatch()` | Lock queue. Delegate to `FlatPriorityQueue::try_dispatch_scan()`. On success: epoch increment, record model dispatch rate (after releasing queue lock). Return `DispatchCandidate`. **Note:** `record_dequeue(Dispatched)` is NOT called here — it is called by the scheduler coordinator (PR5, task 5.8) after `try_dispatch` returns `Some`, so that admission accounting happens at the orchestration layer. | `src/queue.rs` |
+| [x] 4.11 | Implement `DispatchQueue::cancel()` | Lock queue. Remove by ID. Send `DispatchResult::Cancelled` via `response_tx`. Epoch increment. Return removed request. | `src/queue.rs` |
+| [x] 4.12 | Implement `DispatchQueue::boost()` | Lock queue. Re-key to new priority (clamped to `PRIORITY_CEILING`). | `src/queue.rs` |
+| [x] 4.13 | Implement `DispatchQueue::position()` and `depth()` | Delegate to `FlatPriorityQueue`. | `src/queue.rs` |
+| [x] 4.14 | Implement `DispatchQueue::subscribe_dispatch_epoch()` | Return `watch::Receiver<u64>`. | `src/queue.rs` |
+| [x] 4.15 | Implement `wait_for_dispatch_signal()` and `notify_slot_available()` | `wait_for_dispatch_signal` awaits on `dispatch_notify.notified()`. `notify_slot_available` calls `dispatch_notify.notify_one()`. | `src/queue.rs` |
+| [x] 4.16 | Implement `SlotNotifier` trait for `DispatchQueue` | Delegate to `notify_slot_available()`. | `src/queue.rs` |
+| [x] 4.17 | Implement `SlidingWindowRate` | `timestamps: VecDeque<Instant>`, `window_size: Duration`. `record()` evicts expired entries (and oldest if at `MAX_ENTRIES`). `rate()` returns `Option<f64>` (None if < 5 dispatches). | `src/queue.rs` |
+| [x] 4.18 | Add dispatch metrics | `llamaforge_queue_depth` gauge, `llamaforge_queue_wait_seconds` histogram, `llamaforge_dispatch_scan_depth` histogram, `llamaforge_dispatch_duration_seconds` histogram, `llamaforge_queue_depth_by_model` gauge, `llamaforge_dispatch_rate_per_second` gauge. | `src/queue.rs` |
+| [x] 4.19 | Unit tests: FIFO within same priority | Insert 5 requests at priority 600. Dispatch all 5 → assert insertion order. | tests |
+| [x] 4.20 | Unit tests: priority ordering | Insert at priorities 100, 600, 300. Dispatch → assert 600 first, 300 second, 100 third. | tests |
+| [x] 4.21 | Unit tests: model-aware dispatch (no HOL blocking) | Queue: [High-prio ModelA, Low-prio ModelB]. Capacity: ModelA=0, ModelB=1. Assert ModelB dispatched. | tests |
+| [x] 4.22 | Unit tests: cancel removes and sends result | Enqueue, cancel by ID → assert removed, `response_tx` received `Cancelled`. | tests |
+| [x] 4.23 | Unit tests: boost clamps to ceiling | Boost to 5000 → assert effective priority == `PRIORITY_CEILING` (1500). | tests |
+| [x] 4.24 | Unit tests: boost skip if same priority | Boost that doesn't change effective priority → assert FIFO position preserved. | tests |
+| [x] 4.25 | Unit tests: SlidingWindowRate | Record 10 dispatches over 10s → `rate() == Some(1.0)`. Cold start (< 5) → `rate() == None`. Cap at `MAX_ENTRIES`. | tests |
+| [x] 4.26 | Unit tests: dispatch epoch increments | Subscribe. Dispatch → epoch +1. Cancel → epoch +1. Verify coalescing (10 rapid dispatches → receiver sees latest, not all 10). | tests |
+| [x] 4.27 | Unit tests: estimated wait time | Exact model with known rate → verify `estimated_wait_secs`. AnyOf → verify `None`. Cold model → verify `None`. | tests |
+| [x] 4.28 | Unit tests: index consistency | Insert, remove, re-key sequences → assert `index.len() == total VecDeque lengths`. | tests |
 
 ### PR4 Acceptance Criteria
 
-- [ ] `enqueue()` is O(log K) where K is the number of distinct priority levels
-- [ ] `try_dispatch()` correctly skips model-blocked requests (work-conserving)
-- [ ] FIFO ordering within same priority verified
-- [ ] Watch channel coalesces rapid dispatches
-- [ ] `SlidingWindowRate` respects `MAX_ENTRIES` cap
-- [ ] Index consistency maintained through all mutation paths
-- [ ] All 10 unit test suites pass
-- [ ] Mutex locks use `unwrap_or_else(|p| p.into_inner())` for poison recovery
+- [x] `enqueue()` is O(log K) where K is the number of distinct priority levels
+- [x] `try_dispatch()` correctly skips model-blocked requests (work-conserving)
+- [x] FIFO ordering within same priority verified
+- [x] Watch channel coalesces rapid dispatches
+- [x] `SlidingWindowRate` respects `MAX_ENTRIES` cap
+- [x] Index consistency maintained through all mutation paths
+- [x] All 10 unit test suites pass
+- [x] Mutex locks use `unwrap_or_else(|p| p.into_inner())` for poison recovery
 
 ### PR4 Creation Steps
 
