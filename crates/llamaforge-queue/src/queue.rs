@@ -49,11 +49,13 @@ impl FlatPriorityQueue {
     pub(crate) fn try_dispatch_scan<C: llamaforge_types::traits::CapacityChecker + ?Sized>(
         &mut self,
         capacity: &C,
-    ) -> Option<DispatchCandidate> {
+    ) -> Option<(DispatchCandidate, u32)> {
         let mut target_coord = None;
+        let mut scan_depth = 0;
 
         for (rev_prio, deque) in self.queue.iter() {
             for (idx, req) in deque.iter().enumerate() {
+                scan_depth += 1;
                 if capacity.has_capacity(&req.model_target) {
                     target_coord = Some((rev_prio.0, idx));
                     break;
@@ -76,11 +78,11 @@ impl FlatPriorityQueue {
             self.total_depth -= 1;
 
             let wait = req.enqueued_at.elapsed();
-            Some(DispatchCandidate {
+            Some((DispatchCandidate {
                 request: req,
                 dispatch_priority: prio,
                 queue_wait: wait,
-            })
+            }, scan_depth))
         } else {
             None
         }
@@ -144,20 +146,20 @@ impl FlatPriorityQueue {
     }
 }
 
-pub struct SlidingWindowRate {
+pub(crate) struct SlidingWindowRate {
     timestamps: VecDeque<std::time::Instant>,
     window_size: Duration,
 }
 
 impl SlidingWindowRate {
-    pub fn new(window_size: Duration) -> Self {
+    pub(crate) fn new(window_size: Duration) -> Self {
         Self {
             timestamps: VecDeque::new(),
             window_size,
         }
     }
 
-    pub fn record(&mut self) {
+    pub(crate) fn record(&mut self) {
         let now = std::time::Instant::now();
         self.timestamps.push_back(now);
         while self.timestamps.len() > crate::types::SLIDING_WINDOW_MAX_ENTRIES {
@@ -166,7 +168,7 @@ impl SlidingWindowRate {
         self.prune(now);
     }
 
-    pub fn rate(&mut self) -> Option<f64> {
+    pub(crate) fn rate(&mut self) -> Option<f64> {
         let now = std::time::Instant::now();
         self.prune(now);
 
@@ -214,30 +216,33 @@ impl DispatchQueue {
     }
 
     pub fn enqueue(&self, req: crate::types::AdmittedRequest) -> crate::types::QueuePosition {
-        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let id = req.id;
         let prio = req.effective_priority;
         let model_target = req.model_target.clone();
-        inner.insert(QueuedRequest::from_admitted(req));
         
-        let pos = inner.position(id).unwrap_or(1);
+        let pos = {
+            let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            inner.insert(QueuedRequest::from_admitted(req));
+            inner.position(id).expect("request must be in index after insert")
+        };
+        
         self.dispatch_notify.notify_one();
         self.dispatch_epoch.send_modify(|v| *v += 1);
         
+        let estimated_wait_secs = if let ModelTarget::Exact(alias) = &model_target {
+            let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(rate_tracker) = rates.get_mut(alias) {
+                rate_tracker.rate().map(|rate| if rate > 0.0 { (pos as f64) / rate } else { 0.0 })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         crate::types::QueuePosition {
             position: pos,
-            estimated_wait_secs: {
-                if let ModelTarget::Exact(alias) = &model_target {
-                    let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
-                    if let Some(rate_tracker) = rates.get_mut(alias) {
-                        rate_tracker.rate().map(|rate| if rate > 0.0 { (pos as f64) / rate } else { 0.0 })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            },
+            estimated_wait_secs,
             tier_label: TierLabel::from_priority(prio),
         }
     }
@@ -251,8 +256,13 @@ impl DispatchQueue {
         
         let candidate = {
             let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-            depth_at_scan = inner.total_depth;
-            inner.try_dispatch_scan(capacity)
+            let result = inner.try_dispatch_scan(capacity);
+            if let Some((_, scan_depth)) = result {
+                depth_at_scan = scan_depth;
+            } else {
+                depth_at_scan = inner.total_depth;
+            }
+            result.map(|(c, _)| c)
         }; // Lock released here
         
         metrics::histogram!("llamaforge_dispatch_scan_depth").record(depth_at_scan as f64);
@@ -274,6 +284,7 @@ impl DispatchQueue {
     }
 
     pub fn cancel(&self, id: RequestId) -> Option<QueuedRequest> {
+        // Note: queue_depth is decremented in PR5 orchestration layer via AdmissionAccounting
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let mut req = inner.remove_by_id(id)?;
         self.dispatch_epoch.send_modify(|v| *v += 1);
