@@ -7,7 +7,8 @@ use thiserror::Error;
 /// Port traits defining boundaries between components.
 ///
 /// See design doc Section 2.2 and 2.3.
-mod private {
+#[doc(hidden)]
+pub mod private {
     pub trait Sealed {}
     pub struct Token;
     // impl Sealed for Router is added in llamaforge-routing crate via a re-export or feature gate
@@ -58,7 +59,7 @@ pub trait ServerSelector: Send + Sync {
 /// See design doc Section 2.2.
 pub trait AdmissionAccounting: Send + Sync {
     fn record_completion(&self, requestor: &RequestorId);
-    fn record_dequeue(&self, requestor: &RequestorId, reason: DequeueReasonPlaceholder);
+    fn record_dequeue(&self, requestor: &RequestorId, reason: DequeueReason);
 }
 
 /// Notifies the scheduler when a slot becomes available.
@@ -81,10 +82,9 @@ pub enum DispatchError {
     Failed,
 }
 
-/// Placeholder to avoid circular dependencies if DequeueReason is defined in the queue crate.
-/// We'll define a basic enum here or use a u8/type if it is better placed here.
+/// Reason for a request being dequeued.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DequeueReasonPlaceholder {
+pub enum DequeueReason {
     Dispatched,
     Cancelled,
     TimedOut,

@@ -9,7 +9,12 @@ pub mod traits;
 ///
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RequestId(pub Uuid);
+pub struct RequestId(Uuid);
+
+impl RequestId {
+    pub fn new(id: Uuid) -> Self { Self(id) }
+    pub fn into_inner(self) -> Uuid { self.0 }
+}
 
 impl fmt::Display for RequestId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -21,7 +26,12 @@ impl fmt::Display for RequestId {
 ///
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ServerId(pub Uuid);
+pub struct ServerId(Uuid);
+
+impl ServerId {
+    pub fn new(id: Uuid) -> Self { Self(id) }
+    pub fn into_inner(self) -> Uuid { self.0 }
+}
 
 impl fmt::Display for ServerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,7 +43,13 @@ impl fmt::Display for ServerId {
 ///
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RequestorId(pub Arc<str>);
+pub struct RequestorId(Arc<str>);
+
+impl RequestorId {
+    pub fn new(id: Arc<str>) -> Self { Self(id) }
+    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn into_inner(self) -> Arc<str> { self.0 }
+}
 
 impl fmt::Display for RequestorId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -45,7 +61,13 @@ impl fmt::Display for RequestorId {
 ///
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RequestorClass(pub Arc<str>);
+pub struct RequestorClass(Arc<str>);
+
+impl RequestorClass {
+    pub fn new(class: Arc<str>) -> Self { Self(class) }
+    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn into_inner(self) -> Arc<str> { self.0 }
+}
 
 impl fmt::Display for RequestorClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -57,7 +79,13 @@ impl fmt::Display for RequestorClass {
 ///
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ModelAlias(pub Arc<str>);
+pub struct ModelAlias(Arc<str>);
+
+impl ModelAlias {
+    pub fn new(alias: Arc<str>) -> Self { Self(alias) }
+    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn into_inner(self) -> Arc<str> { self.0 }
+}
 
 impl fmt::Display for ModelAlias {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

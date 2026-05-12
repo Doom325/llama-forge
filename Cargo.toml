@@ -4,7 +4,10 @@ members = [
     "crates/llamaforge",
     "crates/llamaforge-config",
     "crates/llamaforge-proto",
-    "crates/llamaforge-metrics", "crates/llamaforge-server-manager", "crates/llamaforge-types", "crates/llamaforge-queue",
+    "crates/llamaforge-metrics",
+    "crates/llamaforge-server-manager",
+    "crates/llamaforge-types",
+    "crates/llamaforge-queue",
 ]
 
 [workspace.package]
