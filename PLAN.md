@@ -131,14 +131,14 @@ Define every data type from design doc Sections 2.2, 2.1a: routing decision type
 
 ### PR2 Acceptance Criteria
 
-- [ ] All types compile with required derives
-- [ ] `SessionId::new("")` returns `Err`
-- [ ] `LoraAdapterId` serde roundtrip preserves value
-- [ ] `RoutingWeightsBuilder::build()` validates range 0.0..=1.0
-- [ ] `RoutingDecision` fields `score` and `slot_target` are NOT accessible outside the crate
-- [ ] All error types implement `std::error::Error` via `thiserror`
-- [ ] `cargo test --workspace` passes all 8 unit test suites
-- [ ] No raw `String` used for domain identifiers — all use newtypes
+- [x] All types compile with required derives
+- [x] `SessionId::new("")` returns `Err`
+- [x] `LoraAdapterId` serde roundtrip preserves value
+- [x] `RoutingWeightsBuilder::build()` validates range 0.0..=1.0
+- [x] `RoutingDecision` fields `score` and `slot_target` are NOT accessible outside the crate
+- [x] All error types implement `std::error::Error` via `thiserror`
+- [x] `cargo test --workspace` passes all 8 unit test suites
+- [x] No raw `String` used for domain identifiers — all use newtypes
 
 ### PR2 Creation Steps
 
