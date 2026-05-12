@@ -102,7 +102,7 @@ async fn main() {
                 {
                     "id": 0,
                     "is_processing": true,
-                    "n_past": 100,
+                    "n_past": 1000,
                     "n_decoded": n_decoded,
                     "prompt_hash": 12345
                 }

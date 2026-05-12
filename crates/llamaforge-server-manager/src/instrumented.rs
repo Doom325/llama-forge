@@ -95,7 +95,7 @@ impl InstrumentedServerManager {
     pub fn increment_requests(&self, id: &ServerId) {
         self.inner.increment_requests(id);
         metrics::counter!("llamaforge_server_cumulative_requests", "server_id" => id.to_string())
-            .increment(1);
+            .absolute(self.inner.cumulative_requests(id));
     }
 
     #[instrument(skip(self), level = "debug")]

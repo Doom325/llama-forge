@@ -523,6 +523,17 @@ async fn monitor_loop(
 
             // Metrics tick
             _ = metrics_interval.tick() => {
+                #[cfg(any(test, feature = "test-utils"))]
+                {
+                    if let Some(mut state) = mgr.servers.get_mut(server_id) {
+                        if let Some((samples, baseline)) = state.test_warm_tps_samples.take() {
+                            for _ in 0..samples {
+                                tps_window.record(baseline);
+                            }
+                        }
+                    }
+                }
+
                 let url = format!("{}/metrics", base_url);
                 if let Ok(resp) = client.get(&url).send().await {
                     if let Ok(body) = resp.text().await {

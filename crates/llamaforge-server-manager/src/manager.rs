@@ -167,6 +167,8 @@ impl ServerManager {
                     gguf_metadata: None,
                     reserved_vram_bytes: 0,
                     task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                    #[cfg(any(test, feature = "test-utils"))]
+                    test_warm_tps_samples: None,
                 },
             );
 
@@ -238,6 +240,8 @@ impl ServerManager {
                             gguf_metadata: None,
                             reserved_vram_bytes: 0,
                             task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                            #[cfg(any(test, feature = "test-utils"))]
+                            test_warm_tps_samples: None,
                         },
                     );
 
@@ -287,6 +291,8 @@ impl ServerManager {
                         gguf_metadata: None,
                         reserved_vram_bytes: 0,
                         task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                        #[cfg(any(test, feature = "test-utils"))]
+                        test_warm_tps_samples: None,
                     },
                 );
 
@@ -516,6 +522,14 @@ impl ServerManager {
             state.cumulative_requests = count;
         }
     }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn force_warm_tps_window_for_test(&self, id: &ServerId, samples: usize, baseline: f64) {
+        if let Some(mut state) = self.servers.get_mut(id) {
+            state.test_warm_tps_samples = Some((samples, baseline));
+        }
+    }
 }
 
 // --- Task 3.2b: resolve_drain_timeout ---
@@ -648,6 +662,8 @@ mod tests {
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
                 task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                #[cfg(any(test, feature = "test-utils"))]
+                test_warm_tps_samples: None,
             },
         );
 
@@ -699,6 +715,8 @@ mod tests {
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
                 task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                #[cfg(any(test, feature = "test-utils"))]
+                test_warm_tps_samples: None,
             },
         );
 
