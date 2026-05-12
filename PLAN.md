@@ -454,6 +454,91 @@ git push -u origin server-manager/08-verification
 
 ---
 
+## PR9: End-to-End Integration Test Suite
+
+**Branch:** `server-manager/09-e2e`
+**Base:** `main` (after PR8 merges)
+**Size:** Medium (~400 lines, all under `tests/`)
+**Estimated Time:** 6–8 hours
+
+### Purpose
+
+Close the E2E coverage gaps identified in the PR8 reviewer feedback. The existing integration tests (PR4–PR8) cover individual features in isolation against `mock-llama`, but they do not chain those features together in a single scenario, and several plan checkpoints (VC-3.1, VC-3.6, VC-4.5) were never realized as runnable tests. This PR adds the missing scenarios so VC-4 can pass from automated tests rather than manual inspection.
+
+### Background — what already exists
+
+| Test | Covers |
+|------|--------|
+| `e2e_lifecycle::test_e2e_lifecycle` | Single server: start → Running → drain → SIGTERM → reaped |
+| `e2e_lifecycle::test_id_task_overflow` | i32::MAX/2 latch fires exactly once |
+| `process_tests::test_process_lifecycle_external_kill` | External SIGKILL → Restarting ≤100ms |
+| `process_tests::test_process_lifecycle_shutdown` | shutdown_token cancellation → child killed |
+| `process_tests::test_orphan_recovery` | 4 cases (adopt / health-fail / dead PID / model mismatch) |
+| `polling_tests::test_health_transition_and_refresh` | /health 200 → Running + `ClientRefreshEvent` |
+| `polling_tests::test_consecutive_health_failures` | 3rd 500 → Restarting |
+| `config_tests::test_apply_config_diff` | Added/removed/hot-reload/FM-5 GPU change |
+| `gpu_semaphore::test_gpu_semaphore` | Same-GPU stagger ≥ `restart_stagger_secs` |
+
+### What's missing
+
+1. No combined scenario that exercises multiple features in one run (VC-3.6).
+2. No integration test for the degradation restart path (VC-4.5, PR5 review F3 deferral).
+3. No automated assertion of backoff schedule timing (VC-3.1).
+4. No test that snapshots the Prometheus metrics surface after a realistic run (VC-3.6).
+5. No multi-server orchestration test (3+ servers, mixed lifecycles, concurrent diff application).
+6. CI invocation guidance for the `--ignored --features test-utils` matrix is undocumented.
+
+### Ground rules
+
+- **All tests in this PR run against `mock-llama`** — same convention as PR4–PR8. No real `llama-server` binary, no GPU.
+- **Each test must be self-contained in port allocation**: use the existing `static NEXT_PORT: AtomicU16` pattern from PR7 (start the counter at `19000` to avoid collisions with prior tests).
+- **`#[ignore]` on every test in this PR** — they take seconds-to-minutes each. CI runs them via `--ignored`.
+- **No `std::env::set_var`** — pass mock-llama config via the comma-packed `--alias "name,health_fail_after=N,..."` CLI surface (PR5 F1 fix).
+- **`#![cfg(feature = "test-utils")]`** at the top of every new file.
+- **Use `metrics_util::debugging::DebuggingRecorder`** for metric-snapshot tests (it's already a workspace dev-dep, added in PR1 Task 1.2).
+- **Use `tokio::time::pause()` / `advance()`** where wall-clock waits would otherwise exceed 30 seconds. Note that `pause()` cannot coexist with real TCP listeners — wall-clock tests that drive `mock-llama` cannot pause time. Pure-fn / state-machine tests can.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| [ ] 9.1 | **Combined scenario test (VC-3.6)** | Spawn 1 server with `mock-llama`, wait for Running, install a per-test `DebuggingRecorder` via `metrics::set_global_recorder` (note: global, so this test must run alone — see Task 9.6), then drive a sequence: (a) wait for first `/health` success → assert `llamaforge_server_status` = 2.0, `llamaforge_server_uptime_seconds` > 0; (b) kill the mock with SIGKILL → wait for Restarting → on restart, assert `restarts_total{reason="crash"}` incremented by 1; (c) inject deadlock by spawning mock-llama with `--alias "mock,hang_after=2"` so n_decoded stalls, AND configure `MockTelemetry` to return `utilization_percent = 5` → assert `restarts_total{reason="deadlock"}` increments AND SIGKILL is sent (verify via PID liveness check); (d) trigger degradation via `--alias "mock,tps=0.1"` plus pre-warmed rolling window (use the test-only `set_cumulative_requests_for_test`-style helper if needed, gated behind `test-utils`) and wait for 3 consecutive degraded ticks → assert `restarts_total{reason="degradation"}`. **Final assertion**: snapshot all 9 metrics from design Section 7.1 and verify each has ≥1 recorded observation with the documented label set. | `tests/scenario_full_stack.rs` |
+| [ ] 9.2 | **Degradation integration test (VC-4.5)** | Standalone test for the degradation path (separate from 9.1 to keep it focused). Spawn server with `restart_on_degradation = true` and `--alias "mock,tps=0.1"`. To bypass the cold-start guard without waiting 5 minutes of wall time, add a feature-gated `#[cfg(any(test, feature = "test-utils"))] pub fn force_warm_tps_window_for_test(&self, id, samples, baseline)` on `ServerManager` (mirrors `set_cumulative_requests_for_test` from PR8). Pre-seed 30 samples at 10.0 TPS, then let the manager run; mock returns near-zero TPS via /metrics; after ~30 seconds wall-clock (3 × 10s metrics ticks), assert lifecycle transitioned to `Restarting`, `server.performance_degraded` log fired, `restarts_total{reason="degradation"}` += 1. Mirror test with `restart_on_degradation = false`: assert WARN logged but lifecycle stays `Running`. | `tests/degradation_e2e.rs` |
+| [ ] 9.3 | **Backoff schedule timing test (VC-3.1)** | Pure-Rust async test (no `mock-llama`). Use `tokio::time::pause()` + `advance()` to fast-forward through 4 restart cycles. Provide a stub spawn function that always fails so the manager hits the backoff path. Measure `Instant`-stamped restart attempts (with `Instant::now()` referring to paused time). Assert: attempt 1 ∈ [8s, 12s], attempt 2 ∈ [16s, 24s], attempt 3 ∈ [32s, 48s], attempt 4 ∈ [32s, 48s] (capped). After `max_restart_attempts` reached, assert lifecycle = `Failed` and no further attempts fire even after advancing the clock another 5 minutes. Note: time::pause() requires `--start-paused` or explicit `tokio::time::pause()` at test entry; mock-llama-based tests cannot use this. | `tests/backoff_schedule.rs` |
+| [ ] 9.4 | **Multi-server orchestration test** | 3 servers configured: two on gpu:0 (with `restart_stagger_secs = 2`), one on gpu:1. Call `start()`. Assert: (a) the two gpu:0 servers reach Running in sequence with ≥ 2s gap; (b) the gpu:1 server reaches Running in parallel (overlapping the gpu:0 sequence); (c) after all three are Running, kill the gpu:0 first server externally → assert it transitions to Restarting and the gpu:0 second server is *not* disturbed; (d) call `apply_config_diff` removing the gpu:1 server while the gpu:0 first is restarting → assert gpu:1 drains/stops cleanly and gpu:0 servers are untouched; (e) `shutdown_all` → all reaped, SQLite `managed_processes` table empty, VRAM ledger empty. Wall-clock budget: ≤ 60 seconds total. | `tests/multi_server.rs` |
+| [ ] 9.5 | **Prometheus metric snapshot test** | (Subset of 9.1 isolated as its own test so it can run without the full scenario.) Spawn one server, wait for Running, fire 5 `increment_requests` calls + 5 `increment_pending` / `decrement_pending` round-trips. Snapshot the `DebuggingRecorder`. Assert all 9 design-Section-7.1 metric names appear with correct label keys: `llamaforge_server_status{server_id}`, `llamaforge_server_restarts_total{server_id, reason}` (empty until restarts), `llamaforge_server_uptime_seconds{server_id}`, `llamaforge_vram_reserved_bytes{gpu_id}`, `llamaforge_vram_free_bytes{gpu_id}` (may be absent if free-VRAM gauge isn't emitted by the poller yet — flag this as a follow-up if so), `llamaforge_gpu_utilization_pct{gpu_id}` (likely absent — same flag), `llamaforge_server_cumulative_requests{server_id}` = 5, `llamaforge_pending_dispatches{server_id}` = 0, `llamaforge_health_check_duration_seconds{server_id}` (histogram, ≥1 observation). Any metric that's documented but not emitted produces a `FIXME: emit <metric>` finding in PR9's output rather than a blocking failure — surface them as known gaps for follow-up. | `tests/metrics_surface.rs` |
+| [ ] 9.6 | **Test ordering / isolation** | The `metrics::set_global_recorder` API is install-once-per-process. Tests in Tasks 9.1 and 9.5 cannot both install a recorder. Two acceptable shapes: (a) gate both behind `#[serial_test::serial]` from the `serial_test` crate (add to workspace dev-deps additively), or (b) make 9.5 a subset of 9.1 (drop the standalone) and only install the recorder once. Pick (a) for clarity. Add `serial_test = "3"` to `[workspace.dependencies]` and inherit in server-manager's dev-deps. | `Cargo.toml` (workspace + server-manager), all metrics-recorder-installing tests |
+| [ ] 9.7 | **CI invocation note** | Add `docs/component-designs/03_SERVER_MANAGER_TESTING.md` (or extend existing) with: the two test invocations (`cargo test -p llamaforge-server-manager` for fast unit/proptest, `cargo test -p llamaforge-server-manager --features test-utils -- --ignored` for the integration suite), the leaked-port cleanup tip (`lsof -i:18100-19200` + kill), and any per-test wall-clock budget warnings. This is informational, not a test. | `docs/component-designs/03_SERVER_MANAGER_TESTING.md` |
+
+### PR9 Acceptance Criteria
+
+- [ ] `cargo test -p llamaforge-server-manager` (default features, no `--ignored`) still completes in < 5 seconds with no failures
+- [ ] `cargo test -p llamaforge-server-manager --features test-utils -- --ignored` runs all integration + scenario tests and passes
+- [ ] Each new test file declares `#![cfg(feature = "test-utils")]` at the top
+- [ ] Combined scenario test (9.1) exercises crash + deadlock + degradation in a single run and the `restarts_total` counter shows all three reasons
+- [ ] Backoff schedule test (9.3) runs in < 1 second wall-clock via `tokio::time::pause()` (verified by `timeout 10s cargo test ... test_backoff_schedule` not actually being needed)
+- [ ] Multi-server test (9.4) completes in < 60 seconds wall-clock
+- [ ] Any metric documented in design Section 7.1 but absent from the recorder snapshot is captured as a `FIXME: emit X` comment in the test output, not a panic — this is the discovery surface for follow-up emission gaps
+- [ ] `serial_test` added to workspace deps additively; no version pins on member crates
+- [ ] Testing doc lands at `docs/component-designs/03_SERVER_MANAGER_TESTING.md`
+
+### Reviewer notes
+
+This PR is intentionally test-only — no production code changes beyond optional test-helper additions (`force_warm_tps_window_for_test` in Task 9.2), which must be gated behind `#[cfg(any(test, feature = "test-utils"))]` and `#[doc(hidden)]` per the PR8 F1 lesson. If any test discovers a real bug in the production code, file it as a separate finding in the PR description and either fix it in a sibling PR or `#[ignore]` the failing test with a `// BUG: <issue>` comment.
+
+The proptest_manager.rs tests (PR8) are tautological by design — don't try to fix them in this PR; they're a separate cleanup item.
+
+### PR9 Creation Steps
+
+```bash
+git checkout -b server-manager/09-e2e main
+# ... implement tasks ...
+git add -A && git commit -m "server-manager: add E2E scenario tests and metrics snapshot suite"
+git push -u origin server-manager/09-e2e
+```
+
+---
+
 ## VC-4: Full Component Verification Checkpoint
 
 **Gate:** All 8 PRs merged. Server Manager is feature-complete.
