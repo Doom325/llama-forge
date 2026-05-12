@@ -18,6 +18,12 @@ pub struct RoutingWeights {
     w_affinity: f64,
 }
 
+impl Default for RoutingWeights {
+    fn default() -> Self {
+        Self { w_slots: 0.4, w_kv: 0.2, w_queue: 0.2, w_affinity: 0.2 }
+    }
+}
+
 impl RoutingWeights {
     pub fn builder() -> RoutingWeightsBuilder {
         RoutingWeightsBuilder::default()

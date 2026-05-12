@@ -63,6 +63,7 @@ prop_compose! {
             requestor: RequestorId::new(Arc::from(user_name.as_str())),
             requestor_class: RequestorClass::new(Arc::from("default")),
             model_target: ModelTarget::Exact(ModelAlias::new(Arc::from(model_name.as_str()))),
+            capabilities: Default::default(),
             explicit_override: override_val,
             response_tx: tx,
             cancel_token: CancellationToken::new(),
@@ -117,6 +118,7 @@ proptest! {
                 requestor: RequestorId::new(Arc::from("user1")),
                 requestor_class: RequestorClass::new(Arc::from("default")),
                 model_target: ModelTarget::Exact(ModelAlias::new(Arc::from("m1"))),
+                capabilities: Default::default(),
                 explicit_override: Some(500), // Fixed priority
                 response_tx: tx,
                 cancel_token: CancellationToken::new(),

@@ -211,16 +211,16 @@ Implement the `Router` struct with its three public methods: `has_capacity()`, `
 
 ### PR3 Acceptance Criteria
 
-- [ ] `select_server()` returns `RoutingDecision` with `SlotTarget::Auto` for all v1 decisions
-- [ ] Scoring formula matches design doc Section 3.1 exactly
-- [ ] `saturating_sub` prevents underflow on dispatch compensation
-- [ ] Zero-guard on `total_slots == 0` prevents division by zero / NaN
-- [ ] `debug_assert!(score.is_finite())` present after score computation
-- [ ] Round-robin uses `AtomicU64` with `.entry().or_default()` for hot-reloaded models
-- [ ] Recurrent model detection zeros KV cache and affinity components
-- [ ] All 3 port trait impls compile and delegate correctly
-- [ ] All 8 unit test suites pass
-- [ ] No `unwrap()` in production code
+- [x] `select_server()` returns `RoutingDecision` with `SlotTarget::Auto` for all v1 decisions
+- [x] Scoring formula matches design doc Section 3.1 exactly
+- [x] `saturating_sub` prevents underflow on dispatch compensation
+- [x] Zero-guard on `total_slots == 0` prevents division by zero / NaN
+- [x] `debug_assert!(score.is_finite())` present after score computation
+- [x] Round-robin uses `AtomicU64` with `.entry().or_default()` for hot-reloaded models
+- [x] Recurrent model detection zeros KV cache and affinity components
+- [x] All 3 port trait impls compile and delegate correctly
+- [x] All 8 unit test suites pass
+- [x] No `unwrap()` in production code
 
 ### PR3 Creation Steps
 

@@ -1,5 +1,36 @@
 //! Module: types
-use llamaforge_types::{ServerId, SessionId, SlotId};
+use llamaforge_types::{
+    Capability, LoraAdapterId, ModelAlias, ServerId, ServerLifecycle, SessionId, SlotId,
+};
+use std::collections::HashSet;
+
+/// A snapshot of a server's state, used by the router to make decisions.
+///
+/// See design doc Section 3.1.
+#[derive(Debug, Clone)]
+pub struct ServerSnapshot {
+    pub id: ServerId,
+    pub lifecycle: ServerLifecycle,
+    pub models: HashSet<ModelAlias>,
+    pub capabilities: HashSet<Capability>,
+    pub lora_adapters: HashSet<LoraAdapterId>,
+    pub multimodal: bool,
+    pub embedding: bool,
+    pub reranking: bool,
+    pub architecture: llamaforge_types::ModelArchitecture,
+    pub total_slots: u32,
+    pub idle_slots: u32,
+    pub kv_usage: f64,
+    pub deferred_ratio: f64,
+}
+
+/// Provides read-only snapshots of server state to the routing engine.
+///
+/// See design doc Section 2.1a and 4.1.
+pub trait ServerStateView: Send + Sync {
+    /// Returns snapshots of all servers in the system.
+    fn all_servers(&self) -> Vec<ServerSnapshot>;
+}
 
 /// Target for a specific slot, eliminating the `-1` sentinel for slot assignment.
 ///

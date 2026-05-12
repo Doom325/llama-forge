@@ -13,6 +13,7 @@ required-features = ["test-utils"]
 
 [dependencies]
 llamaforge-config = { workspace = true }
+llamaforge-types = { workspace = true }
 llamaforge-metrics = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

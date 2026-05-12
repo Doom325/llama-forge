@@ -42,8 +42,7 @@ pub enum RoutingError {
     #[error("Model {model} is currently unavailable. Server states: {server_states:?}")]
     ModelUnavailable {
         model: String,
-        // TODO(PR3): change String to ServerLifecycle once available or imported
-        server_states: Vec<(ServerId, String)>,
+        server_states: Vec<(ServerId, llamaforge_types::ServerLifecycle)>,
     },
 }
 
