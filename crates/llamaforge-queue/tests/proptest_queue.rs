@@ -1,8 +1,8 @@
-use llamaforge_queue::types::{IncomingRequest, TaskType, PRIORITY_CEILING};
+use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigReader, TomlFileConfigSource};
 use llamaforge_queue::admission::AdmissionController;
 use llamaforge_queue::queue::DispatchQueue;
-use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource, ConfigReader};
-use llamaforge_types::traits::CapacityChecker;
+use llamaforge_queue::types::{IncomingRequest, TaskType, PRIORITY_CEILING};
+use llamaforge_routing::CapacityChecker;
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
 use proptest::prelude::*;
 use std::sync::atomic::AtomicU32;
@@ -12,7 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn has_capacity(&self, _: &ModelTarget) -> bool { true }
+    fn has_capacity(&self, _: &ModelTarget) -> bool {
+        true
+    }
 }
 
 fn test_config() -> Arc<ConfigHandle> {
@@ -28,7 +30,11 @@ boost_start_after_secs = 2
 max_boost = 400
 "#;
     std::fs::write(tmp.path(), toml).unwrap();
-    let paths = ConfigPaths::new(tmp.path().to_path_buf(), tmp.path().to_path_buf(), tmp.path().parent().unwrap().to_path_buf());
+    let paths = ConfigPaths::new(
+        tmp.path().to_path_buf(),
+        tmp.path().to_path_buf(),
+        tmp.path().parent().unwrap().to_path_buf(),
+    );
     let source = Arc::new(TomlFileConfigSource::new(paths));
     Arc::new(ConfigHandle::load(source).unwrap())
 }
@@ -82,7 +88,7 @@ proptest! {
                 queue.enqueue(admitted);
             }
         }
-        
+
         expected_prios.sort_by(|a, b| b.cmp(a)); // Descending priority
 
         let cap = MockCapacityChecker;
@@ -163,12 +169,12 @@ proptest! {
 
         let depth = queue.depth();
         prop_assert_eq!(depth.total as usize, ids.len());
-        
+
         // Remove half
         for id in ids.iter().take(ids.len() / 2) {
             queue.cancel(*id);
         }
-        
+
         let depth_after = queue.depth();
         prop_assert_eq!(depth_after.total as usize, ids.len() - (ids.len() / 2));
     }

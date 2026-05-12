@@ -1,4 +1,4 @@
-use crate::types::{DispatchCandidate, QueuedRequest, QueueDepthInfo, TierLabel};
+use crate::types::{DispatchCandidate, QueueDepthInfo, QueuedRequest, TierLabel};
 use llamaforge_config::ConfigHandle;
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId};
 use std::cmp::Reverse;
@@ -17,11 +17,7 @@ pub(crate) struct FlatPriorityQueue {
 
 impl FlatPriorityQueue {
     pub(crate) fn new() -> Self {
-        Self {
-            queue: BTreeMap::new(),
-            index: HashMap::new(),
-            total_depth: 0,
-        }
+        Self { queue: BTreeMap::new(), index: HashMap::new(), total_depth: 0 }
     }
 
     pub(crate) fn insert(&mut self, req: QueuedRequest) {
@@ -34,7 +30,7 @@ impl FlatPriorityQueue {
     pub(crate) fn remove_by_id(&mut self, id: RequestId) -> Option<QueuedRequest> {
         let prio = self.index.remove(&id)?;
         let deque = self.queue.get_mut(&Reverse(prio))?;
-        
+
         let idx = deque.iter().position(|r| r.id == id)?;
         let req = deque.remove(idx)?;
 
@@ -46,7 +42,7 @@ impl FlatPriorityQueue {
         Some(req)
     }
 
-    pub(crate) fn try_dispatch_scan<C: llamaforge_types::traits::CapacityChecker + ?Sized>(
+    pub(crate) fn try_dispatch_scan<C: llamaforge_routing::CapacityChecker + ?Sized>(
         &mut self,
         capacity: &C,
     ) -> Option<(DispatchCandidate, u32)> {
@@ -78,11 +74,10 @@ impl FlatPriorityQueue {
             self.total_depth -= 1;
 
             let wait = req.enqueued_at.elapsed();
-            Some((DispatchCandidate {
-                request: req,
-                dispatch_priority: prio,
-                queue_wait: wait,
-            }, scan_depth))
+            Some((
+                DispatchCandidate { request: req, dispatch_priority: prio, queue_wait: wait },
+                scan_depth,
+            ))
         } else {
             None
         }
@@ -148,11 +143,7 @@ impl FlatPriorityQueue {
             }
         }
 
-        QueueDepthInfo {
-            total: self.total_depth,
-            by_tier,
-            by_model,
-        }
+        QueueDepthInfo { total: self.total_depth, by_tier, by_model }
     }
     pub(crate) fn maintenance_sweep(&mut self) -> Vec<QueuedRequest> {
         let mut to_remove = Vec::new();
@@ -160,7 +151,9 @@ impl FlatPriorityQueue {
 
         for deque in self.queue.values() {
             for req in deque.iter() {
-                if req.cancel_token.is_cancelled() || now.duration_since(req.enqueued_at) > req.queue_timeout {
+                if req.cancel_token.is_cancelled()
+                    || now.duration_since(req.enqueued_at) > req.queue_timeout
+                {
                     to_remove.push(req.id);
                 }
             }
@@ -183,10 +176,7 @@ pub(crate) struct SlidingWindowRate {
 
 impl SlidingWindowRate {
     pub(crate) fn new(window_size: Duration) -> Self {
-        Self {
-            timestamps: VecDeque::new(),
-            window_size,
-        }
+        Self { timestamps: VecDeque::new(), window_size }
     }
 
     pub(crate) fn record(&mut self) {
@@ -249,16 +239,16 @@ impl DispatchQueue {
         let id = req.id;
         let prio = req.effective_priority;
         let model_target = req.model_target.clone();
-        
+
         let pos = {
             let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
             inner.insert(QueuedRequest::from_admitted(req));
             inner.position(id).expect("request must be in index after insert")
         };
-        
+
         self.dispatch_notify.notify_one();
         self.dispatch_epoch.send_modify(|v| *v += 1);
-        
+
         let estimated_wait_secs = if let ModelTarget::Exact(alias) = &model_target {
             let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
             if let Some(rate_tracker) = rates.get_mut(alias) {
@@ -277,13 +267,13 @@ impl DispatchQueue {
         }
     }
 
-    pub fn try_dispatch<C: llamaforge_types::traits::CapacityChecker + ?Sized>(
+    pub fn try_dispatch<C: llamaforge_routing::CapacityChecker + ?Sized>(
         &self,
         capacity: &C,
     ) -> Option<DispatchCandidate> {
         let start_time = std::time::Instant::now();
         let depth_at_scan;
-        
+
         let candidate = {
             let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
             let result = inner.try_dispatch_scan(capacity);
@@ -294,19 +284,24 @@ impl DispatchQueue {
             }
             result.map(|(c, _)| c)
         }; // Lock released here
-        
+
         metrics::histogram!("llamaforge_dispatch_scan_depth").record(depth_at_scan as f64);
 
         if let Some(cand) = candidate {
             self.dispatch_epoch.send_modify(|v| *v += 1);
             if let ModelTarget::Exact(alias) = &cand.request.model_target {
                 let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
-                rates.entry(alias.clone()).or_insert_with(|| SlidingWindowRate::new(Duration::from_secs(60))).record();
+                rates
+                    .entry(alias.clone())
+                    .or_insert_with(|| SlidingWindowRate::new(Duration::from_secs(60)))
+                    .record();
             }
-            
-            metrics::histogram!("llamaforge_queue_wait_seconds").record(cand.queue_wait.as_secs_f64());
-            metrics::histogram!("llamaforge_dispatch_duration_seconds").record(start_time.elapsed().as_secs_f64());
-            
+
+            metrics::histogram!("llamaforge_queue_wait_seconds")
+                .record(cand.queue_wait.as_secs_f64());
+            metrics::histogram!("llamaforge_dispatch_duration_seconds")
+                .record(start_time.elapsed().as_secs_f64());
+
             Some(cand)
         } else {
             None
@@ -352,12 +347,13 @@ impl DispatchQueue {
     pub fn depth(&self) -> QueueDepthInfo {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let info = inner.depth_info();
-        
+
         metrics::gauge!("llamaforge_queue_depth").set(info.total as f64);
         for (model, depth) in &info.by_model {
-            metrics::gauge!("llamaforge_queue_depth_by_model", "model" => model.to_string()).set(*depth as f64);
+            metrics::gauge!("llamaforge_queue_depth_by_model", "model" => model.to_string())
+                .set(*depth as f64);
         }
-        
+
         // Update dispatch rate metrics
         let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
         for (model, rate) in rates.iter_mut() {
@@ -392,7 +388,7 @@ impl llamaforge_types::traits::SlotNotifier for DispatchQueue {
 mod tests {
     use super::*;
     use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
-    use llamaforge_types::traits::CapacityChecker;
+    use llamaforge_routing::CapacityChecker;
     use llamaforge_types::{ModelAlias, RequestId, RequestorClass, RequestorId};
     use std::sync::Arc;
     use tokio::sync::oneshot;
@@ -406,7 +402,9 @@ mod tests {
         fn has_capacity(&self, target: &ModelTarget) -> bool {
             match target {
                 ModelTarget::Exact(alias) => self.allowed_models.contains(alias),
-                ModelTarget::AnyOf(aliases) => aliases.iter().any(|a| self.allowed_models.contains(a)),
+                ModelTarget::AnyOf(aliases) => {
+                    aliases.iter().any(|a| self.allowed_models.contains(a))
+                }
                 ModelTarget::AnyWithCapability(_) => !self.allowed_models.is_empty(), // dummy logic
             }
         }
@@ -424,27 +422,33 @@ mod tests {
         Arc::new(ConfigHandle::load(source).unwrap())
     }
 
-    fn mock_admitted_with_rx(prio: u32, model: &str) -> (crate::types::AdmittedRequest, oneshot::Receiver<crate::types::DispatchResult>) {
+    fn mock_admitted_with_rx(
+        prio: u32,
+        model: &str,
+    ) -> (crate::types::AdmittedRequest, oneshot::Receiver<crate::types::DispatchResult>) {
         let (tx, rx) = oneshot::channel();
-        (crate::types::AdmittedRequest {
-            id: RequestId::new(uuid::Uuid::now_v7()),
-            payload: Arc::new(()),
-            task_type: crate::types::TaskType::Background,
-            requestor: RequestorId::new(Arc::from("user1")),
-            requestor_class: RequestorClass::new(Arc::from("default")),
-            model_target: ModelTarget::Exact(ModelAlias::new(Arc::from(model))),
-            effective_priority: prio,
-            base_priority: prio,
-            requestor_bonus: 0,
-            explicit_override: None,
-            enqueued_at: tokio::time::Instant::now(),
-            enqueued_at_utc: chrono::Utc::now(),
-            queue_timeout: Duration::from_secs(300),
-            response_tx: tx,
-            cancel_token: CancellationToken::new(),
-            trace_context: None,
-            request_span: None,
-        }, rx)
+        (
+            crate::types::AdmittedRequest {
+                id: RequestId::new(uuid::Uuid::now_v7()),
+                payload: Arc::new(()),
+                task_type: crate::types::TaskType::Background,
+                requestor: RequestorId::new(Arc::from("user1")),
+                requestor_class: RequestorClass::new(Arc::from("default")),
+                model_target: ModelTarget::Exact(ModelAlias::new(Arc::from(model))),
+                effective_priority: prio,
+                base_priority: prio,
+                requestor_bonus: 0,
+                explicit_override: None,
+                enqueued_at: tokio::time::Instant::now(),
+                enqueued_at_utc: chrono::Utc::now(),
+                queue_timeout: Duration::from_secs(300),
+                response_tx: tx,
+                cancel_token: CancellationToken::new(),
+                trace_context: None,
+                request_span: None,
+            },
+            rx,
+        )
     }
 
     fn mock_admitted(prio: u32, model: &str) -> crate::types::AdmittedRequest {
@@ -461,7 +465,8 @@ mod tests {
             q.enqueue(req);
         }
 
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         for id in ids {
             let cand = q.try_dispatch(&cap).unwrap();
             assert_eq!(cand.request.id, id);
@@ -476,7 +481,8 @@ mod tests {
         q.enqueue(mock_admitted(600, "model1"));
         q.enqueue(mock_admitted(300, "model1"));
 
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         assert_eq!(q.try_dispatch(&cap).unwrap().request.current_effective_priority, 600);
         assert_eq!(q.try_dispatch(&cap).unwrap().request.current_effective_priority, 300);
         assert_eq!(q.try_dispatch(&cap).unwrap().request.current_effective_priority, 100);
@@ -489,14 +495,15 @@ mod tests {
         let req_a = mock_admitted(600, "model_a");
         let id_a = req_a.id;
         q.enqueue(req_a);
-        
+
         let req_b = mock_admitted(100, "model_b");
         let id_b = req_b.id;
         q.enqueue(req_b);
 
-        // Only model_b has capacity. Even though model_a is higher priority, 
+        // Only model_b has capacity. Even though model_a is higher priority,
         // model_b should dispatch.
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model_b"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model_b"))] };
         let cand = q.try_dispatch(&cap).unwrap();
         assert_eq!(cand.request.id, id_b);
 
@@ -505,7 +512,8 @@ mod tests {
         assert_eq!(q.depth().total, 1);
 
         // Now model_a has capacity
-        let cap_a = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model_a"))] };
+        let cap_a =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model_a"))] };
         let cand_a = q.try_dispatch(&cap_a).unwrap();
         assert_eq!(cand_a.request.id, id_a);
         assert_eq!(q.depth().total, 0);
@@ -516,10 +524,10 @@ mod tests {
         let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
         let (req, rx) = mock_admitted_with_rx(100, "model1");
         let id = req.id;
-        
+
         q.enqueue(req);
         assert_eq!(q.depth().total, 1);
-        
+
         let removed = q.cancel(id);
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().id, id);
@@ -537,8 +545,9 @@ mod tests {
         q.enqueue(req);
 
         q.boost(id, 5000);
-        
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         let cand = q.try_dispatch(&cap).unwrap();
         assert_eq!(cand.request.current_effective_priority, crate::types::PRIORITY_CEILING);
     }
@@ -549,7 +558,7 @@ mod tests {
         let req1 = mock_admitted(500, "model1");
         let id1 = req1.id;
         q.enqueue(req1);
-        
+
         let req2 = mock_admitted(500, "model1");
         let id2 = req2.id;
         q.enqueue(req2);
@@ -557,7 +566,8 @@ mod tests {
         // Boost req1 to 500 (same prio). It should not move to the back of the queue.
         q.boost(id1, 500);
 
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         assert_eq!(q.try_dispatch(&cap).unwrap().request.id, id1);
         assert_eq!(q.try_dispatch(&cap).unwrap().request.id, id2);
     }
@@ -589,7 +599,8 @@ mod tests {
         rx.changed().await.unwrap();
         assert_eq!(*rx.borrow(), initial + 1);
 
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         q.try_dispatch(&cap);
         rx.changed().await.unwrap();
         assert_eq!(*rx.borrow(), initial + 2);
@@ -604,7 +615,7 @@ mod tests {
         for _ in 0..10 {
             q.enqueue(mock_admitted(100, "model1"));
         }
-        
+
         rx.changed().await.unwrap();
         assert_eq!(*rx.borrow(), initial + 10);
     }
@@ -612,13 +623,14 @@ mod tests {
     #[test]
     fn test_estimated_wait_time() {
         let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
-        
+
         // Cold model (no dispatches)
         let pos1 = q.enqueue(mock_admitted(100, "model1"));
         assert_eq!(pos1.estimated_wait_secs, None);
 
         // Record 10 dispatches in 60s window (rate = 1/6 per sec)
-        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        let cap =
+            MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         for _ in 0..10 {
             q.enqueue(mock_admitted(100, "model1"));
             q.try_dispatch(&cap);
@@ -626,10 +638,13 @@ mod tests {
 
         let pos2 = q.enqueue(mock_admitted(100, "model1"));
         assert!(pos2.estimated_wait_secs.is_some());
-        
+
         // AnyOf model target
         let mut req_any = mock_admitted(100, "model2");
-        req_any.model_target = ModelTarget::AnyOf(vec![ModelAlias::new(Arc::from("model1")), ModelAlias::new(Arc::from("model2"))]);
+        req_any.model_target = ModelTarget::AnyOf(vec![
+            ModelAlias::new(Arc::from("model1")),
+            ModelAlias::new(Arc::from("model2")),
+        ]);
         let pos3 = q.enqueue(req_any);
         assert_eq!(pos3.estimated_wait_secs, None);
     }
@@ -639,9 +654,9 @@ mod tests {
         let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
         let req = mock_admitted(100, "model1");
         let id = req.id;
-        
+
         q.enqueue(req);
-        
+
         let inner = q.inner.lock().unwrap();
         assert_eq!(inner.index.len(), 1);
         assert_eq!(inner.queue.len(), 1);

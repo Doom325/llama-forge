@@ -223,6 +223,12 @@ impl QueuedRequest {
     }
 }
 
+impl llamaforge_routing::RequestView for QueuedRequest {
+    fn model_target(&self) -> &ModelTarget {
+        &self.model_target
+    }
+}
+
 impl fmt::Debug for QueuedRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QueuedRequest")
@@ -252,7 +258,9 @@ impl fmt::Debug for DispatchResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Dispatched(_, _) => f.debug_tuple("Dispatched").field(&"<dyn Stream>").finish(),
-            Self::TimedOut { waited } => f.debug_struct("TimedOut").field("waited", waited).finish(),
+            Self::TimedOut { waited } => {
+                f.debug_struct("TimedOut").field("waited", waited).finish()
+            }
             Self::Cancelled => write!(f, "Cancelled"),
             Self::ShuttingDown => write!(f, "ShuttingDown"),
         }
@@ -327,14 +335,8 @@ mod tests {
             trace_context: None,
         };
 
-        let admitted = AdmittedRequest::from_incoming(
-            incoming,
-            450,
-            400,
-            50,
-            Duration::from_secs(60),
-            None,
-        );
+        let admitted =
+            AdmittedRequest::from_incoming(incoming, 450, 400, 50, Duration::from_secs(60), None);
 
         assert_eq!(admitted.effective_priority, 450);
         assert_eq!(admitted.queue_timeout, Duration::from_secs(60));

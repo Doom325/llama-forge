@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod traits;
@@ -12,9 +12,15 @@ pub mod traits;
 pub struct RequestId(Uuid);
 
 impl RequestId {
-    pub fn new(id: Uuid) -> Self { Self(id) }
-    pub fn as_uuid(&self) -> Uuid { self.0 }
-    pub fn into_inner(self) -> Uuid { self.0 }
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
+    pub fn into_inner(self) -> Uuid {
+        self.0
+    }
 }
 
 impl fmt::Display for RequestId {
@@ -30,9 +36,15 @@ impl fmt::Display for RequestId {
 pub struct ServerId(Uuid);
 
 impl ServerId {
-    pub fn new(id: Uuid) -> Self { Self(id) }
-    pub fn as_uuid(&self) -> Uuid { self.0 }
-    pub fn into_inner(self) -> Uuid { self.0 }
+    pub fn new(id: Uuid) -> Self {
+        Self(id)
+    }
+    pub fn as_uuid(&self) -> Uuid {
+        self.0
+    }
+    pub fn into_inner(self) -> Uuid {
+        self.0
+    }
 }
 
 impl fmt::Display for ServerId {
@@ -48,9 +60,15 @@ impl fmt::Display for ServerId {
 pub struct RequestorId(Arc<str>);
 
 impl RequestorId {
-    pub fn new(id: Arc<str>) -> Self { Self(id) }
-    pub fn as_str(&self) -> &str { &self.0 }
-    pub fn into_inner(self) -> Arc<str> { self.0 }
+    pub fn new(id: Arc<str>) -> Self {
+        Self(id)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn into_inner(self) -> Arc<str> {
+        self.0
+    }
 }
 
 impl fmt::Display for RequestorId {
@@ -66,9 +84,15 @@ impl fmt::Display for RequestorId {
 pub struct RequestorClass(Arc<str>);
 
 impl RequestorClass {
-    pub fn new(class: Arc<str>) -> Self { Self(class) }
-    pub fn as_str(&self) -> &str { &self.0 }
-    pub fn into_inner(self) -> Arc<str> { self.0 }
+    pub fn new(class: Arc<str>) -> Self {
+        Self(class)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn into_inner(self) -> Arc<str> {
+        self.0
+    }
 }
 
 impl fmt::Display for RequestorClass {
@@ -84,9 +108,15 @@ impl fmt::Display for RequestorClass {
 pub struct ModelAlias(Arc<str>);
 
 impl ModelAlias {
-    pub fn new(alias: Arc<str>) -> Self { Self(alias) }
-    pub fn as_str(&self) -> &str { &self.0 }
-    pub fn into_inner(self) -> Arc<str> { self.0 }
+    pub fn new(alias: Arc<str>) -> Self {
+        Self(alias)
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    pub fn into_inner(self) -> Arc<str> {
+        self.0
+    }
 }
 
 impl fmt::Display for ModelAlias {
@@ -114,8 +144,3 @@ pub enum Capability {
     Chat,
     Embedding,
 }
-
-/// A stub for QueuedRequest
-#[derive(Debug, Clone)]
-pub struct QueuedRequest;
-

@@ -1,12 +1,12 @@
 use crate::admission::AdmissionController;
 use crate::queue::DispatchQueue;
+use crate::types::DispatchResult;
 use llamaforge_config::{ConfigHandle, ConfigReader};
+use llamaforge_types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span};
-use std::time::Duration;
-use crate::types::DispatchResult;
-use llamaforge_types::traits::{AdmissionAccounting, DequeueReason, ActiveRequestProvider};
 
 /// Start background tasks for the queue.
 pub fn start_background_tasks(
@@ -70,11 +70,9 @@ async fn starvation_boost_loop(
     config: Arc<ConfigHandle>,
     shutdown: CancellationToken,
 ) {
-    let check_interval = {
-        config.snapshot().priority_rules.starvation.check_interval_secs as u64
-    };
+    let check_interval = { config.snapshot().priority_rules.starvation.check_interval_secs as u64 };
     let mut interval = tokio::time::interval(Duration::from_secs(check_interval.max(1)));
-    
+
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {
@@ -84,14 +82,14 @@ async fn starvation_boost_loop(
             _ = interval.tick() => {
                 let starv_cfg = config.snapshot().priority_rules.starvation.clone();
                 let snapshot = queue.snapshot_for_starvation();
-                
+
                 // Phase 2: Compute
                 let now = tokio::time::Instant::now();
                 let mut candidates = Vec::new();
                 for (id, enqueued_at, base_priority) in snapshot {
                     let elapsed_secs = now.duration_since(enqueued_at).as_secs();
                     let wait_secs = elapsed_secs.saturating_sub(starv_cfg.boost_start_after_secs as u64);
-                    
+
                     if wait_secs > 0 {
                         let intervals = wait_secs as f64 / starv_cfg.check_interval_secs as f64;
                         let boost = (starv_cfg.boost_scale * (1.0 + intervals).ln()).min(starv_cfg.max_boost as f64) as u32;
@@ -100,13 +98,13 @@ async fn starvation_boost_loop(
                         }
                     }
                 }
-                
+
                 // Phase 3: Apply
                 if !candidates.is_empty() {
                     let depth = queue.depth().total;
                     let boosted_count = candidates.len();
                     let span = info_span!("starvation_cycle", depth, boosted_count);
-                    
+
                     let q = queue.clone();
                     if depth > 200 {
                         let handle = tokio::task::spawn_blocking(move || {
@@ -122,7 +120,7 @@ async fn starvation_boost_loop(
                             apply_boost(q, candidates);
                         });
                     }
-                    
+
                     metrics::counter!("llamaforge_starvation_boost_applied_total").increment(boosted_count as u64);
                     metrics::histogram!("llamaforge_starvation_boost_duration_seconds").record(now.elapsed().as_secs_f64());
                 }
@@ -143,7 +141,7 @@ async fn maintenance_sweep_loop(
     shutdown: CancellationToken,
 ) {
     let mut interval = tokio::time::interval(Duration::from_secs(1));
-    
+
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {
@@ -154,7 +152,7 @@ async fn maintenance_sweep_loop(
                 let removed = queue.sweep();
                 let mut timeouts = 0;
                 let mut cancellations = 0;
-                
+
                 for req in removed {
                     if req.cancel_token.is_cancelled() {
                         cancellations += 1;
@@ -166,7 +164,7 @@ async fn maintenance_sweep_loop(
                         let _ = req.response_tx.send(DispatchResult::TimedOut { waited: req.queue_timeout });
                     }
                 }
-                
+
                 if timeouts > 0 {
                     metrics::counter!("llamaforge_queue_timeouts_total").increment(timeouts as u64);
                 }

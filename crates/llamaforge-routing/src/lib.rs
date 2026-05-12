@@ -10,11 +10,15 @@ pub mod router;
 pub mod types;
 pub mod weights;
 
-use llamaforge_types::{ModelTarget, QueuedRequest};
+use llamaforge_types::ModelTarget;
 
-// We define our own traits here. If `llamaforge-types` defines similar traits,
-// we define these as separate open traits because this crate owns the Smart Routing logic.
-// This is done to decouple the port traits per the component design.
+/// A read-only view of a request used by the routing layer.
+/// This prevents a bidirectional dependency or forcing the routing layer to know
+/// about the full `QueuedRequest` type from `llamaforge-queue`.
+pub trait RequestView: Send + Sync {
+    /// The target model for this request.
+    fn model_target(&self) -> &ModelTarget;
+}
 
 /// Breaks the bidirectional dependency between routing and dispatch crates.
 /// See design doc Section 2.1a.
@@ -33,7 +37,7 @@ pub trait CapacityChecker: Send + Sync {
 /// Used by Dispatch & Proxy (Component 06) to select a server after dequeue.
 pub trait ServerSelector: Send + Sync {
     /// Selects the best server for a given request.
-    fn select_server(&self, request: &QueuedRequest) -> Result<RoutingDecision, RoutingError>;
+    fn select_server(&self, request: &dyn RequestView) -> Result<RoutingDecision, RoutingError>;
 }
 
 /// Used by Transport Layer (Component 07) at admission time.

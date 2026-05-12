@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 llamaforge-types = { workspace = true }
 llamaforge-config = { workspace = true }
+llamaforge-routing = { workspace = true }
 dashmap = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
