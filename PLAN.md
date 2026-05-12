@@ -108,34 +108,34 @@ Define every data type from design doc Sections 2.3, 2.4: request lifecycle stru
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 2.1 | Implement `TaskType` enum | `Emergency`, `RealtimeChat`, `CodeReview`, `CodeGen`, `BatchAnalysis`, `Summarization`, `Background`, `Backfill`. Derive `Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display`. Add `#[serde(rename_all = "snake_case")]` to ensure `TaskType::RealtimeChat` serializes as `realtime_chat` for config file compatibility (design doc Section 3.1 uses snake_case keys). | `src/types.rs` |
-| 2.2 | Implement `TierLabel` enum | Variants ordered low-to-high: `Background`, `Standard`, `Realtime`, `Emergency`. Derive `Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize`. Implement `Display`, `from_priority(u32)`, `as_str()`. See design doc Section 2.3. | `src/types.rs` |
-| 2.3 | Implement `IncomingRequest` struct | All fields per design doc Section 2.3, including `trace_context: Option<opentelemetry::Context>`. | `src/types.rs` |
-| 2.4 | Implement `AdmittedRequest` struct | All fields per design doc Section 2.3. Implement `from_incoming()` conversion method that consumes `IncomingRequest` by value. | `src/types.rs` |
-| 2.5 | Implement `QueuedRequest` struct | All fields per design doc Section 2.3, including `current_effective_priority`, `trace_context: Option<opentelemetry::Context>`, and `request_span: Option<tracing::Span>` (the local tracing span created in `admit()` for request lifecycle correlation — distinct from the distributed OpenTelemetry `trace_context`; see design doc Section 7.3). Implement `QueuedRequest::from_admitted(AdmittedRequest) -> Self` — sets `current_effective_priority = effective_priority`, consumes `AdmittedRequest` by value. PR4's `enqueue()` (task 4.9) uses this conversion. | `src/types.rs` |
-| 2.6 | Implement `DispatchCandidate` struct | `request: QueuedRequest`, `dispatch_priority: u32`, `queue_wait: Duration`. Derive `Debug`. | `src/types.rs` |
-| 2.7 | Implement `DispatchResult` enum | Four variants: `Dispatched`, `TimedOut`, `Cancelled`, `ShuttingDown`. Manual `Debug` impl with `"<dyn Stream>"` placeholder for the stream field. NOT `Clone`. | `src/types.rs` |
-| 2.8 | Implement `QueuePosition` struct | `position: u32`, `estimated_wait_secs: Option<f64>`, `tier_label: TierLabel`. Derive `Debug, Clone, Serialize`. | `src/types.rs` |
-| 2.9 | Implement `QueueDepthInfo` struct | `total: u32`, `by_tier: HashMap<TierLabel, u32>`, `by_model: HashMap<ModelAlias, u32>`. Derive `Debug, Clone`. | `src/types.rs` |
-| 2.10 | Implement `DequeueReason` enum | `Dispatched`, `Cancelled`, `TimedOut`. Doc comment explaining eventual consistency of `queued--`/`in_flight++` transition. | `src/types.rs` |
-| 2.11 | Implement error types | `AdmissionError` (6 variants with `thiserror`) and `QueueError` (1 variant). `QueueFull` includes `retry_after_secs` computation note. See design doc Section 2.4. | `src/error.rs` |
-| 2.12 | Implement `AllowedPriorityRange` struct | `min: u32`, `max: u32`. Used to define the valid priority range for each task type per requestor class. PR3's priority range validation (task 3.7) depends on this type. | `src/config.rs` |
-| 2.12a | Implement `RequestorClassPolicy` config struct | `max_concurrent: u32`, `allowed_task_types: HashMap<TaskType, AllowedPriorityRange>`, `priority_bonus: i32`, `queue_timeout_secs: Option<u32>`. With `#[serde(default)]` on all fields. The `HashMap` maps each allowed task type to its valid priority range for this requestor class. | `src/config.rs` |
-| 2.13 | Implement `StarvationConfig` struct | `check_interval_secs`, `boost_scale`, `boost_start_after_secs`, `max_boost`. With defaults matching design doc Section 6.2. | `src/config.rs` |
-| 2.14 | Constants | `PRIORITY_CEILING: u32 = 1500`, `SLIDING_WINDOW_MAX_ENTRIES: usize = 2000`. | `src/types.rs` |
-| 2.15 | Unit tests: TierLabel | `from_priority()` mapping correctness, `Ord` ordering (Background < Standard < Realtime < Emergency), `Display` matches `as_str()`. | `src/types.rs` (tests) |
-| 2.16 | Unit tests: AdmittedRequest::from_incoming() | Verify field transfer, verify `enqueued_at` is set, verify `IncomingRequest` is consumed (move semantics). | `src/types.rs` (tests) |
-| 2.17 | Unit tests: DispatchResult Debug | Verify `Dispatched` prints `"<dyn Stream>"`, other variants print normally. | `src/types.rs` (tests) |
+| [x] 2.1 | Implement `TaskType` enum | `Emergency`, `RealtimeChat`, `CodeReview`, `CodeGen`, `BatchAnalysis`, `Summarization`, `Background`, `Backfill`. Derive `Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display`. Add `#[serde(rename_all = "snake_case")]` to ensure `TaskType::RealtimeChat` serializes as `realtime_chat` for config file compatibility (design doc Section 3.1 uses snake_case keys). | `src/types.rs` |
+| [x] 2.2 | Implement `TierLabel` enum | Variants ordered low-to-high: `Background`, `Standard`, `Realtime`, `Emergency`. Derive `Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize`. Implement `Display`, `from_priority(u32)`, `as_str()`. See design doc Section 2.3. | `src/types.rs` |
+| [x] 2.3 | Implement `IncomingRequest` struct | All fields per design doc Section 2.3, including `trace_context: Option<opentelemetry::Context>`. | `src/types.rs` |
+| [x] 2.4 | Implement `AdmittedRequest` struct | All fields per design doc Section 2.3. Implement `from_incoming()` conversion method that consumes `IncomingRequest` by value. | `src/types.rs` |
+| [x] 2.5 | Implement `QueuedRequest` struct | All fields per design doc Section 2.3, including `current_effective_priority`, `trace_context: Option<opentelemetry::Context>`, and `request_span: Option<tracing::Span>` (the local tracing span created in `admit()` for request lifecycle correlation — distinct from the distributed OpenTelemetry `trace_context`; see design doc Section 7.3). Implement `QueuedRequest::from_admitted(AdmittedRequest) -> Self` — sets `current_effective_priority = effective_priority`, consumes `AdmittedRequest` by value. PR4's `enqueue()` (task 4.9) uses this conversion. | `src/types.rs` |
+| [x] 2.6 | Implement `DispatchCandidate` struct | `request: QueuedRequest`, `dispatch_priority: u32`, `queue_wait: Duration`. Derive `Debug`. | `src/types.rs` |
+| [x] 2.7 | Implement `DispatchResult` enum | Four variants: `Dispatched`, `TimedOut`, `Cancelled`, `ShuttingDown`. Manual `Debug` impl with `"<dyn Stream>"` placeholder for the stream field. NOT `Clone`. | `src/types.rs` |
+| [x] 2.8 | Implement `QueuePosition` struct | `position: u32`, `estimated_wait_secs: Option<f64>`, `tier_label: TierLabel`. Derive `Debug, Clone, Serialize`. | `src/types.rs` |
+| [x] 2.9 | Implement `QueueDepthInfo` struct | `total: u32`, `by_tier: HashMap<TierLabel, u32>`, `by_model: HashMap<ModelAlias, u32>`. Derive `Debug, Clone`. | `src/types.rs` |
+| [x] 2.10 | Implement `DequeueReason` enum | `Dispatched`, `Cancelled`, `TimedOut`. Doc comment explaining eventual consistency of `queued--`/`in_flight++` transition. | `src/types.rs` |
+| [x] 2.11 | Implement error types | `AdmissionError` (6 variants with `thiserror`) and `QueueError` (1 variant). `QueueFull` includes `retry_after_secs` computation note. See design doc Section 2.4. | `src/error.rs` |
+| [x] 2.12 | Implement `AllowedPriorityRange` struct | `min: u32`, `max: u32`. Used to define the valid priority range for each task type per requestor class. PR3's priority range validation (task 3.7) depends on this type. | `src/config.rs` |
+| [x] 2.12a | Implement `RequestorClassPolicy` config struct | `max_concurrent: u32`, `allowed_task_types: HashMap<TaskType, AllowedPriorityRange>`, `priority_bonus: i32`, `queue_timeout_secs: Option<u32>`. With `#[serde(default)]` on all fields. The `HashMap` maps each allowed task type to its valid priority range for this requestor class. | `src/config.rs` |
+| [x] 2.13 | Implement `StarvationConfig` struct | `check_interval_secs`, `boost_scale`, `boost_start_after_secs`, `max_boost`. With defaults matching design doc Section 6.2. | `src/config.rs` |
+| [x] 2.14 | Constants | `PRIORITY_CEILING: u32 = 1500`, `SLIDING_WINDOW_MAX_ENTRIES: usize = 2000`. | `src/types.rs` |
+| [x] 2.15 | Unit tests: TierLabel | `from_priority()` mapping correctness, `Ord` ordering (Background < Standard < Realtime < Emergency), `Display` matches `as_str()`. | `src/types.rs` (tests) |
+| [x] 2.16 | Unit tests: AdmittedRequest::from_incoming() | Verify field transfer, verify `enqueued_at` is set, verify `IncomingRequest` is consumed (move semantics). | `src/types.rs` (tests) |
+| [x] 2.17 | Unit tests: DispatchResult Debug | Verify `Dispatched` prints `"<dyn Stream>"`, other variants print normally. | `src/types.rs` (tests) |
 
 ### PR2 Acceptance Criteria
 
-- [ ] All request lifecycle types compile with required traits
-- [ ] `TierLabel` ordering: `Background < Standard < Realtime < Emergency`
-- [ ] `AdmittedRequest::from_incoming()` consumes `IncomingRequest` by value
-- [ ] `DispatchResult` has manual `Debug` impl (does not derive `Debug`)
-- [ ] All error types implement `std::error::Error` via `thiserror`
-- [ ] `cargo test --workspace` passes all unit tests
-- [ ] No raw `String` used for domain identifiers — all use newtypes
+- [x] All request lifecycle types compile with required traits
+- [x] `TierLabel` ordering: `Background < Standard < Realtime < Emergency`
+- [x] `AdmittedRequest::from_incoming()` consumes `IncomingRequest` by value
+- [x] `DispatchResult` has manual `Debug` impl (does not derive `Debug`)
+- [x] All error types implement `std::error::Error` via `thiserror`
+- [x] `cargo test --workspace` passes all unit tests
+- [x] No raw `String` used for domain identifiers — all use newtypes
 
 ### PR2 Creation Steps
 
