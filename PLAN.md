@@ -267,11 +267,11 @@ Implement the `SessionAffinityCache` — an LRU cache mapping `SessionId → Ser
 
 ### PR4 Acceptance Criteria
 
-- [ ] `SessionAffinityCache` is `pub(crate)` — visible within `llamaforge-routing` but not to external crates
-- [ ] LRU cache correctly evicts oldest entries at capacity
-- [ ] `invalidate_server` removes all entries for the given server
-- [ ] PR4 does NOT modify `src/router.rs` — all Router integration deferred to PR5
-- [ ] All 4 unit test suites pass
+- [x] `SessionAffinityCache` is `pub(crate)` — visible within `llamaforge-routing` but not to external crates
+- [x] LRU cache correctly evicts oldest entries at capacity
+- [x] `invalidate_server` removes all entries for the given server
+- [x] PR4 does NOT modify `src/router.rs` — all Router integration deferred to PR5
+- [x] All 4 unit test suites pass
 
 ### PR4 Creation Steps
 
