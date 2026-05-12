@@ -307,7 +307,22 @@ impl DispatchQueue {
 
     pub fn depth(&self) -> QueueDepthInfo {
         let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        inner.depth_info()
+        let info = inner.depth_info();
+        
+        metrics::gauge!("llamaforge_queue_depth").set(info.total as f64);
+        for (model, depth) in &info.by_model {
+            metrics::gauge!("llamaforge_queue_depth_by_model", "model" => model.to_string()).set(*depth as f64);
+        }
+        
+        // Update dispatch rate metrics
+        let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
+        for (model, rate) in rates.iter_mut() {
+            if let Some(r) = rate.rate() {
+                metrics::gauge!("llamaforge_dispatch_rate_per_second", "model" => model.to_string()).set(r);
+            }
+        }
+
+        info
     }
 
     pub fn subscribe_dispatch_epoch(&self) -> watch::Receiver<u64> {
@@ -320,6 +335,12 @@ impl DispatchQueue {
 
     pub fn notify_slot_available(&self) {
         self.dispatch_notify.notify_one();
+    }
+}
+
+impl llamaforge_types::traits::SlotNotifier for DispatchQueue {
+    fn notify_slot_available(&self) {
+        self.notify_slot_available();
     }
 }
 
@@ -359,9 +380,9 @@ mod tests {
         Arc::new(ConfigHandle::load(source).unwrap())
     }
 
-    fn mock_admitted(prio: u32, model: &str) -> crate::types::AdmittedRequest {
-        let (tx, _) = oneshot::channel();
-        crate::types::AdmittedRequest {
+    fn mock_admitted_with_rx(prio: u32, model: &str) -> (crate::types::AdmittedRequest, oneshot::Receiver<crate::types::DispatchResult>) {
+        let (tx, rx) = oneshot::channel();
+        (crate::types::AdmittedRequest {
             id: RequestId::new(uuid::Uuid::now_v7()),
             payload: Arc::new(()),
             task_type: crate::types::TaskType::Background,
@@ -379,7 +400,11 @@ mod tests {
             cancel_token: CancellationToken::new(),
             trace_context: None,
             request_span: None,
-        }
+        }, rx)
+    }
+
+    fn mock_admitted(prio: u32, model: &str) -> crate::types::AdmittedRequest {
+        mock_admitted_with_rx(prio, model).0
     }
 
     #[test]
@@ -442,16 +467,12 @@ mod tests {
         assert_eq!(q.depth().total, 0);
     }
 
-    #[test]
-    fn test_cancel_removes_and_sends_result() {
+    #[tokio::test]
+    async fn test_cancel_removes_and_sends_result() {
         let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
-        let req = mock_admitted(100, "model1");
+        let (req, rx) = mock_admitted_with_rx(100, "model1");
         let id = req.id;
         
-        // We need to capture the Receiver side of the oneshot to verify Cancelled
-        // However, we used dummy channel in mock_admitted. This is a bit tricky to test
-        // the sending part without altering the struct visibility.
-        // We will just verify it gets removed.
         q.enqueue(req);
         assert_eq!(q.depth().total, 1);
         
@@ -459,6 +480,9 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(removed.unwrap().id, id);
         assert_eq!(q.depth().total, 0);
+
+        let result = rx.await.unwrap();
+        assert!(matches!(result, crate::types::DispatchResult::Cancelled));
     }
 
     #[test]
@@ -525,6 +549,45 @@ mod tests {
         q.try_dispatch(&cap);
         rx.changed().await.unwrap();
         assert_eq!(*rx.borrow(), initial + 2);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_epoch_coalescing() {
+        let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
+        let mut rx = q.subscribe_dispatch_epoch();
+        let initial = *rx.borrow();
+
+        for _ in 0..10 {
+            q.enqueue(mock_admitted(100, "model1"));
+        }
+        
+        rx.changed().await.unwrap();
+        assert_eq!(*rx.borrow(), initial + 10);
+    }
+
+    #[test]
+    fn test_estimated_wait_time() {
+        let q = DispatchQueue::new(test_config(), Arc::new(AtomicU32::new(0)));
+        
+        // Cold model (no dispatches)
+        let pos1 = q.enqueue(mock_admitted(100, "model1"));
+        assert_eq!(pos1.estimated_wait_secs, None);
+
+        // Record 10 dispatches in 60s window (rate = 1/6 per sec)
+        let cap = MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
+        for _ in 0..10 {
+            q.enqueue(mock_admitted(100, "model1"));
+            q.try_dispatch(&cap);
+        }
+
+        let pos2 = q.enqueue(mock_admitted(100, "model1"));
+        assert!(pos2.estimated_wait_secs.is_some());
+        
+        // AnyOf model target
+        let mut req_any = mock_admitted(100, "model2");
+        req_any.model_target = ModelTarget::AnyOf(vec![ModelAlias::new(Arc::from("model1")), ModelAlias::new(Arc::from("model2"))]);
+        let pos3 = q.enqueue(req_any);
+        assert_eq!(pos3.estimated_wait_secs, None);
     }
 
     #[test]
