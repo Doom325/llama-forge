@@ -2,7 +2,7 @@ use crate::config::RequestorClassPolicy;
 use crate::types::{AdmittedRequest, IncomingRequest, TaskType};
 use crate::error::AdmissionError;
 use dashmap::DashMap;
-use llamaforge_config::ConfigHandle;
+use llamaforge_config::{ConfigHandle, ConfigReader};
 use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -55,24 +55,25 @@ impl AdmissionController {
         )
     }
 
-    /// Get requestor policy. In a real scenario, this extracts from AppConfig.
-    /// Since AppConfig lacks this field currently, we mock a default policy 
-    /// or extract what we can.
-    fn get_requestor_policy(&self, _class: &RequestorClass) -> RequestorClassPolicy {
-        let _ = &self.config; // Silence dead_code if not allowed above
-        // Stub implementation until AppConfig supports this natively.
-        RequestorClassPolicy {
-            max_concurrent: 100,
-            ..Default::default()
+    /// Get requestor policy from AppConfig.
+    fn get_requestor_policy(&self, class: &RequestorClass) -> RequestorClassPolicy {
+        let snapshot = self.config.snapshot();
+        if let Some(policy) = snapshot.priority_rules.requestor_classes.get(class.as_str()) {
+            policy.clone()
+        } else {
+            RequestorClassPolicy {
+                max_concurrent: 100,
+                ..Default::default()
+            }
         }
     }
 
     fn get_max_queue_depth(&self) -> u32 {
-        // Stub implementation
-        1000
+        self.config.snapshot().global.queue_max_depth
     }
 
     pub fn admit(&self, req: IncomingRequest) -> Result<AdmittedRequest, AdmissionError> {
+        let start_time = tokio::time::Instant::now();
         let max_depth = self.get_max_queue_depth();
 
         // 1. CAS depth reservation
@@ -104,27 +105,34 @@ impl AdmissionController {
 
         // 2. Requestor lookup & concurrent limits
         let policy = self.get_requestor_policy(&req.requestor_class);
-        let usage = self.requestor_usage.entry(req.requestor.clone()).or_default();
-        let queued = usage.queued.load(Ordering::Relaxed);
-        let in_flight = usage.in_flight.load(Ordering::Relaxed);
         
-        if queued + in_flight >= policy.max_concurrent {
-            return Err(AdmissionError::RequestorLimit {
-                requestor: req.requestor.clone(),
-                current: queued + in_flight,
-                max: policy.max_concurrent,
-            });
+        {
+            let usage = self.requestor_usage.entry(req.requestor.clone()).or_default();
+            let queued = usage.queued.load(Ordering::Relaxed);
+            let in_flight = usage.in_flight.load(Ordering::Relaxed);
+            
+            if queued + in_flight >= policy.max_concurrent {
+                return Err(AdmissionError::RequestorLimit {
+                    requestor: req.requestor.clone(),
+                    current: queued + in_flight,
+                    max: policy.max_concurrent,
+                });
+            }
+
+            // Increment queued atomically
+            usage.queued.fetch_add(1, Ordering::SeqCst);
         }
 
-        // Increment queued atomically (rollback if later steps fail)
-        usage.queued.fetch_add(1, Ordering::SeqCst);
-        let usage_ref = usage.value();
-        let guard_queued = scopeguard::guard((), |_| {
-            usage_ref.queued.fetch_sub(1, Ordering::SeqCst);
+        let requestor_for_rollback = req.requestor.clone();
+        let requestor_usage_map = &self.requestor_usage;
+        let guard_queued = scopeguard::guard((), move |_| {
+            if let Some(usage) = requestor_usage_map.get(&requestor_for_rollback) {
+                usage.queued.fetch_sub(1, Ordering::SeqCst);
+            }
         });
 
         // 3. Task type authorization
-        if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&req.task_type) {
+        if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&req.task_type.to_string()) {
             return Err(AdmissionError::UnauthorizedTaskType { task_type: req.task_type });
         }
 
@@ -153,13 +161,15 @@ impl AdmissionController {
         let mut effective_priority = (base_priority as i32 + policy.priority_bonus).max(0) as u32;
 
         if let Some(override_val) = req.explicit_override {
-            if let Some(range) = policy.allowed_task_types.get(&req.task_type) {
+            if let Some(range) = policy.allowed_task_types.get(&req.task_type.to_string()) {
                 if override_val < range.min || override_val > range.max {
                     return Err(AdmissionError::PriorityOutOfRange { priority: override_val });
                 }
             }
             effective_priority = override_val;
         }
+        
+        effective_priority = effective_priority.min(crate::types::PRIORITY_CEILING);
 
         let queue_timeout = Duration::from_secs(policy.queue_timeout_secs.unwrap_or(300) as u64);
 
@@ -183,6 +193,7 @@ impl AdmissionController {
         // Metrics
         metrics::counter!("llamaforge_admission_total").increment(1);
         metrics::gauge!("llamaforge_admission_queued").increment(1.0);
+        metrics::histogram!("llamaforge_admission_duration_seconds").record(start_time.elapsed().as_secs_f64());
 
         // Success, disable rollbacks
         scopeguard::ScopeGuard::into_inner(guard);
@@ -195,20 +206,24 @@ impl AdmissionController {
 impl AdmissionAccounting for AdmissionController {
     fn record_completion(&self, requestor: &RequestorId) {
         if let Some(usage) = self.requestor_usage.get(requestor) {
-            usage.in_flight.fetch_sub(1, Ordering::Relaxed);
+            usage.in_flight.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_inflight").decrement(1.0);
+        } else {
+            tracing::warn!("record_completion called for unknown requestor: {}", requestor);
         }
     }
 
     fn record_dequeue(&self, requestor: &RequestorId, reason: DequeueReason) {
         if let Some(usage) = self.requestor_usage.get(requestor) {
-            usage.queued.fetch_sub(1, Ordering::Relaxed);
+            usage.queued.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_queued").decrement(1.0);
             
             if reason == DequeueReason::Dispatched {
-                usage.in_flight.fetch_add(1, Ordering::Relaxed);
+                usage.in_flight.fetch_add(1, Ordering::SeqCst);
                 metrics::gauge!("llamaforge_admission_inflight").increment(1.0);
             }
+        } else {
+            tracing::warn!("record_dequeue called for unknown requestor: {}", requestor);
         }
     }
 }
@@ -217,7 +232,6 @@ impl AdmissionAccounting for AdmissionController {
 mod tests {
     use super::*;
     use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
-    use llamaforge_types::traits::private::Token;
     use llamaforge_types::traits::CapacityChecker;
     use llamaforge_types::RequestId;
     use std::sync::atomic::AtomicU32;
@@ -233,10 +247,6 @@ mod tests {
     impl CapacityChecker for MockCapacityChecker {
         fn has_capacity(&self, _target: &ModelTarget) -> bool {
             self.capacity
-        }
-
-        fn _sealed(&self) -> Token {
-            Token
         }
     }
 
@@ -258,11 +268,27 @@ mod tests {
 
     fn test_config() -> Arc<ConfigHandle> {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        // Write a minimal valid config
-        std::fs::write(tmp.path(), "[global]\n").unwrap();
+        let tmp_rules = tempfile::NamedTempFile::new().unwrap();
+        let toml_str = r#"
+[global]
+queue_max_depth = 1000
+
+[priority_rules.requestor_classes.default]
+max_concurrent = 100
+priority_bonus = 50
+
+[priority_rules.requestor_classes.default.allowed_task_types.realtime_chat]
+min = 400
+max = 600
+
+[priority_rules.requestor_classes.restricted]
+max_concurrent = 10
+"#;
+        std::fs::write(tmp.path(), toml_str).unwrap();
+        std::fs::write(tmp_rules.path(), "").unwrap();
         let paths = ConfigPaths::new(
             tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
+            tmp_rules.path().to_path_buf(),
             tmp.path().parent().unwrap().to_path_buf(),
         );
         let source = Arc::new(TomlFileConfigSource::new(paths));
@@ -281,7 +307,7 @@ mod tests {
         assert!(res.is_ok());
 
         let admitted = res.unwrap();
-        assert_eq!(admitted.effective_priority, 400); // RealtimeChat base priority
+        assert_eq!(admitted.effective_priority, 450); // RealtimeChat base (400) + bonus (50)
 
         assert_eq!(queue_depth.load(Ordering::SeqCst), 1);
         let usage = controller.requestor_usage(&admitted.requestor);
@@ -376,11 +402,11 @@ mod tests {
         let model_validator = Arc::new(MockCapacityChecker { capacity: true });
         let controller = AdmissionController::new(config, queue_depth.clone(), model_validator);
 
-        // Our dummy policy allows everything by being empty. Let's skip deep test logic 
-        // for now since get_requestor_policy is stubbed, but we can verify the stub 
-        // behavior doesn't block.
-        let req = mock_incoming();
-        assert!(controller.admit(req).is_ok());
+        // "default" class only allows "realtime_chat" in the test config
+        let mut req = mock_incoming();
+        req.task_type = TaskType::Emergency; // Not in allowed_task_types
+        let res = controller.admit(req);
+        assert!(matches!(res, Err(AdmissionError::UnauthorizedTaskType { .. })));
     }
 
     #[test]
@@ -391,10 +417,15 @@ mod tests {
         let controller = AdmissionController::new(config, queue_depth.clone(), model_validator);
 
         let mut req = mock_incoming();
-        req.explicit_override = Some(9000); // Exceeds whatever range we configure later
-        // With an empty dummy policy, explicit overrides are accepted.
-        let admitted = controller.admit(req).unwrap();
-        assert_eq!(admitted.effective_priority, 9000);
+        // Range is 400..=600 for realtime_chat
+        req.explicit_override = Some(9000); 
+        let res = controller.admit(req);
+        assert!(matches!(res, Err(AdmissionError::PriorityOutOfRange { .. })));
+
+        let mut req2 = mock_incoming();
+        req2.explicit_override = Some(500); 
+        let admitted = controller.admit(req2).unwrap();
+        assert_eq!(admitted.effective_priority, 500);
     }
 
     #[tokio::test(flavor = "multi_thread")]

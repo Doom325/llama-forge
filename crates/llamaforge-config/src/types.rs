@@ -448,11 +448,28 @@ pub struct PriorityRulesConfig {
     #[serde(default)]
     pub requestor_bonuses: HashMap<RequestorId, i32>,
     #[serde(default)]
+    pub requestor_classes: HashMap<String, RequestorClassPolicy>,
+    #[serde(default)]
     pub starvation: StarvationConfig,
     #[serde(default)]
     pub fair_share: FairShareConfig,
     #[serde(default)]
     pub preemption: PreemptionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AllowedPriorityRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct RequestorClassPolicy {
+    pub max_concurrent: u32,
+    pub allowed_task_types: HashMap<String, AllowedPriorityRange>,
+    pub priority_bonus: i32,
+    pub queue_timeout_secs: Option<u32>,
 }
 
 /// Request starvation boost configuration.
@@ -606,6 +623,7 @@ mod tests {
                     TaskClassName::from("ui"),
                 )]),
                 requestor_bonuses: HashMap::from([(RequestorId::from("vip"), 100)]),
+                requestor_classes: HashMap::new(),
                 starvation: StarvationConfig { threshold_secs: 10, boost_per_interval: 5 },
                 fair_share: FairShareConfig {
                     weights: HashMap::from([(RequestorId::from("default"), 100)]),
