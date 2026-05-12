@@ -7,14 +7,6 @@ use thiserror::Error;
 /// Port traits defining boundaries between components.
 ///
 /// See design doc Section 2.2 and 2.3.
-#[doc(hidden)]
-pub mod private {
-    pub trait Sealed {}
-    pub struct Token;
-    // impl Sealed for Router is added in llamaforge-routing crate via a re-export or feature gate
-    // — Router cannot be referenced from llamaforge-types without a circular dependency.
-}
-
 /// Checks if there is any configured capacity for a given target.
 ///
 /// See design doc Section 2.2.
@@ -35,7 +27,7 @@ pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, DispatchError>
 /// Dispatches a request to a server.
 ///
 /// See design doc Section 2.2.
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait SlotDispatcher: Send + Sync {
     async fn dispatch(
         &self,
@@ -86,4 +78,5 @@ pub enum DequeueReason {
     Dispatched,
     Cancelled,
     TimedOut,
+    ShuttingDown,
 }
