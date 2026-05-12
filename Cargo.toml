@@ -63,6 +63,7 @@ pin-project-lite = "0.2"
 scopeguard = "1.2"
 async-trait = "0.1"
 tokio-stream = "0.1"
+tracing-opentelemetry = "0.28"
 
 [profile.release]
 lto = "thin"

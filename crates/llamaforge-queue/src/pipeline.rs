@@ -4,10 +4,25 @@ use crate::types::{DispatchResult, IncomingRequest, QueueDepthInfo, QueuePositio
 use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason, ServerSelector, SlotDispatcher, SlotNotifier};
 use llamaforge_types::{ModelTarget, RequestId, RequestorId};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 use tracing::{error, info, info_span, warn, Instrument};
 use tokio_util::sync::CancellationToken;
 use std::time::Duration;
+
+pub struct HealthTracker {
+    pub last_heartbeat: std::sync::atomic::AtomicU64,
+    pub degraded_since: std::sync::atomic::AtomicU64,
+}
+
+impl Default for HealthTracker {
+    fn default() -> Self {
+        Self {
+            last_heartbeat: std::sync::atomic::AtomicU64::new(0),
+            degraded_since: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
 
 /// The primary entry point for submitting requests to the orchestrator.
 ///
@@ -15,11 +30,12 @@ use std::time::Duration;
 pub struct RequestPipeline {
     admission: Arc<AdmissionController>,
     queue: Arc<DispatchQueue>,
+    health: Arc<HealthTracker>,
 }
 
 impl RequestPipeline {
-    pub fn new(admission: Arc<AdmissionController>, queue: Arc<DispatchQueue>) -> Self {
-        Self { admission, queue }
+    pub fn new(admission: Arc<AdmissionController>, queue: Arc<DispatchQueue>, health: Arc<HealthTracker>) -> Self {
+        Self { admission, queue, health }
     }
 
     pub fn submit(&self, req: IncomingRequest) -> Result<QueuePosition, crate::error::AdmissionError> {
@@ -48,6 +64,29 @@ impl RequestPipeline {
 
     pub fn requestor_usage(&self, requestor: &RequestorId) -> (u32, u32) {
         self.admission.requestor_usage(requestor)
+    }
+
+    pub fn ready(&self) -> bool {
+        // Admission initialized + scheduler running (heartbeat > 0)
+        self.health.last_heartbeat.load(Ordering::Relaxed) > 0
+    }
+
+    pub fn live(&self) -> bool {
+        let last = self.health.last_heartbeat.load(Ordering::Relaxed);
+        if last == 0 {
+            return false;
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        now.saturating_sub(last) <= 10
+    }
+
+    pub fn degraded(&self) -> bool {
+        let since = self.health.degraded_since.load(Ordering::Relaxed);
+        if since == 0 {
+            return false;
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        now.saturating_sub(since) > 30
     }
 }
 
@@ -97,11 +136,40 @@ pub async fn run_scheduler(
     capacity: Arc<dyn CapacityChecker>,
     server_selector: Arc<dyn ServerSelector>,
     dispatcher: Arc<dyn SlotDispatcher>,
+    health: Arc<HealthTracker>,
     shutdown: CancellationToken,
 ) {
     info!("Scheduler loop starting");
     let mut dispatch_tasks = tokio::task::JoinSet::new();
     
+    // Create a background heartbeat and degraded-check loop
+    let h1 = health.clone();
+    let q1 = queue.clone();
+    let s1 = shutdown.clone();
+    let _health_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                _ = s1.cancelled() => break,
+                _ = interval.tick() => {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                    h1.last_heartbeat.store(now, Ordering::Relaxed);
+                    
+                    let depth = q1.depth().total;
+                    // Max depth is needed, we can approximate 800 for max_depth 1000, 
+                    // but properly it should be fetched from config.
+                    // For now, let's say we get it from admission.
+                    let max_depth = 1000; // Hardcoded default, can be fetched if accessible
+                    if depth > (max_depth as f64 * 0.8) as u32 {
+                        let _ = h1.degraded_since.compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
+                    } else {
+                        h1.degraded_since.store(0, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+    });
+
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => {

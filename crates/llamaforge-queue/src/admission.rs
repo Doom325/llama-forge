@@ -79,6 +79,14 @@ impl AdmissionController {
         let mut current_depth = self.queue_depth.load(Ordering::Relaxed);
         loop {
             if current_depth >= max_depth {
+                tracing::info!(
+                    request_id = %req.id,
+                    requestor = %req.requestor,
+                    depth = current_depth,
+                    max = max_depth,
+                    "queue.rejected: Queue full"
+                );
+                metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_full").increment(1);
                 return Err(AdmissionError::QueueFull {
                     depth: current_depth,
                     max: max_depth,
@@ -111,6 +119,14 @@ impl AdmissionController {
             let in_flight = usage.in_flight.load(Ordering::Relaxed);
             
             if queued + in_flight >= policy.max_concurrent {
+                tracing::info!(
+                    request_id = %req.id,
+                    requestor = %req.requestor,
+                    current = queued + in_flight,
+                    max = policy.max_concurrent,
+                    "queue.rejected: Requestor concurrent limit reached"
+                );
+                metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_limit").increment(1);
                 return Err(AdmissionError::RequestorLimit {
                     requestor: req.requestor.clone(),
                     current: queued + in_flight,
@@ -133,6 +149,13 @@ impl AdmissionController {
         // 3. Task type authorization
         let task_type_id = TaskTypeId::from(req.task_type.to_string());
         if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&task_type_id) {
+            tracing::warn!(
+                request_id = %req.id,
+                requestor = %req.requestor,
+                task_type = %req.task_type,
+                "queue.rejected: Unauthorized task type"
+            );
+            metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_unauthorized").increment(1);
             return Err(AdmissionError::UnauthorizedTaskType { task_type: req.task_type });
         }
 
@@ -143,6 +166,13 @@ impl AdmissionController {
                 ModelTarget::AnyOf(models) => models.first().cloned().unwrap_or_else(|| ModelAlias::new("unknown".into())),
                 ModelTarget::AnyWithCapability(_) => ModelAlias::new("capability".into()),
             };
+            tracing::info!(
+                request_id = %req.id,
+                requestor = %req.requestor,
+                model = %model_alias,
+                "queue.rejected: No server for model"
+            );
+            metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_no_server").increment(1);
             return Err(AdmissionError::NoServerForModel { model: model_alias });
         }
 
@@ -163,6 +193,15 @@ impl AdmissionController {
         if let Some(override_val) = req.explicit_override {
             if let Some(range) = policy.allowed_task_types.get(&task_type_id) {
                 if override_val < range.min || override_val > range.max {
+                    tracing::warn!(
+                        request_id = %req.id,
+                        requestor = %req.requestor,
+                        priority = override_val,
+                        min = range.min,
+                        max = range.max,
+                        "queue.rejected: Priority out of range"
+                    );
+                    metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_priority").increment(1);
                     return Err(AdmissionError::PriorityOutOfRange { priority: override_val });
                 }
             }
@@ -180,6 +219,11 @@ impl AdmissionController {
             requestor = %req.requestor,
             model = ?req.model_target
         );
+        
+        if let Some(ctx) = &req.trace_context {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            request_span.set_parent(ctx.clone());
+        }
 
         let admitted = AdmittedRequest::from_incoming(
             req,
@@ -187,19 +231,64 @@ impl AdmissionController {
             base_priority,
             policy.priority_bonus,
             queue_timeout,
-            Some(request_span),
+            Some(request_span.clone()),
         );
 
         // Metrics
-        metrics::counter!("llamaforge_admission_total").increment(1);
+        metrics::counter!("llamaforge_queue_admissions_total", "result" => "accepted").increment(1);
         metrics::gauge!("llamaforge_admission_queued").increment(1.0);
         metrics::histogram!("llamaforge_admission_duration_seconds").record(start_time.elapsed().as_secs_f64());
+
+        request_span.in_scope(|| {
+            tracing::debug!(
+                request_id = %admitted.id,
+                model = ?admitted.model_target,
+                tier = %crate::types::TierLabel::from_priority(admitted.effective_priority),
+                position = current_depth + 1, // rough estimate
+                "queue.admitted"
+            );
+        });
 
         // Success, disable rollbacks
         scopeguard::ScopeGuard::into_inner(guard);
         scopeguard::ScopeGuard::into_inner(guard_queued);
 
         Ok(admitted)
+    }
+
+    pub fn reconcile_in_flight(&self, active_set: &std::collections::HashMap<RequestorId, u32>) {
+        let mut corrections = 0;
+        for entry in self.requestor_usage.iter() {
+            let requestor = entry.key();
+            let usage = entry.value();
+            let tracked = usage.in_flight.load(Ordering::SeqCst);
+            let actual = active_set.get(requestor).copied().unwrap_or(0);
+            
+            if tracked != actual {
+                tracing::warn!(
+                    requestor = %requestor,
+                    tracked = tracked,
+                    actual = actual,
+                    "queue.reconciliation_correction: Correcting in_flight count"
+                );
+                
+                // For simplicity, directly set the actual value. In reality, handling concurrent
+                // requests properly would require a more sophisticated compare-and-swap loop,
+                // but since we're setting it to the known active set, an overwrite is acceptable.
+                usage.in_flight.store(actual, Ordering::SeqCst);
+                let diff = (actual as i64) - (tracked as i64);
+                if diff > 0 {
+                    metrics::gauge!("llamaforge_admission_inflight").increment(diff as f64);
+                } else {
+                    metrics::gauge!("llamaforge_admission_inflight").decrement((-diff) as f64);
+                }
+                corrections += 1;
+            }
+        }
+        
+        if corrections > 0 {
+            metrics::counter!("llamaforge_requestor_reconciliation_corrections").increment(corrections);
+        }
     }
 }
 

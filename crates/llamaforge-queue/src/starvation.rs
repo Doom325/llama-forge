@@ -6,13 +6,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, info_span};
 use std::time::Duration;
 use crate::types::DispatchResult;
-use llamaforge_types::traits::{AdmissionAccounting, DequeueReason};
+use llamaforge_types::traits::{AdmissionAccounting, DequeueReason, ActiveRequestProvider};
 
 /// Start background tasks for the queue.
 pub fn start_background_tasks(
     queue: Arc<DispatchQueue>,
     admission: Arc<AdmissionController>,
     config: Arc<ConfigHandle>,
+    active_provider: Option<Arc<dyn ActiveRequestProvider>>,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinSet<()> {
     let q1 = queue.clone();
@@ -20,6 +21,7 @@ pub fn start_background_tasks(
     let s1 = shutdown.clone();
     let s2 = shutdown.clone();
     let c1 = config.clone();
+    let a2 = admission.clone();
 
     let mut tasks = tokio::task::JoinSet::new();
 
@@ -28,10 +30,39 @@ pub fn start_background_tasks(
     });
 
     tasks.spawn(async move {
-        maintenance_sweep_loop(q2, admission, s2).await;
+        maintenance_sweep_loop(q2, a2, s2).await;
     });
-    
+
+    if let Some(provider) = active_provider {
+        let s3 = shutdown.clone();
+        tasks.spawn(async move {
+            reconciliation_sweep_loop(admission, provider, s3).await;
+        });
+    }
     tasks
+}
+
+async fn reconciliation_sweep_loop(
+    admission: Arc<AdmissionController>,
+    provider: Arc<dyn ActiveRequestProvider>,
+    shutdown: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    // Skip immediate first tick
+    interval.tick().await;
+
+    loop {
+        tokio::select! {
+            _ = shutdown.cancelled() => {
+                info!("Reconciliation sweep loop exiting due to shutdown");
+                break;
+            }
+            _ = interval.tick() => {
+                let active_set = provider.active_requests();
+                admission.reconcile_in_flight(&active_set);
+            }
+        }
+    }
 }
 
 async fn starvation_boost_loop(
@@ -128,17 +159,11 @@ async fn maintenance_sweep_loop(
                     if req.cancel_token.is_cancelled() {
                         cancellations += 1;
                         admission.record_dequeue(&req.requestor, DequeueReason::Cancelled);
-                        let (dummy_tx, _) = tokio::sync::oneshot::channel();
-                        let mut real_tx = req.response_tx;
-                        let real_tx = std::mem::replace(&mut real_tx, dummy_tx);
-                        let _ = real_tx.send(DispatchResult::Cancelled);
+                        let _ = req.response_tx.send(DispatchResult::Cancelled);
                     } else {
                         timeouts += 1;
                         admission.record_dequeue(&req.requestor, DequeueReason::TimedOut);
-                        let (dummy_tx, _) = tokio::sync::oneshot::channel();
-                        let mut real_tx = req.response_tx;
-                        let real_tx = std::mem::replace(&mut real_tx, dummy_tx);
-                        let _ = real_tx.send(DispatchResult::TimedOut { waited: req.queue_timeout });
+                        let _ = req.response_tx.send(DispatchResult::TimedOut { waited: req.queue_timeout });
                     }
                 }
                 
