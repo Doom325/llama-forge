@@ -118,7 +118,7 @@ pub fn writer_thread_main(
         if let Some(cmd) = cmd {
             if matches!(cmd, WriterCommand::Shutdown) {
                 info!("Writer thread received Shutdown command");
-                handle_shutdown(&mut conn, &cmd_rx);
+                handle_shutdown(&mut conn, &mut state, &cmd_rx);
                 break;
             }
 
@@ -141,7 +141,11 @@ pub fn writer_thread_main(
     info!("Metrics writer thread exiting");
 }
 
-fn handle_shutdown(conn: &mut Connection, cmd_rx: &Receiver<WriterCommand>) {
+fn handle_shutdown(
+    conn: &mut Connection,
+    state: &mut WriterState,
+    cmd_rx: &Receiver<WriterCommand>,
+) {
     // 1. Drain all pending commands
     let mut drained = 0;
     while let Ok(cmd) = cmd_rx.try_recv() {
@@ -149,10 +153,7 @@ fn handle_shutdown(conn: &mut Connection, cmd_rx: &Receiver<WriterCommand>) {
             continue;
         }
 
-        // We bypass the state machine during shutdown to ensure we drain
-        // as much as possible, though if we are degraded, writes will fail anyway.
-        let mut dummy_state = WriterState::new(u32::MAX);
-        handle_command(conn, &mut dummy_state, cmd);
+        handle_command(conn, state, cmd);
         drained += 1;
     }
 
@@ -161,9 +162,13 @@ fn handle_shutdown(conn: &mut Connection, cmd_rx: &Receiver<WriterCommand>) {
     }
 
     // 2. Truncate checkpoint
-    match conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", []) {
-        Ok(_) => info!("Shutdown WAL checkpoint (TRUNCATE) complete"),
-        Err(e) => error!("Shutdown WAL checkpoint failed: {}", e),
+    if !state.is_degraded() {
+        match conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", []) {
+            Ok(_) => info!("Shutdown WAL checkpoint (TRUNCATE) complete"),
+            Err(e) => error!("Shutdown WAL checkpoint failed: {}", e),
+        }
+    } else {
+        warn!("Skipping shutdown WAL checkpoint due to degraded state");
     }
 
     // 3. Connection is closed implicitly when dropped

@@ -250,3 +250,129 @@ async fn test_writer_degradation() {
     let res3 = reply_rx.await.unwrap();
     assert!(matches!(res3, Err(StoreError::Unavailable { .. })));
 }
+
+#[tokio::test]
+async fn test_writer_shutdown_healthy_flushes() {
+    let (temp_dir, mut writer) = spawn_writer(10);
+
+    // Fill the channel with commands
+    for i in 0..100 {
+        let event = AuditEvent {
+            event_id: format!("evt-flush-{}", i),
+            event_type: EventType::Audit,
+            event_kind: "test".to_string(),
+            server_id: None,
+            request_id: None,
+            created_at: Utc::now(),
+            payload: serde_json::json!({}),
+        };
+        // We do not wait for the reply here, just push them to the channel
+        let (reply_tx, _reply_rx) = oneshot::channel();
+        writer
+            .tx
+            .send(WriterCommand::InsertEvents {
+                events: vec![event],
+                reply: reply_tx,
+                span: Span::none(),
+            })
+            .unwrap();
+    }
+
+    // Now send shutdown. We take the handle to join it.
+    let handle = writer.handle.take().unwrap();
+    writer.tx.send(WriterCommand::Shutdown).unwrap();
+
+    // Measure shutdown time
+    let start = std::time::Instant::now();
+    handle.join().unwrap();
+    let _elapsed = start.elapsed();
+
+    // Check that items were flushed
+    let db_path = temp_dir.path().join("llamaforge.db");
+    let read_conn = rusqlite::Connection::open(&db_path).unwrap();
+    let count: i64 =
+        read_conn.query_row("SELECT count(*) FROM audit_events", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 100);
+}
+
+#[tokio::test]
+async fn test_writer_shutdown_degraded_fast_fails() {
+    let event = AuditEvent {
+        event_id: "evt-fail".to_string(),
+        event_type: EventType::Audit,
+        event_kind: "test".to_string(),
+        server_id: None,
+        request_id: None,
+        created_at: Utc::now(),
+        payload: serde_json::json!({}),
+    };
+
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let db_path = temp_dir.path().join("llamaforge.db");
+    let (conn, _lock_file) = llamaforge_metrics::open_and_migrate(&db_path).unwrap();
+
+    let (tx, rx) = std::sync::mpsc::sync_channel(2000);
+    let writer_handle = std::thread::spawn(move || {
+        llamaforge_metrics::writer_thread_main(conn, rx, 1);
+    });
+
+    // 1. Send first to succeed
+    let (reply_tx, reply_rx) = oneshot::channel();
+    tx.send(WriterCommand::InsertEvents {
+        events: vec![event.clone()],
+        reply: reply_tx,
+        span: Span::none(),
+    })
+    .unwrap();
+    reply_rx.await.unwrap().unwrap();
+
+    // 2. Send second to fail and degrade
+    let (reply_tx, reply_rx) = oneshot::channel();
+    tx.send(WriterCommand::InsertEvents {
+        events: vec![event.clone()],
+        reply: reply_tx,
+        span: Span::none(),
+    })
+    .unwrap();
+    let _ = reply_rx.await.unwrap();
+
+    // 3. Flood 1000 commands
+    for i in 0..1000 {
+        let (reply_tx, _reply_rx) = oneshot::channel();
+        tx.send(WriterCommand::InsertEvents {
+            events: vec![AuditEvent {
+                event_id: format!("evt-drop-{}", i),
+                event_type: EventType::Audit,
+                event_kind: "test".to_string(),
+                server_id: None,
+                request_id: None,
+                created_at: Utc::now(),
+                payload: serde_json::json!({}),
+            }],
+            reply: reply_tx,
+            span: Span::none(),
+        })
+        .unwrap();
+    }
+
+    // 4. Send shutdown
+    tx.send(WriterCommand::Shutdown).unwrap();
+
+    let start = std::time::Instant::now();
+    writer_handle.join().unwrap();
+    let elapsed = start.elapsed();
+
+    // It should complete in under a second (way under)
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "Shutdown took too long: {:?}",
+        elapsed
+    );
+
+    // Verify it didn't write the 1000 events
+    let read_conn = rusqlite::Connection::open(&db_path).unwrap();
+    let count: i64 =
+        read_conn.query_row("SELECT count(*) FROM audit_events", [], |r| r.get(0)).unwrap();
+    // Only the first event should be there
+    assert_eq!(count, 1);
+}
