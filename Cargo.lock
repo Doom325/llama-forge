@@ -1114,6 +1114,27 @@ name = "llamaforge-proto"
 version = "0.1.0-draft"
 
 [[package]]
+name = "llamaforge-queue"
+version = "0.1.0-draft"
+dependencies = [
+ "bytes",
+ "chrono",
+ "dashmap",
+ "futures-core",
+ "llamaforge-config",
+ "llamaforge-types",
+ "metrics",
+ "opentelemetry",
+ "proptest",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "llamaforge-server-manager"
 version = "0.1.0-draft"
 dependencies = [
@@ -1140,6 +1161,17 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typed-builder",
+]
+
+[[package]]
+name = "llamaforge-types"
+version = "0.1.0-draft"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "serde",
+ "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]
@@ -1379,6 +1411,20 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "opentelemetry"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab70038c28ed37b97d8ed414b6429d343a8bbf44c9f79ec854f3a643029ba6d7"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "js-sys",
+ "pin-project-lite",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -2500,6 +2546,7 @@ checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
+ "serde_core",
  "wasm-bindgen",
 ]
 

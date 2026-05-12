@@ -1,0 +1,27 @@
+[package]
+name = "llamaforge-queue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+llamaforge-types = { workspace = true }
+llamaforge-config = { workspace = true }
+dashmap = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+opentelemetry = { workspace = true }
+metrics = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }
