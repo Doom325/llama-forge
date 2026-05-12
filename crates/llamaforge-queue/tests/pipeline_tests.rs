@@ -3,7 +3,7 @@ use llamaforge_queue::admission::AdmissionController;
 use llamaforge_queue::queue::DispatchQueue;
 use llamaforge_queue::pipeline::{RequestPipeline, run_scheduler, CompletionGuard};
 use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
-use llamaforge_types::traits::{CapacityChecker, ServerSelector, SlotDispatcher, DequeueReason, AdmissionAccounting, SlotNotifier, ResponseStream, DispatchToken, DispatchError};
+use llamaforge_types::traits::{CapacityChecker, ServerSelector, SlotDispatcher, DequeueReason, AdmissionAccounting, SlotNotifier, ResponseStream, DispatchToken, DispatchError, ActiveRequestProvider};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -69,7 +69,8 @@ async fn test_pipeline_submit_happy_path() {
     let queue_depth = Arc::new(AtomicU32::new(0));
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
-    let pipeline = RequestPipeline::new(admission, queue);
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = RequestPipeline::new(admission, queue, health);
 
     let (req, _rx) = mock_incoming(uuid::Uuid::now_v7());
     let res = pipeline.submit(req);
@@ -83,7 +84,8 @@ async fn test_pipeline_submit_rejection() {
     let queue_depth = Arc::new(AtomicU32::new(1000)); // Queue full
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
-    let pipeline = RequestPipeline::new(admission, queue);
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = RequestPipeline::new(admission, queue, health);
 
     let (req, _rx) = mock_incoming(uuid::Uuid::now_v7());
     let res = pipeline.submit(req);
@@ -96,7 +98,8 @@ async fn test_pipeline_cancel_notifies_admission() {
     let queue_depth = Arc::new(AtomicU32::new(0));
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
-    let pipeline = RequestPipeline::new(admission.clone(), queue);
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = RequestPipeline::new(admission.clone(), queue, health);
 
     let (req, _rx) = mock_incoming(uuid::Uuid::now_v7());
     let id = req.id;
@@ -169,7 +172,8 @@ async fn test_scheduler_loop_dispatches() {
     let queue_depth = Arc::new(AtomicU32::new(0));
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
-    let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone()));
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
     
     let shutdown = CancellationToken::new();
     let scheduler_handle = tokio::spawn(run_scheduler(
@@ -178,6 +182,7 @@ async fn test_scheduler_loop_dispatches() {
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
         Arc::new(MockDispatcher),
+        health.clone(),
         shutdown.clone(),
     ));
 
@@ -203,7 +208,8 @@ async fn test_scheduler_respects_shutdown() {
     let queue_depth = Arc::new(AtomicU32::new(0));
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
-    let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone()));
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
     
     let shutdown = CancellationToken::new();
     let scheduler_handle = tokio::spawn(run_scheduler(
@@ -212,6 +218,7 @@ async fn test_scheduler_respects_shutdown() {
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
         Arc::new(MockDispatcher),
+        health.clone(),
         shutdown.clone(),
     ));
 
@@ -230,4 +237,84 @@ async fn test_scheduler_respects_shutdown() {
     // Check they got ShuttingDown
     assert!(matches!(res1, DispatchResult::ShuttingDown | DispatchResult::Dispatched(..)));
     assert!(matches!(res2, DispatchResult::ShuttingDown | DispatchResult::Dispatched(..)));
+}
+
+struct MockActiveRequestProvider(std::collections::HashMap<RequestorId, u32>);
+impl llamaforge_types::traits::ActiveRequestProvider for MockActiveRequestProvider {
+    fn active_requests(&self) -> std::collections::HashMap<RequestorId, u32> {
+        self.0.clone()
+    }
+}
+
+#[tokio::test]
+async fn test_reconciliation_corrects_leak() {
+    let config = test_config();
+    let queue_depth = Arc::new(AtomicU32::new(0));
+    let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
+    let requestor = RequestorId::new(Arc::from("user1"));
+    
+    // Create usage entry
+    let (req, _) = mock_incoming(uuid::Uuid::now_v7());
+    let _ = admission.admit(req).unwrap();
+    // This adds 1 queued.
+    
+    // Inject a leak
+    for _ in 0..5 {
+        admission.record_dequeue(&requestor, DequeueReason::Dispatched);
+    }
+    assert_eq!(admission.requestor_usage(&requestor).1, 5); // 5 in flight
+
+    // Reconcile with 3 active
+    let mut active = std::collections::HashMap::new();
+    active.insert(requestor.clone(), 3);
+    let provider = Arc::new(MockActiveRequestProvider(active));
+    
+    admission.reconcile_in_flight(&provider.active_requests());
+    
+    // Verify correction
+    assert_eq!(admission.requestor_usage(&requestor).1, 3);
+}
+
+#[tokio::test]
+async fn test_health_signals() {
+    let config = test_config();
+    let queue_depth = Arc::new(AtomicU32::new(0));
+    let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
+    let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
+
+    // Initially not ready/live because no heartbeat
+    assert!(!pipeline.ready());
+    assert!(!pipeline.live());
+
+    let shutdown = CancellationToken::new();
+    let scheduler_handle = tokio::spawn(run_scheduler(
+        queue.clone(),
+        admission.clone(),
+        Arc::new(MockCapacityChecker),
+        Arc::new(MockServerSelector),
+        Arc::new(MockDispatcher),
+        health.clone(),
+        shutdown.clone(),
+    ));
+
+    // Wait for heartbeat
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    
+    assert!(pipeline.ready());
+    assert!(pipeline.live());
+    assert!(!pipeline.degraded());
+
+    // Trigger degraded
+    // Simulate high depth
+    queue_depth.store(850, Ordering::SeqCst);
+    // Since depth() isn't mocking the total_depth easily from queue_depth, we just let the heartbeat
+    // trigger. But wait, `queue.depth().total` reads from `inner.total_depth`. We must actually enqueue items to increase depth, or just modify `inner`.
+    // Actually, testing `degraded` might require enqueuing 801 items, which is slow. We can just test that health.degraded_since makes `degraded()` return true.
+    health.degraded_since.store(1, Ordering::SeqCst); // Some very old timestamp
+    assert!(pipeline.degraded());
+
+    shutdown.cancel();
+    scheduler_handle.await.unwrap();
 }

@@ -59,6 +59,13 @@ pub trait SlotNotifier: Send + Sync {
     fn notify_slot_available(&self);
 }
 
+/// Provides the true count of active (dispatched) requests per requestor.
+///
+/// Used for periodic reconciliation sweeps. See design doc Section 3.10.
+pub trait ActiveRequestProvider: Send + Sync {
+    fn active_requests(&self) -> std::collections::HashMap<RequestorId, u32>;
+}
+
 /// Result of a routing decision.
 #[derive(Debug, Clone)]
 pub struct RoutingDecision {

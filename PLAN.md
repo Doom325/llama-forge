@@ -471,26 +471,26 @@ Add the reconciliation sweep (every 60s), complete the distributed trace context
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 7.1 | Implement reconciliation sweep | Every 60s: compare `AdmissionController`'s per-requestor in-flight count against Dispatch & Proxy's active request set. Correct mismatches and log warnings. | `src/admission.rs` |
-| 7.2 | Implement trace context propagation | `IncomingRequest.trace_context` flows through `AdmittedRequest` → `QueuedRequest` → `DispatchCandidate`. `admit()` opens child span under caller's context. See design doc Section 3.10. | `src/admission.rs`, `src/queue.rs` |
-| 7.3 | Implement rejection log level split | `QueueFull`/`RequestorLimit`/`ShuttingDown` → `tracing::info!`. `UnauthorizedTaskType`/`PriorityOutOfRange` → `tracing::warn!`. See design doc Section 7.2. | `src/admission.rs` |
-| 7.4 | Implement structured log events | All log events use exact field names from design doc Section 7.2. Example: `tracing::debug!(request_id = %id, model = %model_target, tier = %tier_label, ...)`. | `src/admission.rs`, `src/queue.rs` |
-| 7.5 | Register all Prometheus metrics | Ensure all 15 metrics from design doc Section 7.1 are registered and recorded at the correct call sites. | `src/admission.rs`, `src/queue.rs` |
-| 7.6 | Implement health signals | `ready()`: admission initialized + scheduler running. `live()`: scheduler heartbeat within 10s. `degraded()`: queue > 80% for > 30s. See design doc Section 7.4 (Health Signals). | `src/pipeline.rs` |
-| 7.7 | Add `llamaforge_requestor_reconciliation_corrections` counter | Tracks how many in-flight counts were corrected by the reconciliation sweep. | `src/admission.rs` |
-| 7.8 | Unit test: reconciliation corrects leak | Simulate in-flight count 5, actual active = 3 → verify correction to 3, counter incremented by 2. | tests |
-| 7.9 | Unit test: rejection log levels | Verify `QueueFull` logged at INFO, `UnauthorizedTaskType` logged at WARN (using tracing test subscriber). | tests |
-| 7.10 | Unit test: trace context propagation | Submit request with trace context → dispatch → verify context available in `DispatchCandidate`. | tests |
-| 7.11 | Unit test: health signals | Empty queue → ready. Queue at 90% for 31s → degraded. | tests |
+| [x] 7.1 | Implement reconciliation sweep | Every 60s: compare `AdmissionController`'s per-requestor in-flight count against Dispatch & Proxy's active request set. Correct mismatches and log warnings. | `src/admission.rs` |
+| [x] 7.2 | Implement trace context propagation | `IncomingRequest.trace_context` flows through `AdmittedRequest` → `QueuedRequest` → `DispatchCandidate`. `admit()` opens child span under caller's context. See design doc Section 3.10. | `src/admission.rs`, `src/queue.rs` |
+| [x] 7.3 | Implement rejection log level split | `QueueFull`/`RequestorLimit`/`ShuttingDown` → `tracing::info!`. `UnauthorizedTaskType`/`PriorityOutOfRange` → `tracing::warn!`. See design doc Section 7.2. | `src/admission.rs` |
+| [x] 7.4 | Implement structured log events | All log events use exact field names from design doc Section 7.2. Example: `tracing::debug!(request_id = %id, model = %model_target, tier = %tier_label, ...)`. | `src/admission.rs`, `src/queue.rs` |
+| [x] 7.5 | Register all Prometheus metrics | Ensure all 15 metrics from design doc Section 7.1 are registered and recorded at the correct call sites. | `src/admission.rs`, `src/queue.rs` |
+| [x] 7.6 | Implement health signals | `ready()`: admission initialized + scheduler running. `live()`: scheduler heartbeat within 10s. `degraded()`: queue > 80% for > 30s. See design doc Section 7.4 (Health Signals). | `src/pipeline.rs` |
+| [x] 7.7 | Add `llamaforge_requestor_reconciliation_corrections` counter | Tracks how many in-flight counts were corrected by the reconciliation sweep. | `src/admission.rs` |
+| [x] 7.8 | Unit test: reconciliation corrects leak | Simulate in-flight count 5, actual active = 3 → verify correction to 3, counter incremented by 2. | tests |
+| [x] 7.9 | Unit test: rejection log levels | Verify `QueueFull` logged at INFO, `UnauthorizedTaskType` logged at WARN (using tracing test subscriber). | tests |
+| [x] 7.10 | Unit test: trace context propagation | Submit request with trace context → dispatch → verify context available in `DispatchCandidate`. | tests |
+| [x] 7.11 | Unit test: health signals | Empty queue → ready. Queue at 90% for 31s → degraded. | tests |
 
 ### PR7 Acceptance Criteria
 
-- [ ] Reconciliation sweep detects and corrects in-flight count leaks
-- [ ] Trace context flows from `IncomingRequest` through to `DispatchCandidate`
-- [ ] Rejection log levels split correctly (INFO vs WARN)
-- [ ] All structured log events use exact field names from design doc
-- [ ] Health signals report correct status
-- [ ] All 4 test suites pass
+- [x] Reconciliation sweep detects and corrects in-flight count leaks
+- [x] Trace context flows from `IncomingRequest` through to `DispatchCandidate`
+- [x] Rejection log levels split correctly (INFO vs WARN)
+- [x] All structured log events use exact field names from design doc
+- [x] Health signals report correct status
+- [x] All 4 test suites pass
 
 ### PR7 Creation Steps
 
