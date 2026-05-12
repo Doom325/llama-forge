@@ -116,30 +116,24 @@ async fn test_pipeline_integration_happy_path() {
     println!("test_pipeline_integration_happy_path: done");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test]
 async fn test_telemetry_channel_full_drops_event() {
-    let temp_dir = TempDir::new().unwrap();
-    let config = MetricsConfig {
-        db_path: temp_dir.path().join("llamaforge.db"),
-        telemetry_channel_capacity: 1, // Small channel
-        batch_flush_size: 1,           // Small batch
-        batch_flush_interval_ms: 1000, // Slow flush so it fills up
-        ..Default::default()
-    };
-
-    let pipeline = create_test_pipeline(&config).await;
     let initial_drops = telemetry_drops();
 
-    // Fill batch collector buffer
-    pipeline.ingest.send_telemetry(dummy_telemetry());
-    tokio::time::sleep(Duration::from_millis(10)).await;
+    // Create a dummy ingest with a 0-permit telemetry channel to force immediate drops
+    let (telemetry_tx, _telemetry_rx) = tokio::sync::mpsc::channel(1);
+    let (audit_tx, _audit_rx) = tokio::sync::mpsc::channel(1);
+    let audit_semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+    let ingest =
+        llamaforge_metrics::MetricsIngest::new_for_test(telemetry_tx, audit_tx, audit_semaphore);
 
-    // Fill channel
-    pipeline.ingest.send_telemetry(dummy_telemetry());
+    // First one succeeds (fills the channel of capacity 1)
+    assert!(ingest.send_telemetry(dummy_telemetry()));
 
-    // Next one should drop
-    assert!(!pipeline.ingest.send_telemetry(dummy_telemetry()));
+    // Next one drops immediately because the channel is full and there's no consumer
+    assert!(!ingest.send_telemetry(dummy_telemetry()));
 
+    // Assert at least one drop occurred. We use > because other concurrent tests might also drop.
     assert!(telemetry_drops() > initial_drops);
 }
 
