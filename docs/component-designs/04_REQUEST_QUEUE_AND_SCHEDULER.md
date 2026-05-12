@@ -80,8 +80,8 @@ pub struct QueuedRequest {
     pub id: RequestId,
     pub payload: Arc<InferencePayload>,  // Arc for cheap clone during starvation scan
     pub task_type: TaskType,
-    pub requestor: String,
-    pub requestor_class: String,         // bounded Prometheus label
+    pub requestor: RequestorId,
+    pub requestor_class: RequestorClass,         // bounded Prometheus label
     pub model_target: ModelTarget,       // which model(s) can serve this
     pub effective_priority: u32,
     pub base_priority: u32,
@@ -97,8 +97,8 @@ pub struct QueuedRequest {
 /// What model(s) can serve this request.
 #[derive(Debug, Clone)]
 pub enum ModelTarget {
-    Exact(String),                // specific model alias
-    AnyOf(Vec<String>),          // any of these aliases
+    Exact(ModelAlias),                // specific model alias
+    AnyOf(Vec<ModelAlias>),          // any of these aliases
     AnyWithCapability(Capability), // any model with this capability
 }
 
@@ -112,7 +112,7 @@ pub struct DispatchCandidate {
 
 /// Available capacity information (from Server Manager + Smart Routing).
 pub struct AvailableCapacity {
-    pub servers: Vec<(ServerId, Vec<String>, u32)>, // (id, model_aliases, free_slots)
+    pub servers: Vec<(ServerId, Vec<ModelAlias>, u32)>, // (id, model_aliases, free_slots)
 }
 
 /// Queue position feedback.
@@ -128,7 +128,34 @@ pub struct QueuePosition {
 pub struct QueueDepthInfo {
     pub total: u32,
     pub by_tier: HashMap<PriorityTier, u32>,
-    pub by_model: HashMap<String, u32>,
+    pub by_model: HashMap<ModelAlias, u32>,
+}
+
+/// Port traits.
+pub trait CapacityChecker: Send + Sync {
+    fn has_capacity(&self, target: &ModelTarget) -> bool;
+}
+
+#[allow(async_fn_in_trait)]
+pub trait SlotDispatcher: Send + Sync {
+    async fn dispatch(
+        &self,
+        server_id: &ServerId,
+        request: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+    ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError>;
+}
+
+pub trait ServerSelector: Send + Sync {
+    fn select_server(&self, target: &ModelTarget) -> Option<RoutingDecision>;
+}
+
+pub trait AdmissionAccounting: Send + Sync {
+    fn record_completion(&self, requestor: &RequestorId);
+    fn record_dequeue(&self, requestor: &RequestorId, reason: DequeueReason);
+}
+
+pub trait SlotNotifier: Send + Sync {
+    fn notify_slot_available(&self);
 }
 ```
 
@@ -594,18 +621,6 @@ On SIGTERM:
 | Resource | Bound | Worst Case |
 |----------|-------|------------|
 | QueuedRequest | ~500 bytes (payload is Arc) | 1000 × 500B = 500KB |
-| Index HashMap | ~100 bytes per entry | 1000 × 100B = 100KB |
-| DRR sliding window | 60s × ~10 entries/sec | 600 × 16B = 10KB |
-| Per-requestor semaphores | ~100 bytes per requestor | 50 requestors × 100B = 5KB |
-
-**Total worst case:** < 1MB at max queue depth. Fully bounded by `queue_max_depth`.
-
-### Backpressure
-
-- **Admission → Transport Layer:** Queue full returns 429 with `Retry-After`. Transport Layer passes this to client. Client implements exponential backoff.
-- **Dispatch → Scheduler loop:** If no capacity, `try_dispatch` returns None. Scheduler sleeps on `Notify` until `notify_slot_available()`. No busy-spinning.
-- **Starvation → Queue:** If boost cycle is slow (>200 entries), it runs on blocking thread pool. Main scheduler loop unaffected.
-rc) | 1000 × 500B = 500KB |
 | Index HashMap | ~100 bytes per entry | 1000 × 100B = 100KB |
 | DRR sliding window | 60s × ~10 entries/sec | 600 × 16B = 10KB |
 | Per-requestor semaphores | ~100 bytes per requestor | 50 requestors × 100B = 5KB |
