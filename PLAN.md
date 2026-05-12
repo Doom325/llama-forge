@@ -512,15 +512,15 @@ Close the E2E coverage gaps identified in the PR8 reviewer feedback. The existin
 
 ### PR9 Acceptance Criteria
 
-- [ ] `cargo test -p llamaforge-server-manager` (default features, no `--ignored`) still completes in < 5 seconds with no failures
-- [ ] `cargo test -p llamaforge-server-manager --features test-utils -- --ignored` runs all integration + scenario tests and passes
-- [ ] Each new test file declares `#![cfg(feature = "test-utils")]` at the top
-- [ ] Combined scenario test (9.1) exercises crash + deadlock + degradation in a single run and the `restarts_total` counter shows all three reasons
-- [ ] Backoff schedule test (9.3) runs in < 1 second wall-clock via `tokio::time::pause()` (verified by `timeout 10s cargo test ... test_backoff_schedule` not actually being needed)
-- [ ] Multi-server test (9.4) completes in < 60 seconds wall-clock
-- [ ] Any metric documented in design Section 7.1 but absent from the recorder snapshot is captured as a `FIXME: emit X` comment in the test output, not a panic — this is the discovery surface for follow-up emission gaps
-- [ ] `serial_test` added to workspace deps additively; no version pins on member crates
-- [ ] Testing doc lands at `docs/component-designs/03_SERVER_MANAGER_TESTING.md`
+- [x] `cargo test -p llamaforge-server-manager` (default features, no `--ignored`) still completes in < 5 seconds with no failures
+- [x] `cargo test -p llamaforge-server-manager --features test-utils -- --ignored` runs all integration + scenario tests and passes
+- [x] Each new test file declares `#![cfg(feature = "test-utils")]` at the top
+- [x] Combined scenario test (9.1) exercises crash + deadlock + degradation in a single run and the `restarts_total` counter shows all three reasons
+- [x] Backoff schedule test (9.3) runs in < 1 second wall-clock via `tokio::time::pause()` (verified by `timeout 10s cargo test ... test_backoff_schedule` not actually being needed)
+- [x] Multi-server test (9.4) completes in < 60 seconds wall-clock
+- [x] Any metric documented in design Section 7.1 but absent from the recorder snapshot is captured as a `FIXME: emit X` comment in the test output, not a panic — this is the discovery surface for follow-up emission gaps
+- [x] `serial_test` added to workspace deps additively; no version pins on member crates
+- [x] Testing doc lands at `docs/component-designs/03_SERVER_MANAGER_TESTING.md`
 
 ### Reviewer notes
 

@@ -56,6 +56,9 @@ pub(crate) struct ServerState {
     pub reserved_vram_bytes: u64,
     /// Token used to signal this specific server task to shutdown.
     pub task_shutdown_token: tokio_util::sync::CancellationToken,
+
+    #[cfg(any(test, feature = "test-utils"))]
+    pub test_warm_tps_samples: Option<(usize, f64)>,
 }
 
 impl ServerState {
@@ -110,6 +113,8 @@ mod tests {
             gguf_metadata: None,
             reserved_vram_bytes: 0,
             task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+            #[cfg(any(test, feature = "test-utils"))]
+            test_warm_tps_samples: None,
         };
 
         let snapshot = state.to_snapshot();

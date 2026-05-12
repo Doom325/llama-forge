@@ -35,6 +35,7 @@ proptest = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 typed-builder = { workspace = true }
 metrics-util = { workspace = true, features = ["debugging"] }
+serial_test = { workspace = true }
 
 [features]
 test-utils = ["dep:axum", "dep:tower"]
