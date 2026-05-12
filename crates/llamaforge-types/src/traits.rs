@@ -18,13 +18,10 @@ pub mod private {
 /// Checks if there is any configured capacity for a given target.
 ///
 /// See design doc Section 2.2.
-pub trait CapacityChecker: private::Sealed + Send + Sync {
+pub trait CapacityChecker: Send + Sync {
     /// Returns true if at least one server is configured that could potentially
     /// serve this target model. Does not check if the server is currently idle.
     fn has_capacity(&self, target: &ModelTarget) -> bool;
-
-    #[doc(hidden)]
-    fn _sealed(&self) -> private::Token;
 }
 
 /// A token representing a dispatched request.

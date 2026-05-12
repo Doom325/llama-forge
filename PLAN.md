@@ -181,36 +181,36 @@ Implement the `AdmissionController` — the policy gate. This is a standalone co
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 3.1 | Implement `RequestorUsage` struct | `queued: AtomicU32`, `in_flight: AtomicU32`. Internal to admission module. | `src/admission.rs` |
-| 3.2 | Implement `AdmissionController` struct | `config: Arc<ConfigHandle>`, `requestor_usage: DashMap<RequestorId, RequestorUsage>`, `queue_depth: Arc<AtomicU32>`. Constructor takes `config` and `queue_depth`. | `src/admission.rs` |
-| 3.3 | Implement `admit()` — CAS depth reservation | Step 1: `queue_depth.compare_exchange(current, current + 1)` in a loop. If `current >= max` → `AdmissionError::QueueFull` with computed `retry_after_secs`. On CAS failure, retry. On later-step failure, rollback with `fetch_sub(1)`. | `src/admission.rs` |
-| 3.4 | Implement `admit()` — requestor lookup | Step 2: Load `RequestorClassPolicy` from config. Check `queued + in_flight < max_concurrent`. Increment `queued` atomically. | `src/admission.rs` |
-| 3.5 | Implement `admit()` — task type authorization | Step 3: Check requestor class `allowed_task_types`. Return `AdmissionError::UnauthorizedTaskType` if not allowed. | `src/admission.rs` |
-| 3.6 | Implement `admit()` — model validation | Step 4: Validate model target is recognized via a `dyn ModelValidator` port trait (or reuse `dyn CapacityChecker::has_capacity()`) injected at `AdmissionController` construction time. Do NOT import concrete config or routing types — this must go through a port trait to respect boundary constraints. Return `AdmissionError::NoServerForModel` if no server is configured for the target model. | `src/admission.rs` |
-| 3.7 | Implement `admit()` — priority computation | Step 5: `effective_priority = base_priority(task_type) + requestor_bonus`. If `explicit_priority_override` set, validate within allowed range. Return `AdmissionError::PriorityOutOfRange` if outside. | `src/admission.rs` |
-| 3.8 | Implement `admit()` — produce AdmittedRequest | Step 6: Use `AdmittedRequest::from_incoming()`. Compute `queue_timeout` from per-class override or global default. | `src/admission.rs` |
-| 3.9 | Implement `record_completion()` | Decrement `in_flight` for the requestor. Uses `fetch_sub(1, Relaxed)`. | `src/admission.rs` |
-| 3.10 | Implement `record_dequeue()` | Match on `DequeueReason`: `Dispatched` → `queued--`, `in_flight++`. `Cancelled`/`TimedOut` → `queued--` only. | `src/admission.rs` |
-| 3.11 | Implement `requestor_usage()` | Return `(queued, in_flight)` for a given `RequestorId`. | `src/admission.rs` |
-| 3.12 | Implement `AdmissionAccounting` trait for `AdmissionController` | Delegate `record_completion` and `record_dequeue`. | `src/admission.rs` |
-| 3.13 | Add admission tracing spans | `request` span opened in `admit()` with `request_id`, `requestor`, `model` fields. Stored in `AdmittedRequest` for lifecycle correlation. See design doc Section 7.3 (Tracing Spans — the first 7.3, not Health Signals). | `src/admission.rs` |
-| 3.14 | Add admission metrics | `llamaforge_admission_total` counter, `llamaforge_admission_duration_seconds` histogram, `llamaforge_admission_queued` and `llamaforge_admission_inflight` gauges. Inline recording per design doc Section 7.1 (Metrics table). | `src/admission.rs` |
-| 3.15 | Unit tests: admission happy path | Admit a request → verify `AdmittedRequest` has correct priority, queued count incremented, queue depth incremented. | tests |
-| 3.16 | Unit tests: queue full rejection | Fill queue to `max_depth` → next admission returns `QueueFull` with `retry_after_secs > 0`. | tests |
-| 3.17 | Unit tests: requestor limit | Requestor at `max_concurrent` → next admission returns `RequestorLimit`. Verify queued + in_flight both count. | tests |
-| 3.18 | Unit tests: task type authorization | `batch-worker` submits `emergency` → `UnauthorizedTaskType`. | tests |
-| 3.19 | Unit tests: priority range validation | Priority override outside allowed range → `PriorityOutOfRange`. | tests |
-| 3.20 | Unit tests: CAS contention | Spawn 100 concurrent `admit()` calls against a max_depth of 50 → verify exactly 50 succeed, 50 rejected, queue_depth == 50. | tests |
-| 3.21 | Unit tests: dequeue reason transitions | Admit → `record_dequeue(Dispatched)` → verify queued=0, in_flight=1. `record_completion()` → verify in_flight=0. Admit → `record_dequeue(Cancelled)` → verify queued=0, in_flight=0. | tests |
+| [x] 3.1 | Implement `RequestorUsage` struct | `queued: AtomicU32`, `in_flight: AtomicU32`. Internal to admission module. | `src/admission.rs` |
+| [x] 3.2 | Implement `AdmissionController` struct | `config: Arc<ConfigHandle>`, `requestor_usage: DashMap<RequestorId, RequestorUsage>`, `queue_depth: Arc<AtomicU32>`. Constructor takes `config` and `queue_depth`. | `src/admission.rs` |
+| [x] 3.3 | Implement `admit()` — CAS depth reservation | Step 1: `queue_depth.compare_exchange(current, current + 1)` in a loop. If `current >= max` → `AdmissionError::QueueFull` with computed `retry_after_secs`. On CAS failure, retry. On later-step failure, rollback with `fetch_sub(1)`. | `src/admission.rs` |
+| [x] 3.4 | Implement `admit()` — requestor lookup | Step 2: Load `RequestorClassPolicy` from config. Check `queued + in_flight < max_concurrent`. Increment `queued` atomically. | `src/admission.rs` |
+| [x] 3.5 | Implement `admit()` — task type authorization | Step 3: Check requestor class `allowed_task_types`. Return `AdmissionError::UnauthorizedTaskType` if not allowed. | `src/admission.rs` |
+| [x] 3.6 | Implement `admit()` — model validation | Step 4: Validate model target is recognized via a `dyn ModelValidator` port trait (or reuse `dyn CapacityChecker::has_capacity()`) injected at `AdmissionController` construction time. Do NOT import concrete config or routing types — this must go through a port trait to respect boundary constraints. Return `AdmissionError::NoServerForModel` if no server is configured for the target model. | `src/admission.rs` |
+| [x] 3.7 | Implement `admit()` — priority computation | Step 5: `effective_priority = base_priority(task_type) + requestor_bonus`. If `explicit_priority_override` set, validate within allowed range. Return `AdmissionError::PriorityOutOfRange` if outside. | `src/admission.rs` |
+| [x] 3.8 | Implement `admit()` — produce AdmittedRequest | Step 6: Use `AdmittedRequest::from_incoming()`. Compute `queue_timeout` from per-class override or global default. | `src/admission.rs` |
+| [x] 3.9 | Implement `record_completion()` | Decrement `in_flight` for the requestor. Uses `fetch_sub(1, Relaxed)`. | `src/admission.rs` |
+| [x] 3.10 | Implement `record_dequeue()` | Match on `DequeueReason`: `Dispatched` → `queued--`, `in_flight++`. `Cancelled`/`TimedOut` → `queued--` only. | `src/admission.rs` |
+| [x] 3.11 | Implement `requestor_usage()` | Return `(queued, in_flight)` for a given `RequestorId`. | `src/admission.rs` |
+| [x] 3.12 | Implement `AdmissionAccounting` trait for `AdmissionController` | Delegate `record_completion` and `record_dequeue`. | `src/admission.rs` |
+| [x] 3.13 | Add admission tracing spans | `request` span opened in `admit()` with `request_id`, `requestor`, `model` fields. Stored in `AdmittedRequest` for lifecycle correlation. See design doc Section 7.3 (Tracing Spans — the first 7.3, not Health Signals). | `src/admission.rs` |
+| [x] 3.14 | Add admission metrics | `llamaforge_admission_total` counter, `llamaforge_admission_duration_seconds` histogram, `llamaforge_admission_queued` and `llamaforge_admission_inflight` gauges. Inline recording per design doc Section 7.1 (Metrics table). | `src/admission.rs` |
+| [x] 3.15 | Unit tests: admission happy path | Admit a request → verify `AdmittedRequest` has correct priority, queued count incremented, queue depth incremented. | tests |
+| [x] 3.16 | Unit tests: queue full rejection | Fill queue to `max_depth` → next admission returns `QueueFull` with `retry_after_secs > 0`. | tests |
+| [x] 3.17 | Unit tests: requestor limit | Requestor at `max_concurrent` → next admission returns `RequestorLimit`. Verify queued + in_flight both count. | tests |
+| [x] 3.18 | Unit tests: task type authorization | `batch-worker` submits `emergency` → `UnauthorizedTaskType`. | tests |
+| [x] 3.19 | Unit tests: priority range validation | Priority override outside allowed range → `PriorityOutOfRange`. | tests |
+| [x] 3.20 | Unit tests: CAS contention | Spawn 100 concurrent `admit()` calls against a max_depth of 50 → verify exactly 50 succeed, 50 rejected, queue_depth == 50. | tests |
+| [x] 3.21 | Unit tests: dequeue reason transitions | Admit → `record_dequeue(Dispatched)` → verify queued=0, in_flight=1. `record_completion()` → verify in_flight=0. Admit → `record_dequeue(Cancelled)` → verify queued=0, in_flight=0. | tests |
 
 ### PR3 Acceptance Criteria
 
-- [ ] `admit()` is O(1) amortized (DashMap lookup + CAS loop + atomic increments)
-- [ ] CAS loop correctly handles contention (no over-admission)
-- [ ] Rollback on later-step failure (depth decremented if requestor check fails)
-- [ ] All 7 unit test suites pass
-- [ ] No `unwrap()` in production code
-- [ ] `AdmissionAccounting` trait implemented
+- [x] `admit()` is O(1) amortized (DashMap lookup + CAS loop + atomic increments)
+- [x] CAS loop correctly handles contention (no over-admission)
+- [x] Rollback on later-step failure (depth decremented if requestor check fails)
+- [x] All 7 unit test suites pass
+- [x] No `unwrap()` in production code
+- [x] `AdmissionAccounting` trait implemented
 
 ### PR3 Creation Steps
 

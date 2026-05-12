@@ -215,6 +215,7 @@ fn arb_priority_rules_config() -> impl Strategy<Value = PriorityRulesConfig> {
                 custom_task_types,
                 task_type_classes,
                 requestor_bonuses,
+                requestor_classes: Default::default(),
                 starvation,
                 fair_share,
                 preemption,

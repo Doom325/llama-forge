@@ -18,9 +18,9 @@ pub use source::toml_file::TomlFileConfigSource;
 pub use source::ConfigSource;
 pub use traits::{ConfigReader, ConfigWriter};
 pub use types::{
-    AppConfig, Backend, CacheType, ConfigMutation, ConfigPaths, DeviceSpec, FairShareConfig,
+    AllowedPriorityRange, AppConfig, Backend, CacheType, ConfigMutation, ConfigPaths, DeviceSpec, FairShareConfig,
     FlashAttnMode, GlobalConfig, GpuId, GrpcConfig, LogFormat, LogLevel, LoraAdapterConfig,
     ModelArchitecture, MutationOutcome, PreemptionConfig, PriorityRulesConfig, PrometheusConfig,
-    RequestorId, ServerConfig, ServerId, SpeculativeMethod, StarvationConfig, TaskClassName,
+    RequestorClassPolicy, RequestorId, ServerConfig, ServerId, SpeculativeMethod, StarvationConfig, TaskClassName,
     TaskTypeId, WebUiConfig,
 };
