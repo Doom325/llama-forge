@@ -43,11 +43,16 @@ impl TomlFileConfigSource {
                 // Fix rounding errors to ensure exact 100 sum
                 let new_sum: u32 = config.priority_rules.fair_share.weights.values().sum();
                 if new_sum != 100 && !config.priority_rules.fair_share.weights.is_empty() {
-                    if let Some(first_id) =
-                        config.priority_rules.fair_share.weights.keys().next().cloned()
+                    // Find the key with the maximum weight
+                    if let Some(max_id) = config
+                        .priority_rules
+                        .fair_share
+                        .weights
+                        .iter()
+                        .max_by_key(|&(_, w)| *w)
+                        .map(|(k, _)| k.clone())
                     {
-                        if let Some(w) = config.priority_rules.fair_share.weights.get_mut(&first_id)
-                        {
+                        if let Some(w) = config.priority_rules.fair_share.weights.get_mut(&max_id) {
                             if new_sum < 100 {
                                 *w += 100 - new_sum;
                             } else {
@@ -442,6 +447,45 @@ threshold_secs = 60
             *config.priority_rules.fair_share.weights.get(&RequestorId::from("b")).unwrap(),
             50
         );
+    }
+
+    #[test]
+    fn test_fair_share_normalization_bug_101_with_zero() {
+        let mut config = AppConfig::default();
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("a"), 3);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("b"), 3);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("c"), 2);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("d"), 0);
+
+        TomlFileConfigSource::validate(&mut config).unwrap();
+
+        let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+        assert_eq!(sum, 100);
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_fair_share_normalization_proptest(
+            weights in prop::collection::hash_map("[a-z]", 0..1000u32, 1..20)
+        ) {
+            let mut config = AppConfig::default();
+            for (k, v) in weights {
+                config.priority_rules.fair_share.weights.insert(RequestorId::from(k), v);
+            }
+
+            let orig_sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+
+            TomlFileConfigSource::validate(&mut config).unwrap();
+
+            let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+            if orig_sum > 0 {
+                prop_assert_eq!(sum, 100);
+            } else {
+                prop_assert_eq!(sum, 0);
+            }
+        }
     }
 
     #[test]
