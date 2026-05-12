@@ -275,10 +275,16 @@ async fn test_reconciliation_corrects_leak() {
     assert_eq!(admission.requestor_usage(&requestor).1, 3);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_health_signals() {
     let config = test_config();
     let queue_depth = Arc::new(AtomicU32::new(0));
+
+    struct NoCapacityChecker;
+    impl CapacityChecker for NoCapacityChecker {
+        fn has_capacity(&self, _: &ModelTarget) -> bool { false }
+    }
+
     let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
     let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
     let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
@@ -292,7 +298,7 @@ async fn test_health_signals() {
     let scheduler_handle = tokio::spawn(run_scheduler(
         queue.clone(),
         admission.clone(),
-        Arc::new(MockCapacityChecker),
+        Arc::new(NoCapacityChecker),
         Arc::new(MockServerSelector),
         Arc::new(MockDispatcher),
         health.clone(),
@@ -307,12 +313,19 @@ async fn test_health_signals() {
     assert!(!pipeline.degraded());
 
     // Trigger degraded
-    // Simulate high depth
-    queue_depth.store(850, Ordering::SeqCst);
-    // Since depth() isn't mocking the total_depth easily from queue_depth, we just let the heartbeat
-    // trigger. But wait, `queue.depth().total` reads from `inner.total_depth`. We must actually enqueue items to increase depth, or just modify `inner`.
-    // Actually, testing `degraded` might require enqueuing 801 items, which is slow. We can just test that health.degraded_since makes `degraded()` return true.
-    health.degraded_since.store(1, Ordering::SeqCst); // Some very old timestamp
+    // Simulate high depth by enqueuing 801 items
+    for i in 0..801 {
+        let (mut req, _rx) = mock_incoming(uuid::Uuid::now_v7());
+        req.requestor = RequestorId::new(Arc::from(format!("user{}", i)));
+        pipeline.submit(req).unwrap();
+    }
+
+    // Let the heartbeat trigger and set degraded_since
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!pipeline.degraded()); // Not degraded yet, only since 2 seconds
+
+    // Advance 31 seconds so it crosses the 30s degraded threshold
+    tokio::time::sleep(Duration::from_secs(31)).await;
     assert!(pipeline.degraded());
 
     shutdown.cancel();

@@ -40,6 +40,7 @@ async fn setup_store() -> (TempDir, llamaforge_metrics::MetricsPipeline) {
     use std::io::Write;
     writeln!(file, "[global]").unwrap();
     writeln!(file, "metrics_db_path = \"{}\"", db_path.to_str().unwrap()).unwrap();
+    writeln!(file, "metrics_retention_days = 999999").unwrap();
     std::fs::write(&priority_rules, "").unwrap();
 
     let paths = llamaforge_config::ConfigPaths::new(config_path, priority_rules, state_dir);
@@ -47,7 +48,7 @@ async fn setup_store() -> (TempDir, llamaforge_metrics::MetricsPipeline) {
     let handle = llamaforge_config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
     let reader: std::sync::Arc<dyn llamaforge_config::ConfigReader> = std::sync::Arc::new(handle);
 
-    let config = MetricsConfig { db_path, ..Default::default() };
+    let config = MetricsConfig { db_path, retention_days: 999999, ..Default::default() };
     let pipeline = create_metrics_pipeline(&config, reader).unwrap();
     (temp_dir, pipeline)
 }

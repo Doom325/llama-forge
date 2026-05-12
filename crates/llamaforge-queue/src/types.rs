@@ -115,6 +115,19 @@ pub struct IncomingRequest {
     pub trace_context: Option<opentelemetry::Context>,
 }
 
+impl fmt::Debug for IncomingRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IncomingRequest")
+            .field("id", &self.id)
+            .field("task_type", &self.task_type)
+            .field("requestor", &self.requestor)
+            .field("requestor_class", &self.requestor_class)
+            .field("model_target", &self.model_target)
+            .field("explicit_override", &self.explicit_override)
+            .finish()
+    }
+}
+
 pub struct AdmittedRequest {
     pub id: RequestId,
     pub payload: Arc<InferencePayload>,
