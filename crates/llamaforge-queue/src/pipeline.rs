@@ -4,22 +4,21 @@ use crate::types::{DispatchResult, IncomingRequest, QueueDepthInfo, QueuePositio
 use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason, ServerSelector, SlotDispatcher, SlotNotifier};
 use llamaforge_types::{ModelTarget, RequestId, RequestorId};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tokio::sync::watch;
 use tracing::{error, info, info_span, warn, Instrument};
 use tokio_util::sync::CancellationToken;
 use std::time::Duration;
 
 pub struct HealthTracker {
-    pub last_heartbeat: std::sync::atomic::AtomicU64,
-    pub degraded_since: std::sync::atomic::AtomicU64,
+    pub last_heartbeat: std::sync::RwLock<Option<tokio::time::Instant>>,
+    pub degraded_since: std::sync::RwLock<Option<tokio::time::Instant>>,
 }
 
 impl Default for HealthTracker {
     fn default() -> Self {
         Self {
-            last_heartbeat: std::sync::atomic::AtomicU64::new(0),
-            degraded_since: std::sync::atomic::AtomicU64::new(0),
+            last_heartbeat: std::sync::RwLock::new(None),
+            degraded_since: std::sync::RwLock::new(None),
         }
     }
 }
@@ -68,25 +67,25 @@ impl RequestPipeline {
 
     pub fn ready(&self) -> bool {
         // Admission initialized + scheduler running (heartbeat > 0)
-        self.health.last_heartbeat.load(Ordering::Relaxed) > 0
+        self.health.last_heartbeat.read().unwrap().is_some()
     }
 
     pub fn live(&self) -> bool {
-        let last = self.health.last_heartbeat.load(Ordering::Relaxed);
-        if last == 0 {
-            return false;
+        let last = *self.health.last_heartbeat.read().unwrap();
+        if let Some(last_time) = last {
+            last_time.elapsed().as_secs() <= 10
+        } else {
+            false
         }
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        now.saturating_sub(last) <= 10
     }
 
     pub fn degraded(&self) -> bool {
-        let since = self.health.degraded_since.load(Ordering::Relaxed);
-        if since == 0 {
-            return false;
+        let since = *self.health.degraded_since.read().unwrap();
+        if let Some(since_time) = since {
+            since_time.elapsed().as_secs() > 30
+        } else {
+            false
         }
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        now.saturating_sub(since) > 30
     }
 }
 
@@ -146,24 +145,25 @@ pub async fn run_scheduler(
     let h1 = health.clone();
     let q1 = queue.clone();
     let s1 = shutdown.clone();
-    let _health_task = tokio::spawn(async move {
+    let a1 = admission.clone();
+    dispatch_tasks.spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
                 _ = s1.cancelled() => break,
                 _ = interval.tick() => {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                    h1.last_heartbeat.store(now, Ordering::Relaxed);
+                    let now = tokio::time::Instant::now();
+                    *h1.last_heartbeat.write().unwrap() = Some(now);
                     
                     let depth = q1.depth().total;
-                    // Max depth is needed, we can approximate 800 for max_depth 1000, 
-                    // but properly it should be fetched from config.
-                    // For now, let's say we get it from admission.
-                    let max_depth = 1000; // Hardcoded default, can be fetched if accessible
+                    let max_depth = a1.get_max_queue_depth();
                     if depth > (max_depth as f64 * 0.8) as u32 {
-                        let _ = h1.degraded_since.compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
+                        let mut since = h1.degraded_since.write().unwrap();
+                        if since.is_none() {
+                            *since = Some(now);
+                        }
                     } else {
-                        h1.degraded_since.store(0, Ordering::Relaxed);
+                        *h1.degraded_since.write().unwrap() = None;
                     }
                 }
             }

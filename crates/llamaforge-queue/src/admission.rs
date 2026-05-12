@@ -67,7 +67,7 @@ impl AdmissionController {
         }
     }
 
-    fn get_max_queue_depth(&self) -> u32 {
+    pub fn get_max_queue_depth(&self) -> u32 {
         self.config.snapshot().global.queue_max_depth
     }
 
