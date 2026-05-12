@@ -14,20 +14,24 @@ pub fn start_background_tasks(
     admission: Arc<AdmissionController>,
     config: Arc<ConfigHandle>,
     shutdown: CancellationToken,
-) {
+) -> tokio::task::JoinSet<()> {
     let q1 = queue.clone();
     let q2 = queue.clone();
     let s1 = shutdown.clone();
     let s2 = shutdown.clone();
     let c1 = config.clone();
 
-    tokio::spawn(async move {
+    let mut tasks = tokio::task::JoinSet::new();
+
+    tasks.spawn(async move {
         starvation_boost_loop(q1, c1, s1).await;
     });
 
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         maintenance_sweep_loop(q2, admission, s2).await;
     });
+    
+    tasks
 }
 
 async fn starvation_boost_loop(
@@ -35,7 +39,10 @@ async fn starvation_boost_loop(
     config: Arc<ConfigHandle>,
     shutdown: CancellationToken,
 ) {
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let check_interval = {
+        config.snapshot().priority_rules.starvation.check_interval_secs as u64
+    };
+    let mut interval = tokio::time::interval(Duration::from_secs(check_interval.max(1)));
     
     loop {
         tokio::select! {
@@ -51,10 +58,12 @@ async fn starvation_boost_loop(
                 let now = tokio::time::Instant::now();
                 let mut candidates = Vec::new();
                 for (id, enqueued_at, base_priority) in snapshot {
-                    let wait_secs = now.duration_since(enqueued_at).as_secs();
-                    if wait_secs > starv_cfg.threshold_secs {
-                        let intervals = (wait_secs - starv_cfg.threshold_secs) / 5; // Assuming 5s interval
-                        let boost = ((starv_cfg.boost_per_interval as f64) * (1.0 + intervals as f64).ln()).min(400.0) as u32;
+                    let elapsed_secs = now.duration_since(enqueued_at).as_secs();
+                    let wait_secs = elapsed_secs.saturating_sub(starv_cfg.boost_start_after_secs as u64);
+                    
+                    if wait_secs > 0 {
+                        let intervals = wait_secs as f64 / starv_cfg.check_interval_secs as f64;
+                        let boost = (starv_cfg.boost_scale * (1.0 + intervals).ln()).min(starv_cfg.max_boost as f64) as u32;
                         if boost > 0 {
                             candidates.push((id, base_priority + boost));
                         }

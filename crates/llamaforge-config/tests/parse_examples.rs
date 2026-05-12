@@ -31,5 +31,5 @@ fn test_parse_example_priority_rules_toml() {
         toml::from_str(&content).expect("failed to parse example priority_rules.toml");
 
     assert_eq!(config.task_types.get(&"chat".into()), Some(&200));
-    assert_eq!(config.starvation.threshold_secs, 30);
+    assert_eq!(config.starvation.check_interval_secs, 5);
 }

@@ -205,6 +205,8 @@ impl AdmissionController {
 
 impl AdmissionAccounting for AdmissionController {
     fn record_completion(&self, requestor: &RequestorId) {
+        self.queue_depth.fetch_sub(1, Ordering::SeqCst);
+        
         if let Some(usage) = self.requestor_usage.get(requestor) {
             usage.in_flight.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_inflight").decrement(1.0);
@@ -214,6 +216,11 @@ impl AdmissionAccounting for AdmissionController {
     }
 
     fn record_dequeue(&self, requestor: &RequestorId, reason: DequeueReason) {
+        if reason != DequeueReason::Dispatched {
+            // Cancelled, TimedOut, or ShuttingDown means it leaves the queue without dispatching.
+            self.queue_depth.fetch_sub(1, Ordering::SeqCst);
+        }
+
         if let Some(usage) = self.requestor_usage.get(requestor) {
             usage.queued.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_queued").decrement(1.0);

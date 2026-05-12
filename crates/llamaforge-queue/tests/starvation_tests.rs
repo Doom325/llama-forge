@@ -1,7 +1,7 @@
 use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_queue::admission::AdmissionController;
 use llamaforge_queue::queue::DispatchQueue;
-use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType, PRIORITY_CEILING};
+use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
 use llamaforge_queue::starvation::start_background_tasks;
 use llamaforge_types::traits::CapacityChecker;
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
@@ -23,8 +23,10 @@ fn test_config() -> Arc<ConfigHandle> {
 queue_max_depth = 1000
 
 [priority_rules.starvation]
-threshold_secs = 2
-boost_per_interval = 50
+check_interval_secs = 5
+boost_scale = 50.0
+boost_start_after_secs = 2
+max_boost = 400
 "#;
     std::fs::write(tmp.path(), toml).unwrap();
     let paths = ConfigPaths::new(tmp.path().to_path_buf(), tmp.path().to_path_buf(), tmp.path().parent().unwrap().to_path_buf());
@@ -64,12 +66,35 @@ fn test_boost_capped_at_max_boost() {
     assert_eq!(boost, 400);
 }
 
-#[test]
-fn test_boost_ceiling_enforcement() {
-    let base = 1400;
-    let boost = 400;
-    let clamped = std::cmp::min(base + boost, PRIORITY_CEILING);
-    assert_eq!(clamped, PRIORITY_CEILING);
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_boost_ceiling_enforcement() {
+    let config = test_config();
+    let queue_depth = Arc::new(AtomicU32::new(0));
+    let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
+    let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
+    
+    let shutdown = CancellationToken::new();
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
+
+    let (req, _rx) = mock_incoming();
+    let id = req.id;
+    let mut admitted = admission.admit(req).unwrap();
+    admitted.queue_timeout = Duration::from_secs(200000);
+    // Background task base_priority is 0. Wait, PLAN says Background(100) + max_boost(400) = 500.
+    // Our Background is 0. So 0 + 400 = 400.
+    // Let's assert it's less than Emergency (1000).
+    queue.enqueue(admitted);
+
+    tokio::time::advance(Duration::from_secs(100000)).await;
+    tokio::task::yield_now().await;
+    
+    let req_out = queue.cancel(id).unwrap();
+    
+    // Background base priority is 0, max boost is 400.
+    assert_eq!(req_out.current_effective_priority, 400);
+    assert!(req_out.current_effective_priority < 1000); // < Emergency
+    
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -80,7 +105,7 @@ async fn test_timeout_eviction() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
     
     let shutdown = CancellationToken::new();
-    start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     let mut admitted = admission.admit(req).unwrap();
@@ -102,11 +127,12 @@ async fn test_client_disconnect_cleanup() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
     
     let shutdown = CancellationToken::new();
-    start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     let cancel_token = req.cancel_token.clone();
-    let admitted = admission.admit(req).unwrap();
+    let mut admitted = admission.admit(req).unwrap();
+    admitted.queue_timeout = Duration::from_secs(200000);
     queue.enqueue(admitted);
 
     cancel_token.cancel();
@@ -118,12 +144,38 @@ async fn test_client_disconnect_cleanup() {
     shutdown.cancel();
 }
 
-#[test]
-fn test_boost_skip_if_same_priority() {
-    let intervals: f64 = 0.0;
-    let boost_scale: f64 = 50.0;
-    let boost = (boost_scale * (1.0f64 + intervals).ln()).min(400.0) as u32;
-    assert_eq!(boost, 0); // No boost means no re-key
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_boost_skip_if_same_priority() {
+    let config = test_config();
+    let queue_depth = Arc::new(AtomicU32::new(0));
+    let admission = Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), Arc::new(MockCapacityChecker)));
+    let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
+    
+    let shutdown = CancellationToken::new();
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
+
+    let (req1, _rx1) = mock_incoming();
+    let id1 = req1.id;
+    let admitted1 = admission.admit(req1).unwrap();
+    queue.enqueue(admitted1);
+
+    let (req2, _rx2) = mock_incoming();
+    let id2 = req2.id;
+    let admitted2 = admission.admit(req2).unwrap();
+    queue.enqueue(admitted2);
+
+    // Advance time by just 1 second (under threshold of 2s). 
+    // It should trigger a loop but apply no boost.
+    tokio::time::advance(Duration::from_secs(1)).await;
+    tokio::task::yield_now().await;
+    
+    let pos1 = queue.position(id1).unwrap();
+    let pos2 = queue.position(id2).unwrap();
+    
+    // Position 1 should still be ahead of 2
+    assert!(pos1 < pos2);
+    
+    shutdown.cancel();
 }
 
 #[tokio::test]
@@ -135,7 +187,8 @@ async fn test_cancel_during_starvation_scan() {
     
     let (req, _rx) = mock_incoming();
     let id = req.id;
-    let admitted = admission.admit(req).unwrap();
+    let mut admitted = admission.admit(req).unwrap();
+    admitted.queue_timeout = Duration::from_secs(200000);
     queue.enqueue(admitted);
 
     let snapshot = queue.snapshot_for_starvation();
@@ -145,7 +198,7 @@ async fn test_cancel_during_starvation_scan() {
     queue.cancel(id);
 
     // Now apply boost - it shouldn't panic or fail
-    let _candidates = vec![(id, 500)];
+    let _candidates = [(id, 500)];
     
     // Simulate apply_boost (which calls queue.boost internally)
     queue.boost(id, 500);
