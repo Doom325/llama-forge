@@ -192,11 +192,13 @@ fn arb_priority_rules_config() -> impl Strategy<Value = PriorityRulesConfig> {
         hash_map(arb_task_type_id(), arb_task_class_name(), 0..3),
         hash_map(arb_requestor_id(), any::<i32>(), 0..3),
         (1..100u32, 1.0..100.0f64, 1..100u32, 1..1000u32).prop_map(
-            |(check_interval_secs, boost_scale, boost_start_after_secs, max_boost)| StarvationConfig {
-                check_interval_secs,
-                boost_scale,
-                boost_start_after_secs,
-                max_boost,
+            |(check_interval_secs, boost_scale, boost_start_after_secs, max_boost)| {
+                StarvationConfig {
+                    check_interval_secs,
+                    boost_scale,
+                    boost_start_after_secs,
+                    max_boost,
+                }
             },
         ),
         hash_map(arb_requestor_id(), 1..100u32, 0..3)

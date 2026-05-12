@@ -1,13 +1,14 @@
 use crate::admission::AdmissionController;
 use crate::queue::DispatchQueue;
 use crate::types::{DispatchResult, IncomingRequest, QueueDepthInfo, QueuePosition};
-use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason, ServerSelector, SlotDispatcher, SlotNotifier};
+use llamaforge_routing::{CapacityChecker, ServerSelector};
+use llamaforge_types::traits::{AdmissionAccounting, DequeueReason, SlotDispatcher, SlotNotifier};
 use llamaforge_types::{ModelTarget, RequestId, RequestorId};
 use std::sync::Arc;
-use tokio::sync::watch;
-use tracing::{error, info, info_span, warn, Instrument};
-use tokio_util::sync::CancellationToken;
 use std::time::Duration;
+use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, info_span, warn, Instrument};
 
 pub struct HealthTracker {
     pub last_heartbeat: std::sync::RwLock<Option<tokio::time::Instant>>,
@@ -33,11 +34,18 @@ pub struct RequestPipeline {
 }
 
 impl RequestPipeline {
-    pub fn new(admission: Arc<AdmissionController>, queue: Arc<DispatchQueue>, health: Arc<HealthTracker>) -> Self {
+    pub fn new(
+        admission: Arc<AdmissionController>,
+        queue: Arc<DispatchQueue>,
+        health: Arc<HealthTracker>,
+    ) -> Self {
         Self { admission, queue, health }
     }
 
-    pub fn submit(&self, req: IncomingRequest) -> Result<QueuePosition, crate::error::AdmissionError> {
+    pub fn submit(
+        &self,
+        req: IncomingRequest,
+    ) -> Result<QueuePosition, crate::error::AdmissionError> {
         let admitted = self.admission.admit(req)?;
         // Note: enqueue is currently infallible, so rollback of admission counters is not needed.
         Ok(self.queue.enqueue(admitted))
@@ -106,12 +114,7 @@ impl CompletionGuard {
         admission: Arc<dyn AdmissionAccounting>,
         queue_notify: Arc<dyn SlotNotifier>,
     ) -> Self {
-        Self {
-            requestor,
-            admission,
-            queue_notify,
-            _dispatch_token: Box::new(()),
-        }
+        Self { requestor, admission, queue_notify, _dispatch_token: Box::new(()) }
     }
 }
 
@@ -140,7 +143,7 @@ pub async fn run_scheduler(
 ) {
     info!("Scheduler loop starting");
     let mut dispatch_tasks = tokio::task::JoinSet::new();
-    
+
     // Create a background heartbeat and degraded-check loop
     let h1 = health.clone();
     let q1 = queue.clone();
@@ -154,7 +157,7 @@ pub async fn run_scheduler(
                 _ = interval.tick() => {
                     let now = tokio::time::Instant::now();
                     *h1.last_heartbeat.write().unwrap() = Some(now);
-                    
+
                     let depth = q1.depth().total;
                     let max_depth = a1.get_max_queue_depth();
                     if depth > (max_depth as f64 * 0.8) as u32 {
@@ -189,12 +192,12 @@ pub async fn run_scheduler(
                     let req = candidate.request;
                     let request_id = req.id;
                     let requestor = req.requestor.clone();
-                    
+
                     // Record dequeue BEFORE potentially slow dispatch/routing
                     admission.record_dequeue(&requestor, DequeueReason::Dispatched);
 
-                    let decision = server_selector.select_server(&req.model_target);
-                    let Some(routing) = decision else {
+                    let decision = server_selector.select_server(&req);
+                    let Ok(routing) = decision else {
                         warn!(%request_id, "No server selected for candidate model target {:?}", req.model_target);
                         // If we can't route it now, we re-enqueue or fail it.
                         // Design doc says if has_capacity passed but select_server fails, it's a race.
@@ -211,9 +214,9 @@ pub async fn run_scheduler(
                     let payload = req.payload.clone();
 
                     let span = req.request_span.unwrap_or_else(|| info_span!("request", %request_id));
-                    
+
                     dispatch_tasks.spawn(async move {
-                        match dispatcher.dispatch(&routing.server_id, payload).await {
+                        match dispatcher.dispatch(routing.server_id(), payload).await {
                             Ok((stream, token)) => {
                                 let guard = CompletionGuard {
                                     requestor,
@@ -236,7 +239,7 @@ pub async fn run_scheduler(
             }
         }
     }
-    
+
     while let Some(res) = dispatch_tasks.join_next().await {
         if let Err(e) = res {
             error!("Dispatch task panicked during shutdown: {:?}", e);
@@ -252,9 +255,11 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
     // and then send ShuttingDown.
     struct DrainChecker;
     impl CapacityChecker for DrainChecker {
-        fn has_capacity(&self, _: &ModelTarget) -> bool { true }
+        fn has_capacity(&self, _: &ModelTarget) -> bool {
+            true
+        }
     }
-    
+
     while let Some(candidate) = queue.try_dispatch(&DrainChecker) {
         admission.record_dequeue(&candidate.request.requestor, DequeueReason::ShuttingDown);
         let _ = candidate.request.response_tx.send(DispatchResult::ShuttingDown);

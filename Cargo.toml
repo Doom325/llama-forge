@@ -7,7 +7,7 @@ members = [
     "crates/llamaforge-metrics",
     "crates/llamaforge-server-manager",
     "crates/llamaforge-types",
-    "crates/llamaforge-queue",
+    "crates/llamaforge-queue", "crates/llamaforge-routing",
 ]
 
 [workspace.package]
@@ -26,6 +26,7 @@ llamaforge-config = { path = "crates/llamaforge-config", version = "0.1.0-draft"
 llamaforge-metrics = { path = "crates/llamaforge-metrics", version = "0.1.0-draft" }
 llamaforge-types = { path = "crates/llamaforge-types", version = "0.1.0-draft" }
 llamaforge-queue = { path = "crates/llamaforge-queue", version = "0.1.0-draft" }
+llamaforge-routing = { path = "crates/llamaforge-routing", version = "0.1.0-draft" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
@@ -64,6 +65,7 @@ scopeguard = "1.2"
 async-trait = "0.1"
 tokio-stream = "0.1"
 tracing-opentelemetry = "0.28"
+lru = "0.12"
 
 [profile.release]
 lto = "thin"

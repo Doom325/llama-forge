@@ -1,9 +1,10 @@
 use crate::config::RequestorClassPolicy;
-use crate::types::{AdmittedRequest, IncomingRequest, TaskType};
 use crate::error::AdmissionError;
+use crate::types::{AdmittedRequest, IncomingRequest, TaskType};
 use dashmap::DashMap;
 use llamaforge_config::{ConfigHandle, ConfigReader, TaskTypeId};
-use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason};
+use llamaforge_routing::CapacityChecker;
+use llamaforge_types::traits::{AdmissionAccounting, DequeueReason};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -17,10 +18,7 @@ pub struct RequestorUsage {
 
 impl Default for RequestorUsage {
     fn default() -> Self {
-        Self {
-            queued: AtomicU32::new(0),
-            in_flight: AtomicU32::new(0),
-        }
+        Self { queued: AtomicU32::new(0), in_flight: AtomicU32::new(0) }
     }
 }
 
@@ -37,21 +35,13 @@ impl AdmissionController {
         queue_depth: Arc<AtomicU32>,
         model_validator: Arc<dyn CapacityChecker>,
     ) -> Self {
-        Self {
-            config,
-            requestor_usage: DashMap::new(),
-            queue_depth,
-            model_validator,
-        }
+        Self { config, requestor_usage: DashMap::new(), queue_depth, model_validator }
     }
 
     /// Gets or creates requestor usage tracking.
     pub fn requestor_usage(&self, requestor: &RequestorId) -> (u32, u32) {
         let usage = self.requestor_usage.entry(requestor.clone()).or_default();
-        (
-            usage.queued.load(Ordering::Relaxed),
-            usage.in_flight.load(Ordering::Relaxed),
-        )
+        (usage.queued.load(Ordering::Relaxed), usage.in_flight.load(Ordering::Relaxed))
     }
 
     /// Get requestor policy from AppConfig.
@@ -60,10 +50,7 @@ impl AdmissionController {
         if let Some(policy) = snapshot.priority_rules.requestor_classes.get(class.as_str()) {
             policy.clone()
         } else {
-            RequestorClassPolicy {
-                max_concurrent: 100,
-                ..Default::default()
-            }
+            RequestorClassPolicy { max_concurrent: 100, ..Default::default() }
         }
     }
 
@@ -86,7 +73,8 @@ impl AdmissionController {
                     max = max_depth,
                     "queue.rejected: Queue full"
                 );
-                metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_full").increment(1);
+                metrics::counter!("llamaforge_queue_admissions_total", "result" => "rejected_full")
+                    .increment(1);
                 return Err(AdmissionError::QueueFull {
                     depth: current_depth,
                     max: max_depth,
@@ -112,12 +100,12 @@ impl AdmissionController {
 
         // 2. Requestor lookup & concurrent limits
         let policy = self.get_requestor_policy(&req.requestor_class);
-        
+
         {
             let usage = self.requestor_usage.entry(req.requestor.clone()).or_default();
             let queued = usage.queued.load(Ordering::Relaxed);
             let in_flight = usage.in_flight.load(Ordering::Relaxed);
-            
+
             if queued + in_flight >= policy.max_concurrent {
                 tracing::info!(
                     request_id = %req.id,
@@ -148,7 +136,9 @@ impl AdmissionController {
 
         // 3. Task type authorization
         let task_type_id = TaskTypeId::from(req.task_type.to_string());
-        if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&task_type_id) {
+        if !policy.allowed_task_types.is_empty()
+            && !policy.allowed_task_types.contains_key(&task_type_id)
+        {
             tracing::warn!(
                 request_id = %req.id,
                 requestor = %req.requestor,
@@ -163,7 +153,9 @@ impl AdmissionController {
         if !self.model_validator.has_capacity(&req.model_target) {
             let model_alias = match &req.model_target {
                 ModelTarget::Exact(m) => m.clone(),
-                ModelTarget::AnyOf(models) => models.first().cloned().unwrap_or_else(|| ModelAlias::new("unknown".into())),
+                ModelTarget::AnyOf(models) => {
+                    models.first().cloned().unwrap_or_else(|| ModelAlias::new("unknown".into()))
+                }
                 ModelTarget::AnyWithCapability(_) => ModelAlias::new("capability".into()),
             };
             tracing::info!(
@@ -207,7 +199,7 @@ impl AdmissionController {
             }
             effective_priority = override_val;
         }
-        
+
         effective_priority = effective_priority.min(crate::types::PRIORITY_CEILING);
 
         let queue_timeout = Duration::from_secs(policy.queue_timeout_secs.unwrap_or(300) as u64);
@@ -219,7 +211,7 @@ impl AdmissionController {
             requestor = %req.requestor,
             model = ?req.model_target
         );
-        
+
         if let Some(ctx) = &req.trace_context {
             use tracing_opentelemetry::OpenTelemetrySpanExt;
             request_span.set_parent(ctx.clone());
@@ -237,7 +229,8 @@ impl AdmissionController {
         // Metrics
         metrics::counter!("llamaforge_queue_admissions_total", "result" => "accepted").increment(1);
         metrics::gauge!("llamaforge_admission_queued").increment(1.0);
-        metrics::histogram!("llamaforge_admission_duration_seconds").record(start_time.elapsed().as_secs_f64());
+        metrics::histogram!("llamaforge_admission_duration_seconds")
+            .record(start_time.elapsed().as_secs_f64());
 
         request_span.in_scope(|| {
             tracing::debug!(
@@ -263,7 +256,7 @@ impl AdmissionController {
             let usage = entry.value();
             let tracked = usage.in_flight.load(Ordering::SeqCst);
             let actual = active_set.get(requestor).copied().unwrap_or(0);
-            
+
             if tracked != actual {
                 tracing::warn!(
                     requestor = %requestor,
@@ -271,7 +264,7 @@ impl AdmissionController {
                     actual = actual,
                     "queue.reconciliation_correction: Correcting in_flight count"
                 );
-                
+
                 // For simplicity, directly set the actual value. In reality, handling concurrent
                 // requests properly would require a more sophisticated compare-and-swap loop,
                 // but since we're setting it to the known active set, an overwrite is acceptable.
@@ -285,9 +278,10 @@ impl AdmissionController {
                 corrections += 1;
             }
         }
-        
+
         if corrections > 0 {
-            metrics::counter!("llamaforge_requestor_reconciliation_corrections").increment(corrections);
+            metrics::counter!("llamaforge_requestor_reconciliation_corrections")
+                .increment(corrections);
         }
     }
 }
@@ -295,7 +289,7 @@ impl AdmissionController {
 impl AdmissionAccounting for AdmissionController {
     fn record_completion(&self, requestor: &RequestorId) {
         self.queue_depth.fetch_sub(1, Ordering::SeqCst);
-        
+
         if let Some(usage) = self.requestor_usage.get(requestor) {
             usage.in_flight.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_inflight").decrement(1.0);
@@ -313,7 +307,7 @@ impl AdmissionAccounting for AdmissionController {
         if let Some(usage) = self.requestor_usage.get(requestor) {
             usage.queued.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_queued").decrement(1.0);
-            
+
             if reason == DequeueReason::Dispatched {
                 usage.in_flight.fetch_add(1, Ordering::SeqCst);
                 metrics::gauge!("llamaforge_admission_inflight").increment(1.0);
@@ -328,7 +322,7 @@ impl AdmissionAccounting for AdmissionController {
 mod tests {
     use super::*;
     use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
-    use llamaforge_types::traits::CapacityChecker;
+    use llamaforge_routing::CapacityChecker;
     use llamaforge_types::RequestId;
     use std::sync::atomic::AtomicU32;
     use tokio::sync::oneshot;
@@ -432,7 +426,7 @@ max_concurrent = 10
         let req = mock_incoming();
         let res = controller.admit(req);
         assert!(matches!(res, Err(AdmissionError::NoServerForModel { .. })));
-        
+
         // Ensure rollbacks happened
         assert_eq!(queue_depth.load(Ordering::SeqCst), 0);
         let usage = controller.requestor_usage(&RequestorId::new(Arc::from("user1")));
@@ -512,12 +506,12 @@ max_concurrent = 10
 
         let mut req = mock_incoming();
         // Range is 400..=600 for realtime_chat
-        req.explicit_override = Some(9000); 
+        req.explicit_override = Some(9000);
         let res = controller.admit(req);
         assert!(matches!(res, Err(AdmissionError::PriorityOutOfRange { .. })));
 
         let mut req2 = mock_incoming();
-        req2.explicit_override = Some(500); 
+        req2.explicit_override = Some(500);
         let admitted = controller.admit(req2).unwrap();
         assert_eq!(admitted.effective_priority, 500);
     }
@@ -527,7 +521,8 @@ max_concurrent = 10
         let config = test_config();
         let queue_depth = Arc::new(AtomicU32::new(950)); // max is 1000, so exactly 50 can succeed
         let model_validator = Arc::new(MockCapacityChecker { capacity: true });
-        let controller = Arc::new(AdmissionController::new(config, queue_depth.clone(), model_validator));
+        let controller =
+            Arc::new(AdmissionController::new(config, queue_depth.clone(), model_validator));
 
         let mut handles = vec![];
         for i in 0..100 {

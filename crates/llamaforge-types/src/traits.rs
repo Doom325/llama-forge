@@ -1,4 +1,4 @@
-use crate::{ModelTarget, ModelAlias, RequestorId, ServerId};
+use crate::{RequestorId, ServerId};
 use bytes::Bytes;
 use futures_core::Stream;
 use std::pin::Pin;
@@ -7,15 +7,6 @@ use thiserror::Error;
 /// Port traits defining boundaries between components.
 ///
 /// See design doc Section 2.2 and 2.3.
-/// Checks if there is any configured capacity for a given target.
-///
-/// See design doc Section 2.2.
-pub trait CapacityChecker: Send + Sync {
-    /// Returns true if at least one server is configured that could potentially
-    /// serve this target model. Does not check if the server is currently idle.
-    fn has_capacity(&self, target: &ModelTarget) -> bool;
-}
-
 /// A token representing a dispatched request.
 pub trait DispatchToken: Send + Sync {
     // Methods to be defined by Component 06.
@@ -35,13 +26,6 @@ pub trait SlotDispatcher: Send + Sync {
         // TODO: Prefer a typed payload instead of `Arc<dyn Any>` when payload types are strictly defined
         request: std::sync::Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError>;
-}
-
-/// Selects the best server for a given request.
-///
-/// See design doc Section 2.2.
-pub trait ServerSelector: Send + Sync {
-    fn select_server(&self, target: &ModelTarget) -> Option<RoutingDecision>;
 }
 
 /// Tracks in-flight request counts for admission control.
@@ -64,13 +48,6 @@ pub trait SlotNotifier: Send + Sync {
 /// Used for periodic reconciliation sweeps. See design doc Section 3.10.
 pub trait ActiveRequestProvider: Send + Sync {
     fn active_requests(&self) -> std::collections::HashMap<RequestorId, u32>;
-}
-
-/// Result of a routing decision.
-#[derive(Debug, Clone)]
-pub struct RoutingDecision {
-    pub server_id: ServerId,
-    pub model_alias: ModelAlias,
 }
 
 #[derive(Debug, Error)]
