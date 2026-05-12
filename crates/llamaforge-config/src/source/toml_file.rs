@@ -43,11 +43,15 @@ impl TomlFileConfigSource {
                 // Fix rounding errors to ensure exact 100 sum
                 let new_sum: u32 = config.priority_rules.fair_share.weights.values().sum();
                 if new_sum != 100 && !config.priority_rules.fair_share.weights.is_empty() {
-                    if let Some(first_id) =
-                        config.priority_rules.fair_share.weights.keys().next().cloned()
+                    if let Some(max_id) = config
+                        .priority_rules
+                        .fair_share
+                        .weights
+                        .iter()
+                        .max_by_key(|(_, w)| **w)
+                        .map(|(k, _)| k.clone())
                     {
-                        if let Some(w) = config.priority_rules.fair_share.weights.get_mut(&first_id)
-                        {
+                        if let Some(w) = config.priority_rules.fair_share.weights.get_mut(&max_id) {
                             if new_sum < 100 {
                                 *w += 100 - new_sum;
                             } else {
@@ -442,6 +446,66 @@ threshold_secs = 60
             *config.priority_rules.fair_share.weights.get(&RequestorId::from("b")).unwrap(),
             50
         );
+    }
+
+    #[test]
+    fn test_fair_share_normalization_101_with_zero() {
+        let mut config = AppConfig::default();
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("a"), 0);
+        // We want the pre-normalized weights to sum to something that after proportional
+        // normalization yields a sum > 100.
+        // E.g., if we have 3 weights: 0, 10, 10.
+        // sum = 20. 0 -> 0. 10/20 * 100 = 50. 10/20 * 100 = 50. Sum is 100.
+        // What if weights are 0, 33, 33, 33? sum = 99. 0 -> 0. 33/99 = 1/3 * 100 = 33.33 -> 33. Sum = 99.
+        // What if we have weights that round up?
+        // E.g. sum = 3. Elements: 0, 1, 1, 1.
+        // 1/3 * 100 = 33.33 -> 33. sum = 99.
+        // Elements: 0, 2, 2, 2. Sum = 6. 2/6 * 100 = 33.33 -> 33.
+        // Elements: 0, 3, 3, 3, 3, 3.
+        // Wait, to get 101: we need rounding up.
+        // 0, 1, 1, 1, 1, 1, 1 (six 1s). sum = 6. 1/6 * 100 = 16.66 -> 17. 17 * 6 = 102.
+        // Let's use 0, 1, 1, 1, 1, 1, 1.
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("b"), 1);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("c"), 1);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("d"), 1);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("e"), 1);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("f"), 1);
+        config.priority_rules.fair_share.weights.insert(RequestorId::from("g"), 1);
+
+        TomlFileConfigSource::validate(&mut config).unwrap();
+
+        let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+        assert_eq!(sum, 100);
+        // 'a' should remain 0
+        assert_eq!(
+            *config.priority_rules.fair_share.weights.get(&RequestorId::from("a")).unwrap(),
+            0
+        );
+    }
+
+    use proptest::collection::hash_map;
+    use proptest::prelude::*;
+
+    fn arb_requestor_id() -> impl Strategy<Value = RequestorId> {
+        "[a-z0-9]{1,8}".prop_map(|s| RequestorId::from(s.to_string()))
+    }
+
+    proptest! {
+        #[test]
+        fn test_fair_share_normalization_proptest(mut weights in hash_map(arb_requestor_id(), 0..10000u32, 1..20)) {
+            // Ensure at least one non-zero weight to avoid sum == 0 which skips normalization
+            if weights.values().sum::<u32>() == 0 {
+                weights.insert(RequestorId::from("fallback"), 1);
+            }
+
+            let mut config = AppConfig::default();
+            config.priority_rules.fair_share.weights = weights;
+
+            TomlFileConfigSource::validate(&mut config).unwrap();
+
+            let sum: u32 = config.priority_rules.fair_share.weights.values().sum();
+            assert_eq!(sum, 100);
+        }
     }
 
     #[test]
