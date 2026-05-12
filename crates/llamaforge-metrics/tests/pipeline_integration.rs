@@ -136,11 +136,12 @@ async fn test_telemetry_channel_full_drops_event() {
 
     // Fill channel
     pipeline.ingest.send_telemetry(dummy_telemetry());
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
     // Next one should drop
     assert!(!pipeline.ingest.send_telemetry(dummy_telemetry()));
 
-    assert!(telemetry_drops() > initial_drops);
+    assert_eq!(telemetry_drops(), initial_drops + 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
