@@ -109,6 +109,7 @@ pub struct IncomingRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
+    pub capabilities: llamaforge_routing::RequestCapabilities,
     pub explicit_override: Option<u32>,
     pub response_tx: oneshot::Sender<DispatchResult>,
     pub cancel_token: CancellationToken,
@@ -135,6 +136,7 @@ pub struct AdmittedRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
+    pub capabilities: llamaforge_routing::RequestCapabilities,
     pub effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -164,6 +166,7 @@ impl AdmittedRequest {
             requestor: req.requestor,
             requestor_class: req.requestor_class,
             model_target: req.model_target,
+            capabilities: req.capabilities,
             effective_priority,
             base_priority,
             requestor_bonus,
@@ -186,6 +189,7 @@ pub struct QueuedRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
+    pub capabilities: llamaforge_routing::RequestCapabilities,
     pub current_effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -208,6 +212,7 @@ impl QueuedRequest {
             requestor: req.requestor,
             requestor_class: req.requestor_class,
             model_target: req.model_target,
+            capabilities: req.capabilities,
             current_effective_priority: req.effective_priority,
             base_priority: req.base_priority,
             requestor_bonus: req.requestor_bonus,
@@ -226,6 +231,11 @@ impl QueuedRequest {
 impl llamaforge_routing::RequestView for QueuedRequest {
     fn model_target(&self) -> &ModelTarget {
         &self.model_target
+    }
+
+    fn capabilities(&self) -> &llamaforge_routing::RequestCapabilities {
+        let Self { capabilities, .. } = self;
+        capabilities
     }
 }
 
@@ -329,6 +339,7 @@ mod tests {
             requestor: requestor.clone(),
             requestor_class: requestor_class.clone(),
             model_target: model_target.clone(),
+            capabilities: Default::default(),
             explicit_override: None,
             response_tx: tx,
             cancel_token: cancel_token.clone(),

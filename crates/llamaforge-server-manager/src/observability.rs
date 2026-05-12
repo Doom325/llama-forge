@@ -126,6 +126,7 @@ pub fn spawn_metrics_poller(mgr: Arc<ServerManager>) {
                     ServerLifecycle::Starting | ServerLifecycle::Restarting => 1.0,
                     ServerLifecycle::Running | ServerLifecycle::Draining => 2.0,
                     ServerLifecycle::Failed => 3.0,
+                    _ => 0.0,
                 };
                 metrics::gauge!("llamaforge_server_status", "server_id" => s_id.clone())
                     .set(status_val);

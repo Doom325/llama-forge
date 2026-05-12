@@ -69,6 +69,29 @@ impl<'de> Deserialize<'de> for LoraAdapterId {
     }
 }
 
+/// The architecture family of the underlying model.
+/// See design doc Section 2.3.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelArchitecture {
+    Llama,
+    Mistral,
+    Mixtral,
+    Qwen,
+    Gemma,
+    Phi,
+    DeepSeek,
+    Recurrent,
+    Other(String),
+}
+
+impl Default for ModelArchitecture {
+    fn default() -> Self {
+        Self::Other("unknown".into())
+    }
+}
+
 /// Represents capabilities required by a request.
 ///
 /// See design doc Section 2.2, line 198-199.
@@ -78,6 +101,7 @@ pub struct RequestCapabilities {
     pub multimodal: bool,
     pub embedding: bool,
     pub reranking: bool,
+    pub architecture: Option<ModelArchitecture>,
 }
 
 /// A unique identifier for a single request.
@@ -130,6 +154,19 @@ impl fmt::Display for SlotId {
 /// See design doc Section 2.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ServerId(Uuid);
+
+/// The lifecycle state of a managed server process.
+/// See design doc Section 2.3.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerLifecycle {
+    Stopped,
+    Starting,
+    Running,
+    Draining,
+    Restarting,
+    Failed,
+}
 
 impl ServerId {
     pub fn new(id: Uuid) -> Self {

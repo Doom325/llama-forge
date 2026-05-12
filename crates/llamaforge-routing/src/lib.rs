@@ -18,6 +18,9 @@ use llamaforge_types::ModelTarget;
 pub trait RequestView: Send + Sync {
     /// The target model for this request.
     fn model_target(&self) -> &ModelTarget;
+
+    /// The capabilities required by this request.
+    fn capabilities(&self) -> &RequestCapabilities;
 }
 
 /// Breaks the bidirectional dependency between routing and dispatch crates.

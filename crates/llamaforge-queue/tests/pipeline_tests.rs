@@ -71,6 +71,7 @@ fn mock_incoming(id: uuid::Uuid) -> (IncomingRequest, oneshot::Receiver<Dispatch
             requestor: RequestorId::new(Arc::from("user1")),
             requestor_class: RequestorClass::new(Arc::from("default")),
             model_target: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
+            capabilities: Default::default(),
             explicit_override: None,
             response_tx: tx,
             cancel_token: CancellationToken::new(),
