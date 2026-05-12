@@ -1,0 +1,19 @@
+[package]
+name = "llamaforge-routing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+llamaforge-types = { workspace = true }
+llamaforge-config = { workspace = true }
+lru = { workspace = true }
+tracing = { workspace = true }
+metrics = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+dashmap = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

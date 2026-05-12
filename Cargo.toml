@@ -7,7 +7,7 @@ members = [
     "crates/llamaforge-metrics",
     "crates/llamaforge-server-manager",
     "crates/llamaforge-types",
-    "crates/llamaforge-queue",
+    "crates/llamaforge-queue", "crates/llamaforge-routing",
 ]
 
 [workspace.package]
@@ -64,6 +64,7 @@ scopeguard = "1.2"
 async-trait = "0.1"
 tokio-stream = "0.1"
 tracing-opentelemetry = "0.28"
+lru = "0.12"
 
 [profile.release]
 lto = "thin"

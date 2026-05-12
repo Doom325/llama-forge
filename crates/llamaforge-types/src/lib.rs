@@ -114,3 +114,8 @@ pub enum Capability {
     Chat,
     Embedding,
 }
+
+/// A stub for QueuedRequest
+#[derive(Debug, Clone)]
+pub struct QueuedRequest;
+
