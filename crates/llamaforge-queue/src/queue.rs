@@ -217,6 +217,7 @@ impl DispatchQueue {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let id = req.id;
         let prio = req.effective_priority;
+        let model_target = req.model_target.clone();
         inner.insert(QueuedRequest::from_admitted(req));
         
         let pos = inner.position(id).unwrap_or(1);
@@ -225,7 +226,18 @@ impl DispatchQueue {
         
         crate::types::QueuePosition {
             position: pos,
-            estimated_wait_secs: None, // Implementation left for later tasks
+            estimated_wait_secs: {
+                if let ModelTarget::Exact(alias) = &model_target {
+                    let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(rate_tracker) = rates.get_mut(alias) {
+                        rate_tracker.rate().map(|rate| if rate > 0.0 { (pos as f64) / rate } else { 0.0 })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            },
             tier_label: TierLabel::from_priority(prio),
         }
     }
@@ -234,14 +246,28 @@ impl DispatchQueue {
         &self,
         capacity: &C,
     ) -> Option<DispatchCandidate> {
-        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(candidate) = inner.try_dispatch_scan(capacity) {
+        let start_time = std::time::Instant::now();
+        let depth_at_scan;
+        
+        let candidate = {
+            let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            depth_at_scan = inner.total_depth;
+            inner.try_dispatch_scan(capacity)
+        }; // Lock released here
+        
+        metrics::histogram!("llamaforge_dispatch_scan_depth").record(depth_at_scan as f64);
+
+        if let Some(cand) = candidate {
             self.dispatch_epoch.send_modify(|v| *v += 1);
-            if let ModelTarget::Exact(alias) = &candidate.request.model_target {
+            if let ModelTarget::Exact(alias) = &cand.request.model_target {
                 let mut rates = self.model_dispatch_rate.lock().unwrap_or_else(|p| p.into_inner());
                 rates.entry(alias.clone()).or_insert_with(|| SlidingWindowRate::new(Duration::from_secs(60))).record();
             }
-            Some(candidate)
+            
+            metrics::histogram!("llamaforge_queue_wait_seconds").record(cand.queue_wait.as_secs_f64());
+            metrics::histogram!("llamaforge_dispatch_duration_seconds").record(start_time.elapsed().as_secs_f64());
+            
+            Some(cand)
         } else {
             None
         }
