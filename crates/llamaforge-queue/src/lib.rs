@@ -11,4 +11,5 @@ pub mod config;
 pub mod error;
 pub mod pipeline;
 pub mod queue;
+pub mod starvation;
 pub mod types;

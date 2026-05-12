@@ -476,24 +476,36 @@ pub struct RequestorClassPolicy {
 /// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StarvationConfig {
-    #[serde(default = "default_starvation_threshold")]
-    pub threshold_secs: u64,
-    #[serde(default = "default_starvation_boost")]
-    pub boost_per_interval: u32,
+    #[serde(default = "default_check_interval_secs")]
+    pub check_interval_secs: u32,
+    #[serde(default = "default_boost_scale")]
+    pub boost_scale: f64,
+    #[serde(default = "default_boost_start_after_secs")]
+    pub boost_start_after_secs: u32,
+    #[serde(default = "default_max_boost")]
+    pub max_boost: u32,
 }
 impl Default for StarvationConfig {
     fn default() -> Self {
         Self {
-            threshold_secs: default_starvation_threshold(),
-            boost_per_interval: default_starvation_boost(),
+            check_interval_secs: default_check_interval_secs(),
+            boost_scale: default_boost_scale(),
+            boost_start_after_secs: default_boost_start_after_secs(),
+            max_boost: default_max_boost(),
         }
     }
 }
-fn default_starvation_threshold() -> u64 {
+fn default_check_interval_secs() -> u32 {
+    5
+}
+fn default_boost_scale() -> f64 {
+    50.0
+}
+fn default_boost_start_after_secs() -> u32 {
     30
 }
-fn default_starvation_boost() -> u32 {
-    50
+fn default_max_boost() -> u32 {
+    400
 }
 
 /// Fair share scheduling weights.
@@ -624,7 +636,12 @@ mod tests {
                 )]),
                 requestor_bonuses: HashMap::from([(RequestorId::from("vip"), 100)]),
                 requestor_classes: HashMap::new(),
-                starvation: StarvationConfig { threshold_secs: 10, boost_per_interval: 5 },
+                starvation: StarvationConfig {
+                    check_interval_secs: 5,
+                    boost_scale: 50.0,
+                    boost_start_after_secs: 30,
+                    max_boost: 400,
+                },
                 fair_share: FairShareConfig {
                     weights: HashMap::from([(RequestorId::from("default"), 100)]),
                 },

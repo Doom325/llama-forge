@@ -388,33 +388,33 @@ Implement the two periodic background tasks: starvation boost (every 5 seconds) 
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 6.1 | Implement starvation boost Phase 1 | Snapshot: acquire queue lock, collect `Vec<(RequestId, Instant, u32)>` (id, enqueued_at, base_priority), release lock immediately. | `src/queue.rs` (or `src/starvation.rs`) |
-| 6.2 | Implement starvation boost Phase 2 | Compute (no lock): `wait_secs = max(0, elapsed - start_after)`, `intervals = wait_secs / check_interval`, `boost = min(boost_scale * ln(1 + intervals), max_boost)`. Filter where `boost > 0`. | same |
-| 6.3 | Implement starvation boost Phase 3 | Apply: if depth > 200, `spawn_blocking` with lock inside closure. Else, lock on Tokio thread. Re-key each candidate. Recompute boost from `enqueued_at` (authoritative at apply time, not snapshot time). Skip if `new_prio == current_prio`. Clamp to `PRIORITY_CEILING`. Mutex uses `unwrap_or_else(|p| p.into_inner())`. `spawn_blocking().await` wrapped in `match`. | same |
-| 6.4 | Implement starvation boost scheduling | `tokio::time::interval(check_interval_secs)`. Runs until shutdown token cancelled. | same |
-| 6.5 | Implement queue maintenance sweep | Every 1s: acquire queue lock, iterate all entries. Check `cancel_token.is_cancelled()` → remove + send `Cancelled`. Check `enqueued_at + queue_timeout < now()` → remove + send `TimedOut { waited }`. Decrement counters. Epoch increment per removal. See design doc Section 3.8. | `src/queue.rs` |
-| 6.6 | Implement sweep scheduling | `tokio::time::interval(Duration::from_secs(1))`. Runs until shutdown token cancelled. | same |
-| 6.7 | Add starvation metrics | `llamaforge_starvation_boost_applied_total` counter, `llamaforge_starvation_boost_duration_seconds` histogram. | same |
-| 6.8 | Add sweep metrics | `llamaforge_queue_timeouts_total` counter, `llamaforge_queue_cancellations_total` counter (with `reason` label). | same |
-| 6.9 | Add starvation tracing span | `starvation_cycle{depth, boosted_count}` span per design doc Section 7.3. | same |
-| 6.10 | Unit test: logarithmic boost formula | Request at base 100, waiting 60s (6 intervals after 30s start). `boost = min(50 * ln(1+6), 400) = 97`. Assert effective_priority = 197. | tests |
-| 6.11 | Unit test: boost capped at max_boost | Request waiting long enough for max → assert boost == `max_boost`, not more. | tests |
-| 6.12 | Unit test: boost skip if same priority | Boost computation rounds to same value → request NOT re-keyed, FIFO position preserved. | tests |
-| 6.13 | Unit test: cancel during starvation scan | Snapshot includes a request. Cancel before Phase 3. Assert Phase 3 skips it (not in index). | tests |
-| 6.14 | Tokio test: timeout eviction | Enqueue with 1s timeout. Advance time 2s. Assert request evicted, `response_tx` sent `TimedOut`. | tests |
-| 6.15 | Tokio test: client disconnect cleanup | Enqueue with `CancellationToken`. Cancel token. Assert request removed within sweep cycle. | tests |
-| 6.16 | Tokio test: spawn_blocking recovery | Inject panic inside blocking task → assert scheduler loop continues, boost cycle logged as error. | tests |
-| 6.17 | Unit test: boost ceiling enforcement | Background(100) + max_boost(400) = 500. Assert < Emergency(800). Cannot reach Emergency range. | tests |
+| [x] 6.1 | Implement starvation boost Phase 1 | Snapshot: acquire queue lock, collect `Vec<(RequestId, Instant, u32)>` (id, enqueued_at, base_priority), release lock immediately. | `src/queue.rs` (or `src/starvation.rs`) |
+| [x] 6.2 | Implement starvation boost Phase 2 | Compute (no lock): `wait_secs = max(0, elapsed - start_after)`, `intervals = wait_secs / check_interval`, `boost = min(boost_scale * ln(1 + intervals), max_boost)`. Filter where `boost > 0`. | same |
+| [x] 6.3 | Implement starvation boost Phase 3 | Apply: if depth > 200, `spawn_blocking` with lock inside closure. Else, lock on Tokio thread. Re-key each candidate. Recompute boost from `enqueued_at` (authoritative at apply time, not snapshot time). Skip if `new_prio == current_prio`. Clamp to `PRIORITY_CEILING`. Mutex uses `unwrap_or_else(|p| p.into_inner())`. `spawn_blocking().await` wrapped in `match`. | same |
+| [x] 6.4 | Implement starvation boost scheduling | `tokio::time::interval(check_interval_secs)`. Runs until shutdown token cancelled. | same |
+| [x] 6.5 | Implement queue maintenance sweep | Every 1s: acquire queue lock, iterate all entries. Check `cancel_token.is_cancelled()` → remove + send `Cancelled`. Check `enqueued_at + queue_timeout < now()` → remove + send `TimedOut { waited }`. Decrement counters. Epoch increment per removal. See design doc Section 3.8. | `src/queue.rs` |
+| [x] 6.6 | Implement sweep scheduling | `tokio::time::interval(Duration::from_secs(1))`. Runs until shutdown token cancelled. | same |
+| [x] 6.7 | Add starvation metrics | `llamaforge_starvation_boost_applied_total` counter, `llamaforge_starvation_boost_duration_seconds` histogram. | same |
+| [x] 6.8 | Add sweep metrics | `llamaforge_queue_timeouts_total` counter, `llamaforge_queue_cancellations_total` counter (with `reason` label). | same |
+| [x] 6.9 | Add starvation tracing span | `starvation_cycle{depth, boosted_count}` span per design doc Section 7.3. | same |
+| [x] 6.10 | Unit test: logarithmic boost formula | Request at base 100, waiting 60s (6 intervals after 30s start). `boost = min(50 * ln(1+6), 400) = 97`. Assert effective_priority = 197. | tests |
+| [x] 6.11 | Unit test: boost capped at max_boost | Request waiting long enough for max → assert boost == `max_boost`, not more. | tests |
+| [x] 6.12 | Unit test: boost skip if same priority | Boost computation rounds to same value → request NOT re-keyed, FIFO position preserved. | tests |
+| [x] 6.13 | Unit test: cancel during starvation scan | Snapshot includes a request. Cancel before Phase 3. Assert Phase 3 skips it (not in index). | tests |
+| [x] 6.14 | Tokio test: timeout eviction | Enqueue with 1s timeout. Advance time 2s. Assert request evicted, `response_tx` sent `TimedOut`. | tests |
+| [x] 6.15 | Tokio test: client disconnect cleanup | Enqueue with `CancellationToken`. Cancel token. Assert request removed within sweep cycle. | tests |
+| [x] 6.16 | Tokio test: spawn_blocking recovery | Inject panic inside blocking task → assert scheduler loop continues, boost cycle logged as error. | tests |
+| [x] 6.17 | Unit test: boost ceiling enforcement | Background(100) + max_boost(400) = 500. Assert < Emergency(800). Cannot reach Emergency range. | tests |
 
 ### PR6 Acceptance Criteria
 
-- [ ] Starvation boost formula matches design doc exactly
-- [ ] `spawn_blocking` used when depth > 200, direct lock when ≤ 200
-- [ ] Mutex poison recovered via `unwrap_or_else`
-- [ ] `spawn_blocking` panic caught and logged (not propagated)
-- [ ] Queue maintenance sweep handles both timeout and cancellation in single pass
-- [ ] All 8 test suites pass
-- [ ] No blocking `.await` under `std::sync::Mutex` lock
+- [x] Starvation boost formula matches design doc exactly
+- [x] `spawn_blocking` used when depth > 200, direct lock when ≤ 200
+- [x] Mutex poison recovered via `unwrap_or_else`
+- [x] `spawn_blocking` panic caught and logged (not propagated)
+- [x] Queue maintenance sweep handles both timeout and cancellation in single pass
+- [x] All 8 test suites pass
+- [x] No blocking `.await` under `std::sync::Mutex` lock
 
 ### PR6 Creation Steps
 

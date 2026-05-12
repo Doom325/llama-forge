@@ -330,7 +330,7 @@ mod tests {
     fn test_compute_diff_priority_rules_changed() {
         let old = AppConfig::default();
         let mut new = AppConfig::default();
-        new.priority_rules.starvation.threshold_secs = 60;
+        new.priority_rules.starvation.check_interval_secs = 60;
 
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);

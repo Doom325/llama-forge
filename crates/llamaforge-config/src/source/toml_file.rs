@@ -346,7 +346,7 @@ ctx_size = 2048
             &rules_path,
             r#"
 [starvation]
-threshold_secs = 60
+check_interval_secs = 60
 "#,
         )
         .unwrap();
@@ -357,7 +357,7 @@ threshold_secs = 60
 
         assert_eq!(config.global.http_port, 9000);
         assert_eq!(config.servers.get(&ServerId::from("s1")).unwrap().port, 8080);
-        assert_eq!(config.priority_rules.starvation.threshold_secs, 60);
+        assert_eq!(config.priority_rules.starvation.check_interval_secs, 60);
     }
 
     #[test]
