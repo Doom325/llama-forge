@@ -350,12 +350,12 @@ Wire the two components together: the `RequestPipeline` facade (for Transport La
 
 ### PR5 Acceptance Criteria
 
-- [ ] `RequestPipeline::submit()` coordinates admission + enqueue atomically
-- [ ] `CompletionGuard::Drop` calls both `record_completion` and `notify_slot_available`
-- [ ] `CompletionGuard::Drop` survives `record_completion` panic (no process abort)
-- [ ] Scheduler loop dispatches requests and exits on shutdown
-- [ ] All 7 test suites pass
-- [ ] No concrete type dependencies in scheduler loop — all port traits
+- [x] `RequestPipeline::submit()` coordinates admission + enqueue atomically
+- [x] `CompletionGuard::Drop` calls both `record_completion` and `notify_slot_available`
+- [x] `CompletionGuard::Drop` survives `record_completion` panic (no process abort)
+- [x] Scheduler loop dispatches requests and exits on shutdown
+- [x] All 7 test suites pass
+- [x] No concrete type dependencies in scheduler loop — all port traits
 
 ### PR5 Creation Steps
 

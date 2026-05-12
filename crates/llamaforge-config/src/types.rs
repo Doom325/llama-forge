@@ -467,7 +467,7 @@ pub struct AllowedPriorityRange {
 #[serde(default)]
 pub struct RequestorClassPolicy {
     pub max_concurrent: u32,
-    pub allowed_task_types: HashMap<String, AllowedPriorityRange>,
+    pub allowed_task_types: HashMap<TaskTypeId, AllowedPriorityRange>,
     pub priority_bonus: i32,
     pub queue_timeout_secs: Option<u32>,
 }

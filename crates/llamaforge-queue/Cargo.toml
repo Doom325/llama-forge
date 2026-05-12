@@ -27,3 +27,5 @@ scopeguard = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }
+tokio-stream = { workspace = true }
+async-trait = { workspace = true }

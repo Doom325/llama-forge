@@ -2,7 +2,7 @@ use crate::config::RequestorClassPolicy;
 use crate::types::{AdmittedRequest, IncomingRequest, TaskType};
 use crate::error::AdmissionError;
 use dashmap::DashMap;
-use llamaforge_config::{ConfigHandle, ConfigReader};
+use llamaforge_config::{ConfigHandle, ConfigReader, TaskTypeId};
 use llamaforge_types::traits::{AdmissionAccounting, CapacityChecker, DequeueReason};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,7 +25,6 @@ impl Default for RequestorUsage {
 }
 
 pub struct AdmissionController {
-    #[allow(dead_code)]
     config: Arc<ConfigHandle>,
     requestor_usage: DashMap<RequestorId, RequestorUsage>,
     queue_depth: Arc<AtomicU32>,
@@ -132,7 +131,8 @@ impl AdmissionController {
         });
 
         // 3. Task type authorization
-        if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&req.task_type.to_string()) {
+        let task_type_id = TaskTypeId::from(req.task_type.to_string());
+        if !policy.allowed_task_types.is_empty() && !policy.allowed_task_types.contains_key(&task_type_id) {
             return Err(AdmissionError::UnauthorizedTaskType { task_type: req.task_type });
         }
 
@@ -147,7 +147,7 @@ impl AdmissionController {
         }
 
         // 5. Priority computation
-        let base_priority = match req.task_type {
+        let base_priority: u32 = match req.task_type {
             TaskType::Emergency => 1000,
             TaskType::RealtimeChat => 400,
             TaskType::CodeReview => 200,
@@ -158,10 +158,10 @@ impl AdmissionController {
             TaskType::Backfill => 0,
         };
 
-        let mut effective_priority = (base_priority as i32 + policy.priority_bonus).max(0) as u32;
+        let mut effective_priority = base_priority.saturating_add_signed(policy.priority_bonus);
 
         if let Some(override_val) = req.explicit_override {
-            if let Some(range) = policy.allowed_task_types.get(&req.task_type.to_string()) {
+            if let Some(range) = policy.allowed_task_types.get(&task_type_id) {
                 if override_val < range.min || override_val > range.max {
                     return Err(AdmissionError::PriorityOutOfRange { priority: override_val });
                 }
@@ -241,8 +241,6 @@ mod tests {
     struct MockCapacityChecker {
         capacity: bool,
     }
-    
-    impl llamaforge_types::traits::private::Sealed for MockCapacityChecker {}
 
     impl CapacityChecker for MockCapacityChecker {
         fn has_capacity(&self, _target: &ModelTarget) -> bool {
