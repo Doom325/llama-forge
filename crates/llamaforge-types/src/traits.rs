@@ -43,6 +43,7 @@ pub trait SlotDispatcher: Send + Sync {
     async fn dispatch(
         &self,
         server_id: &ServerId,
+        // TODO: Prefer a typed payload instead of `Arc<dyn Any>` when payload types are strictly defined
         request: std::sync::Arc<dyn std::any::Any + Send + Sync>,
     ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError>;
 }

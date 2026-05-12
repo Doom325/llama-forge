@@ -141,10 +141,10 @@ pub enum AdmissionError {
     QueueFull { depth: u32, max: u32, retry_after_secs: u32 },
 
     #[error("requestor '{requestor}' at concurrent limit ({current}/{max})")]
-    RequestorLimit { requestor: String, current: u32, max: u32 },
+    RequestorLimit { requestor: RequestorId, current: u32, max: u32 },
 
     #[error("no server configured for model '{model}'")]
-    NoServerForModel { model: String },
+    NoServerForModel { model: ModelAlias },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -594,6 +594,18 @@ On SIGTERM:
 | Resource | Bound | Worst Case |
 |----------|-------|------------|
 | QueuedRequest | ~500 bytes (payload is Arc) | 1000 × 500B = 500KB |
+| Index HashMap | ~100 bytes per entry | 1000 × 100B = 100KB |
+| DRR sliding window | 60s × ~10 entries/sec | 600 × 16B = 10KB |
+| Per-requestor semaphores | ~100 bytes per requestor | 50 requestors × 100B = 5KB |
+
+**Total worst case:** < 1MB at max queue depth. Fully bounded by `queue_max_depth`.
+
+### Backpressure
+
+- **Admission → Transport Layer:** Queue full returns 429 with `Retry-After`. Transport Layer passes this to client. Client implements exponential backoff.
+- **Dispatch → Scheduler loop:** If no capacity, `try_dispatch` returns None. Scheduler sleeps on `Notify` until `notify_slot_available()`. No busy-spinning.
+- **Starvation → Queue:** If boost cycle is slow (>200 entries), it runs on blocking thread pool. Main scheduler loop unaffected.
+rc) | 1000 × 500B = 500KB |
 | Index HashMap | ~100 bytes per entry | 1000 × 100B = 100KB |
 | DRR sliding window | 60s × ~10 entries/sec | 600 × 16B = 10KB |
 | Per-requestor semaphores | ~100 bytes per requestor | 50 requestors × 100B = 5KB |

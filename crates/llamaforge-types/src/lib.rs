@@ -13,6 +13,7 @@ pub struct RequestId(Uuid);
 
 impl RequestId {
     pub fn new(id: Uuid) -> Self { Self(id) }
+    pub fn as_uuid(&self) -> Uuid { self.0 }
     pub fn into_inner(self) -> Uuid { self.0 }
 }
 
@@ -30,6 +31,7 @@ pub struct ServerId(Uuid);
 
 impl ServerId {
     pub fn new(id: Uuid) -> Self { Self(id) }
+    pub fn as_uuid(&self) -> Uuid { self.0 }
     pub fn into_inner(self) -> Uuid { self.0 }
 }
 
