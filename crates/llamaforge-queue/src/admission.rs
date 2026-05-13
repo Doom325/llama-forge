@@ -150,7 +150,7 @@ impl AdmissionController {
         }
 
         // 4. Model validation
-        if !self.model_validator.has_capacity(&req.model_target) {
+        if !self.model_validator.has_capacity(&req.model_target, &req.capabilities) {
             let model_alias = match &req.model_target {
                 ModelTarget::Exact(m) => m.clone(),
                 ModelTarget::AnyOf(models) => {
@@ -333,7 +333,11 @@ mod tests {
     }
 
     impl CapacityChecker for MockCapacityChecker {
-        fn has_capacity(&self, _target: &ModelTarget) -> bool {
+        fn has_capacity(
+            &self,
+            _target: &ModelTarget,
+            _capabilities: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
             self.capacity
         }
     }

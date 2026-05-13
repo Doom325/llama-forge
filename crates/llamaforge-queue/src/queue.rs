@@ -52,7 +52,7 @@ impl FlatPriorityQueue {
         for (rev_prio, deque) in self.queue.iter() {
             for (idx, req) in deque.iter().enumerate() {
                 scan_depth += 1;
-                if capacity.has_capacity(&req.model_target) {
+                if capacity.has_capacity(&req.model_target, &req.capabilities) {
                     target_coord = Some((rev_prio.0, idx));
                     break;
                 }
@@ -399,7 +399,11 @@ mod tests {
     }
 
     impl CapacityChecker for MockCapacityChecker {
-        fn has_capacity(&self, target: &ModelTarget) -> bool {
+        fn has_capacity(
+            &self,
+            target: &ModelTarget,
+            _capabilities: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
             match target {
                 ModelTarget::Exact(alias) => self.allowed_models.contains(alias),
                 ModelTarget::AnyOf(aliases) => {

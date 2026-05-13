@@ -61,7 +61,7 @@ fn test_vc2_2_dispatch_compensation() {
     let model_target = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
     // effective_free = 0, has_capacity = false
-    assert!(!router.has_capacity(&model_target));
+    assert!(!router.has_capacity(&model_target, &Default::default()));
 }
 
 // VC-2.3

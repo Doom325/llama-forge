@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn has_capacity(&self, _: &ModelTarget) -> bool {
+    fn has_capacity(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
         true
     }
 }

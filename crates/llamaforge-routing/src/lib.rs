@@ -37,7 +37,7 @@ pub trait DispatchCountView: Send + Sync {
 /// This trait is intentionally open (unsealed) so that external test crates can implement it.
 pub trait CapacityChecker: Send + Sync {
     /// Checks if there is any configured capacity for a given target.
-    fn has_capacity(&self, target: &ModelTarget) -> bool;
+    fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool;
 }
 
 /// Used by Dispatch & Proxy (Component 06) to select a server after dequeue.
