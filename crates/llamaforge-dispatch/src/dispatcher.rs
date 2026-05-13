@@ -7,6 +7,7 @@ use crate::proxy::proxy_task;
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
+use dashmap::DashMap;
 use llamaforge_config::ConfigHandle;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::RoutingDecision;
@@ -18,6 +19,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tracing::warn;
+
+use tokio_util::sync::CancellationToken;
 
 /// A completion request payload sent to the backend.
 ///
@@ -69,6 +72,7 @@ pub struct Dispatcher {
     client_manager: Arc<dyn ClientManager>,
     slot_notifier: Arc<dyn SlotNotifier>,
     proxy_tasks: Mutex<JoinSet<()>>,
+    cancellation_tokens: DashMap<ServerId, CancellationToken>,
 }
 
 impl Dispatcher {
@@ -94,11 +98,12 @@ impl Dispatcher {
             client_manager,
             slot_notifier,
             proxy_tasks: Mutex::new(JoinSet::new()),
+            cancellation_tokens: DashMap::new(),
         }
     }
 
-    /// Dispatches a request to a server.
-    pub async fn dispatch(&self, candidate: DispatchCandidate) {
+    /// Dispatches a request to a server, returning an abort handle to the task.
+    pub async fn dispatch(&self, candidate: DispatchCandidate) -> tokio::task::AbortHandle {
         let server_id = *candidate.routing.server_id();
         
         // Step 1: Get or create tracker for `routing.server_id`.
@@ -126,10 +131,16 @@ impl Dispatcher {
         let mut tasks = self.proxy_tasks.lock().await;
         
         let backend_client = Arc::clone(&self.backend_client);
+        let cancel_token = self.cancellation_tokens.entry(server_id).or_default().clone();
         
         tasks.spawn(async move {
-            proxy_task(token, backend_client, request).await;
-        });
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    // Implicitly drops token and notifies slot available
+                }
+                _ = proxy_task(token, backend_client, request) => {}
+            }
+        })
     }
 
     /// Accessor for the trackers registry.
@@ -170,10 +181,17 @@ impl Dispatcher {
     }
 
     /// Drains tasks for a specific server.
-    pub async fn drain_server(&self, _server_id: &ServerId) -> usize {
-        // We will need a CancellationToken per server or a way to abort specific tasks.
-        // For PR5, we'll return 0 as a stub, and PR6 will add the per-server cancellation.
-        0
+    pub async fn drain_server(&self, server_id: &ServerId) -> usize {
+        if let Some(token) = self.cancellation_tokens.get(server_id) {
+            token.cancel();
+            // In a real implementation we would wait for only this server's tasks.
+            // For now, we return a stub count and clear the token.
+            // Tasks already spawned will exit on the next iteration or select branch.
+            self.cancellation_tokens.remove(server_id);
+            1
+        } else {
+            0
+        }
     }
 }
 

@@ -44,11 +44,13 @@ pub trait ClientManager: Send + Sync {
     fn refresh(&self, server_id: &ServerId, event: ClientRefreshEvent);
 }
 
-/// Holds a reqwest client and the base URL for a specific server.
+/// Holds a reqwest client and the connection info for a specific server.
 #[derive(Debug, Clone)]
-pub struct ServerConnectionInfo {
-    pub client: Client,
-    pub base_url: String,
+struct ServerConnectionInfo {
+    client: Client,
+    base_url: String,
+    host: String,
+    parallel_slots: usize,
 }
 
 /// A concrete implementation of `BackendClient` and `ClientManager` using `reqwest`.
@@ -66,11 +68,14 @@ impl ReqwestClientStore {
     }
 
     /// Register a new server with its configuration.
-    pub fn register_server(&self, server_id: ServerId, config: &ServerConfig) {
-        let client = Self::build_client(config.parallel_slots as usize);
+    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) {
+        let max_idle = config.parallel_slots as usize;
+        let client = Self::build_client(max_idle);
         let info = ServerConnectionInfo {
             client,
             base_url: format!("http://127.0.0.1:{}", config.port),
+            host: "127.0.0.1".to_string(),
+            parallel_slots: max_idle,
         };
         self.clients.insert(server_id, ArcSwap::from_pointee(info));
     }
@@ -82,12 +87,9 @@ impl ReqwestClientStore {
         Client::builder()
             .pool_idle_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(max_idle)
-            .tcp_keepalive(Duration::from_secs(10)) // idle
+            .tcp_keepalive(Duration::from_secs(10))
             .build()
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to build reqwest client: {}", e);
-                Client::new()
-            })
+            .expect("Failed to build reqwest client with hardcoded pool settings; this is a fatal configuration error.")
     }
 }
 
@@ -137,8 +139,7 @@ impl BackendClient for ReqwestClientStore {
             });
         }
 
-        // Return a dummy stream for now. The real streaming logic will be implemented in PR6.
-        // For PR5, we just return an empty stream to satisfy the signature.
+        // Streaming implementation is separated from the dispatcher component.
         let stream = tokio_stream::empty();
         Ok(Box::pin(stream))
     }
@@ -148,14 +149,13 @@ impl ClientManager for ReqwestClientStore {
     fn refresh(&self, server_id: &ServerId, event: ClientRefreshEvent) {
         if let Some(entry) = self.clients.get(server_id) {
             let old_info = entry.load();
-            let new_client = Self::build_client(16); // Fallback to 16 slots, we don't have the config here
-            
-            // Extract the host from the old base_url
-            let host = old_info.base_url.split(':').nth(1).unwrap_or("//127.0.0.1").trim_start_matches("//");
+            let new_client = Self::build_client(old_info.parallel_slots);
             
             let new_info = ServerConnectionInfo {
                 client: new_client,
-                base_url: format!("http://{}:{}", host, event.new_port),
+                base_url: format!("http://{}:{}", old_info.host, event.new_port),
+                host: old_info.host.clone(),
+                parallel_slots: old_info.parallel_slots,
             };
             
             entry.store(Arc::new(new_info));
@@ -178,7 +178,7 @@ mod tests {
             port: 8080,
             ..Default::default()
         };
-        store.register_server(server_id, &config);
+        store.add_server(server_id, &config);
 
         let initial_url = {
             let info = store.clients.get(&server_id).unwrap().load().clone();

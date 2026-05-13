@@ -7,7 +7,7 @@ use crate::dispatcher::CompletionRequest;
 use crate::token::DispatchToken;
 use std::sync::Arc;
 
-/// A stub for the proxy task. This will be replaced with the real implementation in PR6.
+/// A stub for the proxy task. This will be replaced with the real streaming implementation.
 pub async fn proxy_task(
     mut token: DispatchToken,
     _client: Arc<dyn BackendClient>,
