@@ -7,13 +7,13 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures_core::Stream;
+use futures_util::StreamExt;
 use llamaforge_config::ServerConfig;
 use llamaforge_types::{ClientRefreshEvent, ServerId};
 use reqwest::Client;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 use crate::dispatcher::CompletionRequest;
 use crate::error::{DispatchError, HttpStatus, StreamError};
@@ -68,9 +68,9 @@ impl ReqwestClientStore {
     }
 
     /// Register a new server with its configuration.
-    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) {
+    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) -> Result<(), reqwest::Error> {
         let max_idle = config.parallel_slots as usize;
-        let client = Self::build_client(max_idle);
+        let client = Self::build_client(max_idle)?;
         let info = ServerConnectionInfo {
             client,
             base_url: format!("http://127.0.0.1:{}", config.port),
@@ -78,10 +78,11 @@ impl ReqwestClientStore {
             parallel_slots: max_idle,
         };
         self.clients.insert(server_id, ArcSwap::from_pointee(info));
+        Ok(())
     }
 
     /// Helper to build a `reqwest::Client` with the correct pool settings.
-    fn build_client(parallel_slots: usize) -> Client {
+    fn build_client(parallel_slots: usize) -> Result<Client, reqwest::Error> {
         let max_idle = parallel_slots.max(16);
         
         Client::builder()
@@ -89,7 +90,6 @@ impl ReqwestClientStore {
             .pool_max_idle_per_host(max_idle)
             .tcp_keepalive(Duration::from_secs(10))
             .build()
-            .expect("Failed to build reqwest client with hardcoded pool settings; this is a fatal configuration error.")
     }
 }
 
@@ -139,8 +139,9 @@ impl BackendClient for ReqwestClientStore {
             });
         }
 
-        // Streaming implementation is separated from the dispatcher component.
-        let stream = tokio_stream::empty();
+        let stream = response.bytes_stream().map(|res| {
+            res.map_err(|e| StreamError::Internal(Box::new(e)))
+        });
         Ok(Box::pin(stream))
     }
 }
@@ -149,17 +150,22 @@ impl ClientManager for ReqwestClientStore {
     fn refresh(&self, server_id: &ServerId, event: ClientRefreshEvent) {
         if let Some(entry) = self.clients.get(server_id) {
             let old_info = entry.load();
-            let new_client = Self::build_client(old_info.parallel_slots);
-            
-            let new_info = ServerConnectionInfo {
-                client: new_client,
-                base_url: format!("http://{}:{}", old_info.host, event.new_port),
-                host: old_info.host.clone(),
-                parallel_slots: old_info.parallel_slots,
-            };
-            
-            entry.store(Arc::new(new_info));
-            info!("Refreshed client for server {}, new port: {}", server_id, event.new_port);
+            match Self::build_client(old_info.parallel_slots) {
+                Ok(new_client) => {
+                    let new_info = ServerConnectionInfo {
+                        client: new_client,
+                        base_url: format!("http://{}:{}", old_info.host, event.new_port),
+                        host: old_info.host.clone(),
+                        parallel_slots: old_info.parallel_slots,
+                    };
+                    
+                    entry.store(Arc::new(new_info));
+                    tracing::info!("Refreshed client for server {}, new port: {}", server_id, event.new_port);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to build reqwest client during refresh. Keeping old client.");
+                }
+            }
         }
     }
 }
@@ -178,7 +184,7 @@ mod tests {
             port: 8080,
             ..Default::default()
         };
-        store.add_server(server_id, &config);
+        store.add_server(server_id, &config).unwrap();
 
         let initial_url = {
             let info = store.clients.get(&server_id).unwrap().load().clone();

@@ -3,7 +3,6 @@
 //! See design doc Section 2.1
 
 use crate::client::{BackendClient, ClientManager};
-use crate::proxy::proxy_task;
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
@@ -66,7 +65,7 @@ pub struct Dispatcher {
     backend_client: Arc<dyn BackendClient>,
     client_manager: Arc<dyn ClientManager>,
     slot_notifier: Arc<dyn SlotNotifier>,
-    proxy_tasks: Mutex<JoinSet<()>>,
+    proxy_tasks: DashMap<ServerId, Mutex<JoinSet<()>>>,
     cancellation_tokens: DashMap<ServerId, CancellationToken>,
 }
 
@@ -92,16 +91,20 @@ impl Dispatcher {
             backend_client,
             client_manager,
             slot_notifier,
-            proxy_tasks: Mutex::new(JoinSet::new()),
+            proxy_tasks: DashMap::new(),
             cancellation_tokens: DashMap::new(),
         }
     }
 
-    /// Dispatches a request to a server, returning an abort handle to the task.
+    /// Dispatches a request to a server, returning a receiver for the response stream.
     pub async fn dispatch(
         &self,
         candidate: DispatchCandidate,
-    ) -> tokio::task::AbortHandle {
+        audit_tx: tokio::sync::mpsc::Sender<crate::proxy::AuditRecord>,
+    ) -> (
+        tokio::task::AbortHandle,
+        tokio::sync::mpsc::Receiver<Result<crate::proxy::ParsedChunk, crate::error::StreamError>>,
+    ) {
         let server_id = *candidate.routing.server_id();
 
         // Step 1: Get or create tracker for `routing.server_id`.
@@ -126,19 +129,30 @@ impl Dispatcher {
         };
 
         // Step 4: Add task to `proxy_tasks` JoinSet
-        let mut tasks = self.proxy_tasks.lock().await;
+        let tasks_mutex = self.proxy_tasks.entry(server_id).or_insert_with(|| Mutex::new(JoinSet::new()));
+        let mut tasks = tasks_mutex.lock().await;
 
         let backend_client = Arc::clone(&self.backend_client);
         let cancel_token = self.cancellation_tokens.entry(server_id).or_default().clone();
+        let slot_notifier = Arc::clone(&self.slot_notifier);
+        let slot_dispatch_map = Arc::clone(&self.slot_dispatch_map);
+        let (response_tx, response_rx) = tokio::sync::mpsc::channel(32);
 
-        tasks.spawn(async move {
-            tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    // Implicitly drops token and notifies slot available
-                }
-                _ = proxy_task(token, backend_client, request) => {}
-            }
-        })
+        let handle = tasks.spawn(async move {
+            crate::proxy::proxy_task(
+                token,
+                backend_client,
+                request,
+                response_tx,
+                slot_notifier,
+                audit_tx,
+                cancel_token,
+                slot_dispatch_map,
+            )
+            .await;
+        });
+
+        (handle, response_rx)
     }
 
     /// Accessor for the trackers registry.
@@ -158,34 +172,49 @@ impl Dispatcher {
 
     /// Gracefully shuts down the dispatcher, waiting for all proxy tasks to complete.
     pub async fn shutdown(&self) {
-        let mut tasks = self.proxy_tasks.lock().await;
-        let count = tasks.len();
-        if count > 0 {
-            warn!(count, "Waiting for proxy tasks to complete during shutdown");
+        let mut all_tasks = Vec::new();
+        let mut total_count = 0;
+        
+        let server_ids: Vec<_> = self.proxy_tasks.iter().map(|e| *e.key()).collect();
+        for id in server_ids {
+            if let Some((_, tasks_mutex)) = self.proxy_tasks.remove(&id) {
+                let tasks = tasks_mutex.into_inner();
+                if !tasks.is_empty() {
+                    total_count += tasks.len();
+                    all_tasks.push(tasks);
+                }
+            }
+        }
+
+        if total_count > 0 {
+            warn!(count = total_count, "Waiting for proxy tasks to complete during shutdown");
             // Wait with timeout
             match tokio::time::timeout(Duration::from_secs(5), async {
-                while tasks.join_next().await.is_some() {}
+                for mut tasks in all_tasks {
+                    while tasks.join_next().await.is_some() {}
+                }
             })
             .await
             {
                 Ok(_) => info!("All proxy tasks completed"),
-                Err(_) => warn!(
-                    remaining = tasks.len(),
-                    "Timed out waiting for proxy tasks to complete"
-                ),
+                Err(_) => warn!("Timed out waiting for proxy tasks to complete"),
             }
         }
     }
 
     /// Drains tasks for a specific server.
     pub async fn drain_server(&self, server_id: &ServerId) -> usize {
-        if let Some(token) = self.cancellation_tokens.get(server_id) {
+        if let Some((_, token)) = self.cancellation_tokens.remove(server_id) {
             token.cancel();
-            // In a real implementation we would wait for only this server's tasks.
-            // For now, we return a stub count and clear the token.
-            // Tasks already spawned will exit on the next iteration or select branch.
-            self.cancellation_tokens.remove(server_id);
-            1
+        }
+
+        if let Some((_, tasks_mutex)) = self.proxy_tasks.remove(server_id) {
+            let mut tasks = tasks_mutex.into_inner();
+            let mut count = 0;
+            while tasks.join_next().await.is_some() {
+                count += 1;
+            }
+            count
         } else {
             0
         }
@@ -297,7 +326,8 @@ mod tests {
             routing: RoutingDecision::new_for_test(server_id),
         };
 
-        let _handle = dispatcher.dispatch(candidate).await;
+        let (audit_tx_dispatch, _) = tokio::sync::mpsc::channel(1);
+        let _handle = dispatcher.dispatch(candidate, audit_tx_dispatch).await;
 
         let tracker = trackers.get(&server_id).unwrap();
         assert_eq!(tracker.count(), 1);
