@@ -250,12 +250,12 @@ Implement the RAII slot accounting guard (`DispatchToken`) and the bidirectional
 
 ### PR4 Acceptance Criteria
 
-- [ ] `DispatchToken::Drop` always releases the slot (verified by unit test)
-- [ ] Double-release via `release()` + `Drop` does not double-decrement
-- [ ] `SlotDispatchMap` maintains bidirectional consistency through all mutations
-- [ ] `get_request_for_slot` and `has_unresolved` are only accessible via `SlotDispatchView` trait
-- [ ] All mutex locks use poison recovery
-- [ ] All 7 test suites pass
+- [x] `DispatchToken::Drop` always releases the slot (verified by unit test)
+- [x] Double-release via `release()` + `Drop` does not double-decrement
+- [x] `SlotDispatchMap` maintains bidirectional consistency through all mutations
+- [x] `get_request_for_slot` and `has_unresolved` are only accessible via `SlotDispatchView` trait
+- [x] All mutex locks use poison recovery
+- [x] All 7 test suites pass
 
 ### PR4 Creation Steps
 
