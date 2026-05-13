@@ -229,6 +229,74 @@ pub struct AppConfig {
     pub servers: HashMap<ServerId, ServerConfig>,
     #[serde(default)]
     pub priority_rules: PriorityRulesConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
+}
+
+/// Routing configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoutingConfig {
+    #[serde(default = "default_session_affinity_max_entries")]
+    pub session_affinity_max_entries: u32,
+    #[serde(default = "default_startup_wait_secs")]
+    pub startup_wait_secs: u64,
+    #[serde(default)]
+    pub weights: RoutingWeightsConfig,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            session_affinity_max_entries: default_session_affinity_max_entries(),
+            startup_wait_secs: default_startup_wait_secs(),
+            weights: RoutingWeightsConfig::default(),
+        }
+    }
+}
+
+fn default_session_affinity_max_entries() -> u32 {
+    10_000
+}
+
+fn default_startup_wait_secs() -> u64 {
+    30
+}
+
+/// Routing weights configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoutingWeightsConfig {
+    #[serde(default = "default_w_slots")]
+    pub w_slots: f64,
+    #[serde(default = "default_w_kv")]
+    pub w_kv: f64,
+    #[serde(default = "default_w_queue")]
+    pub w_queue: f64,
+    #[serde(default = "default_w_affinity")]
+    pub w_affinity: f64,
+}
+
+impl Default for RoutingWeightsConfig {
+    fn default() -> Self {
+        Self {
+            w_slots: default_w_slots(),
+            w_kv: default_w_kv(),
+            w_queue: default_w_queue(),
+            w_affinity: default_w_affinity(),
+        }
+    }
+}
+
+fn default_w_slots() -> f64 {
+    0.4
+}
+fn default_w_kv() -> f64 {
+    0.2
+}
+fn default_w_queue() -> f64 {
+    0.2
+}
+fn default_w_affinity() -> f64 {
+    0.2
 }
 
 /// Global system configuration.
@@ -647,6 +715,7 @@ mod tests {
                 },
                 preemption: PreemptionConfig { enabled: true, min_tokens_before_preempt: 5 },
             },
+            routing: Default::default(),
         };
 
         config.servers.insert(

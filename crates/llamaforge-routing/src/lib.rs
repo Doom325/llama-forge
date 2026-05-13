@@ -21,6 +21,9 @@ pub trait RequestView: Send + Sync {
 
     /// The capabilities required by this request.
     fn capabilities(&self) -> &RequestCapabilities;
+
+    /// The session ID for session affinity (if any).
+    fn session_id(&self) -> Option<&llamaforge_types::SessionId>;
 }
 
 /// Breaks the bidirectional dependency between routing and dispatch crates.

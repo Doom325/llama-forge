@@ -101,7 +101,6 @@ impl fmt::Display for TierLabel {
         write!(f, "{}", self.as_str())
     }
 }
-
 pub struct IncomingRequest {
     pub id: RequestId,
     pub payload: Arc<InferencePayload>,
@@ -110,6 +109,7 @@ pub struct IncomingRequest {
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
     pub capabilities: llamaforge_routing::RequestCapabilities,
+    pub session_id: Option<llamaforge_types::SessionId>,
     pub explicit_override: Option<u32>,
     pub response_tx: oneshot::Sender<DispatchResult>,
     pub cancel_token: CancellationToken,
@@ -124,6 +124,8 @@ impl fmt::Debug for IncomingRequest {
             .field("requestor", &self.requestor)
             .field("requestor_class", &self.requestor_class)
             .field("model_target", &self.model_target)
+            .field("capabilities", &self.capabilities)
+            .field("session_id", &self.session_id)
             .field("explicit_override", &self.explicit_override)
             .finish()
     }
@@ -137,6 +139,7 @@ pub struct AdmittedRequest {
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
     pub capabilities: llamaforge_routing::RequestCapabilities,
+    pub session_id: Option<llamaforge_types::SessionId>,
     pub effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -167,6 +170,7 @@ impl AdmittedRequest {
             requestor_class: req.requestor_class,
             model_target: req.model_target,
             capabilities: req.capabilities,
+            session_id: req.session_id,
             effective_priority,
             base_priority,
             requestor_bonus,
@@ -190,6 +194,7 @@ pub struct QueuedRequest {
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
     pub capabilities: llamaforge_routing::RequestCapabilities,
+    pub session_id: Option<llamaforge_types::SessionId>,
     pub current_effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -213,6 +218,7 @@ impl QueuedRequest {
             requestor_class: req.requestor_class,
             model_target: req.model_target,
             capabilities: req.capabilities,
+            session_id: req.session_id,
             current_effective_priority: req.effective_priority,
             base_priority: req.base_priority,
             requestor_bonus: req.requestor_bonus,
@@ -236,6 +242,11 @@ impl llamaforge_routing::RequestView for QueuedRequest {
     fn capabilities(&self) -> &llamaforge_routing::RequestCapabilities {
         let Self { capabilities, .. } = self;
         capabilities
+    }
+
+    fn session_id(&self) -> Option<&llamaforge_types::SessionId> {
+        let Self { session_id, .. } = self;
+        session_id.as_ref()
     }
 }
 
@@ -340,6 +351,7 @@ mod tests {
             requestor_class: requestor_class.clone(),
             model_target: model_target.clone(),
             capabilities: Default::default(),
+            session_id: None,
             explicit_override: None,
             response_tx: tx,
             cancel_token: cancel_token.clone(),

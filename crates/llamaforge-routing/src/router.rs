@@ -7,7 +7,7 @@ use crate::{
     RoutingDecision, RoutingError, ServerSelector,
 };
 use dashmap::DashMap;
-use llamaforge_config::ConfigHandle;
+use llamaforge_config::{ConfigHandle, ConfigReader};
 use llamaforge_types::{ModelAlias, ModelTarget, ServerId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -16,11 +16,12 @@ use std::sync::Arc;
 ///
 /// See design doc Section 3.1.
 pub struct Router {
-    #[allow(dead_code)]
     config: Arc<ConfigHandle>,
     server_state: Arc<dyn ServerStateView>,
     dispatch_counts: Arc<dyn DispatchCountView>,
     round_robin: DashMap<ModelAlias, AtomicU64>,
+    affinity_cache: std::sync::Mutex<crate::affinity::SessionAffinityCache>,
+    started_at: std::time::Instant,
 }
 
 struct ScoredCandidate {
@@ -34,7 +35,66 @@ impl Router {
         server_state: Arc<dyn ServerStateView>,
         dispatch_counts: Arc<dyn DispatchCountView>,
     ) -> Self {
-        Self { config, server_state, dispatch_counts, round_robin: DashMap::new() }
+        let max_entries = config.snapshot().routing.session_affinity_max_entries;
+        Self {
+            config,
+            server_state,
+            dispatch_counts,
+            round_robin: DashMap::new(),
+            affinity_cache: std::sync::Mutex::new(crate::affinity::SessionAffinityCache::new(
+                max_entries as usize,
+            )),
+            started_at: std::time::Instant::now(),
+        }
+    }
+
+    /// Safely gets an affinity entry, handling Mutex poison.
+    #[allow(dead_code)]
+    fn get_affinity(
+        &self,
+        session_id: &llamaforge_types::SessionId,
+        available: &[ServerId],
+    ) -> Option<ServerId> {
+        let mut guard = match self.affinity_cache.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!("session affinity cache poisoned, degrading to score-only routing");
+                poisoned.into_inner()
+            }
+        };
+        guard.get(session_id, available)
+    }
+
+    /// Records a routing decision into the affinity cache.
+    #[allow(dead_code)]
+    fn set_affinity(&self, session_id: llamaforge_types::SessionId, server_id: ServerId) {
+        let mut guard = match self.affinity_cache.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!("session affinity cache poisoned, degrading to score-only routing");
+                poisoned.into_inner()
+            }
+        };
+        guard.set(session_id, server_id);
+    }
+
+    /// Invalidates all affinity entries pointing to a server.
+    pub fn invalidate_affinity(&self, server_id: &ServerId) {
+        let mut guard = match self.affinity_cache.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!("session affinity cache poisoned, degrading to score-only routing");
+                poisoned.into_inner()
+            }
+        };
+        guard.invalidate_server(server_id);
+    }
+
+    #[doc(hidden)]
+    #[allow(dead_code)]
+    pub fn poison_affinity_cache_for_test(&self) {
+        let _guard = self.affinity_cache.lock().unwrap();
+        panic!("poisoning mutex");
     }
 
     /// Hard constraint filter.
@@ -144,10 +204,11 @@ impl Router {
     }
 
     /// Scoring formula.
-    fn score_server(&self, server: &ServerSnapshot) -> f64 {
-        // TODO(PR5): Read weights from configuration. For now, use default weights.
-        let weights = crate::weights::RoutingWeights::default();
-
+    fn score_server(
+        &self,
+        server: &ServerSnapshot,
+        weights: &crate::weights::RoutingWeights,
+    ) -> f64 {
         let total_slots = server.total_slots;
         let free_ratio = if total_slots == 0 {
             0.0
@@ -222,6 +283,19 @@ impl Router {
         match res {
             Ok(_) => Ok(()),
             Err(e) => {
+                if let RoutingError::ModelUnavailable { ref server_states, .. } = e {
+                    let all_starting = !server_states.is_empty()
+                        && server_states.iter().all(|(_, state)| {
+                            *state == llamaforge_types::ServerLifecycle::Starting
+                        });
+                    if all_starting {
+                        let wait_secs = self.config.snapshot().routing.startup_wait_secs;
+                        if self.started_at.elapsed().as_secs() < wait_secs {
+                            return Ok(());
+                        }
+                    }
+                }
+
                 metrics::counter!("llamaforge_routing_rejections_total", "reason" => match &e {
                     RoutingError::ModelNotFound { .. } => "not_found",
                     RoutingError::NoCapableServer { .. } => "no_capable",
@@ -249,27 +323,30 @@ impl Router {
         }
     }
 
-    /// Placeholder for session affinity check.
-    #[allow(dead_code)]
-    fn check_affinity(&self, _request: &dyn RequestView) -> Option<ServerId> {
-        None
-    }
-
     /// Selects the best server for a given request.
     pub fn select_server(
         &self,
         request: &dyn RequestView,
     ) -> Result<RoutingDecision, RoutingError> {
+        let config = self.config.snapshot();
         let model = request.model_target();
         let capabilities = request.capabilities();
 
         let eligible = self.eligible_servers(model, capabilities)?;
 
+        let weights = match config.routing.weights.clone().try_into() {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!(error = %e, "routing.weights_invalid");
+                crate::weights::RoutingWeights::default()
+            }
+        };
+
         // Score servers
         let candidates: Vec<ScoredCandidate> = eligible
             .into_iter()
             .map(|server| {
-                let score = self.score_server(&server);
+                let score = self.score_server(&server, &weights);
                 ScoredCandidate { server, score }
             })
             .collect();
@@ -330,7 +407,9 @@ impl Router {
             "routing.selected"
         );
 
-        // TODO(PR5): record affinity after scoring
+        if let Some(session_id) = request.session_id() {
+            self.set_affinity(session_id.clone(), server_id);
+        }
 
         Ok(RoutingDecision::new(server_id, reason, score, SlotTarget::Auto))
     }
@@ -427,6 +506,7 @@ mod tests {
     struct MockRequest {
         model: ModelTarget,
         caps: RequestCapabilities,
+        session: Option<llamaforge_types::SessionId>,
     }
     impl RequestView for MockRequest {
         fn model_target(&self) -> &ModelTarget {
@@ -434,6 +514,9 @@ mod tests {
         }
         fn capabilities(&self) -> &RequestCapabilities {
             &self.caps
+        }
+        fn session_id(&self) -> Option<&llamaforge_types::SessionId> {
+            self.session.as_ref()
         }
     }
 
@@ -449,6 +532,7 @@ mod tests {
         let req = MockRequest {
             model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
             caps: Default::default(),
+            session: None,
         };
         let decision = router.select_server(&req).unwrap();
         assert_eq!(*decision.server_id(), s1_id);
@@ -463,7 +547,7 @@ mod tests {
         dispatch.counts.insert(s1.id, 2);
 
         let router = create_mock_router(vec![s1.clone()], dispatch);
-        let score = router.score_server(&s1);
+        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
 
         // Effective free = max(0, 3 - 2) = 1.
         // free_ratio = 1 / 4 = 0.25.
@@ -491,6 +575,7 @@ mod tests {
         let req = MockRequest {
             model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
             caps: Default::default(),
+            session: None,
         };
 
         let mut counts = std::collections::HashMap::new();
@@ -509,7 +594,7 @@ mod tests {
         s1.total_slots = 0;
 
         let router = create_mock_router(vec![s1.clone()], MockDispatchCountView::new());
-        let score = router.score_server(&s1);
+        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
 
         assert!(score.is_finite());
         // w_slots * 0.0 + 0.2 + 0.2 = 0.4
@@ -522,7 +607,7 @@ mod tests {
         s1.architecture = llamaforge_types::ModelArchitecture::Recurrent;
 
         let router = create_mock_router(vec![s1.clone()], MockDispatchCountView::new());
-        let score = router.score_server(&s1);
+        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
 
         // score = 0.4 * (4/4) + 0.0 (KV) + 0.2 * (1.0) + 0.0 = 0.6
         assert!((score - 0.6).abs() < f64::EPSILON, "score was {}", score);
