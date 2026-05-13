@@ -1,12 +1,14 @@
-# Smart Routing — Implementation Plan
+# Dispatch & Proxy — Implementation Plan
 
-**Component:** Smart Routing (`05_SMART_ROUTING.md`)  
-**Estimated LOC:** ~1,350 (~900 production + ~450 tests)  
-**Estimated Duration:** 5–7 working days (single engineer) / 3–4 days (two engineers, PR3/PR4 parallelizable)  
-**Design Document:** `component-designs/05_SMART_ROUTING.md` (R2 PASS — all 24 findings addressed)  
-**Branch Prefix:** `routing/`  
+**Component:** Dispatch & Proxy (`06_DISPATCH_AND_PROXY.md`)  
+**Estimated LOC:** ~2,700 (~1,900 production + ~750 tests)  
+**Estimated Duration:** 10–12 working days (single engineer) / 7–8 days (two engineers)  
+**Design Document:** `component-designs/06_DISPATCH_AND_PROXY.md` (R2 PASS WITH WARNINGS — all 28 findings addressed)  
+**Branch Prefix:** `dispatch/`  
 **Target:** `main` (via squash-merge PRs)  
-**Upstream Dependencies:** Config Manager (`llamaforge-config`), Server Manager (`llamaforge-types` with `ServerStateView` trait), Request Queue (`llamaforge-types` with `QueuedRequest`, `ModelTarget`)
+**Upstream Dependencies:** Config Manager (`llamaforge-config`), Server Manager (`llamaforge-server-mgr` types), Smart Routing (`llamaforge-routing` — `RoutingDecision`, `DispatchCountView`), Metrics & Storage (`llamaforge-metrics` — `MetricsIngest`), Request Queue (`llamaforge-queue` — `DispatchCandidate`)
+
+> **Stub strategy for `DispatchCandidate`:** If `llamaforge-queue` (Component 04) is not yet implemented when PR5 begins, define a minimal `DispatchCandidate` struct in `llamaforge-types` with fields `request_id: RequestId`, `prompt: String`, `params: CompletionParams`, `routing: RoutingDecision`. When `llamaforge-queue` lands, migrate to its canonical definition and remove the stub. This avoids blocking the dispatch implementation on the queue component.
 
 > **Branching workflow:** Each PR is squash-merged to `main` before the next PR branches. All `git checkout -b` commands branch from `main`, which is correct because the predecessor PR has already been merged. The "Depends on" field on each PR indicates which predecessor(s) must be merged to `main` before that PR's branch is created. Do NOT branch from a predecessor's feature branch — always branch from `main` after the predecessor is merged.
 
@@ -15,145 +17,137 @@
 ## Ground Rules for CoderAgents
 
 1. **Read the design doc first.** Every PR description must reference the specific design doc sections it implements.
-2. **No `unwrap()` or `expect()` in production code paths.** Use `?` propagation, `unwrap_or_else`, or explicit `match`. Mutex locks use `unwrap_or_else(|p| p.into_inner())` for poison recovery.
-3. **All Router methods are synchronous.** Async callers MUST wrap calls in `spawn_blocking`. Never add `.await` inside the Router.
+2. **No `unwrap()` or `expect()` in production code paths.** Use `?` propagation, `unwrap_or_else`, or explicit `match`. Mutex locks use `unwrap_or_else(|p| { tracing::warn!("...poisoned..."); p.into_inner() })` for poison recovery.
+3. **No blocking under `.await`.** `std::sync::Mutex` critical sections are pure computation (insert, remove, len). Lock guards are acquired, used, and dropped within a single synchronous expression. Never hold a guard across an `.await` point. If async work is needed, clone the data out first.
 4. **Every public type gets a doc comment.** Reference the design doc section number.
-5. **Newtype wrappers for domain IDs.** Use `SessionId`, `LoraAdapterId`, `ServerId` — never raw `String` for domain identifiers.
+5. **Newtype wrappers for domain IDs.** Use `ServerId`, `RequestId`, `SlotId`, `HttpStatus`, `CancellationPhase` — never raw integers or strings for domain identifiers.
 6. **Tests run with `cargo test --workspace`.** Every PR must pass before merge.
 7. **`cargo clippy -- -D warnings` must pass.** Zero warnings policy.
-8. **Commit messages:** `routing: <imperative summary>` (e.g., `routing: add Router struct with scoring formula`).
-9. **Port traits over concrete types.** The Router depends on `dyn ServerStateView`, `dyn DispatchCountView` — never on concrete `ServerManager` or `DispatchTracker`. Consumers depend on `dyn CapacityChecker`, `dyn ServerSelector`, `dyn RouteValidator` — never on `Arc<Router>` directly.
-10. **Private fields, public getters.** `RoutingDecision` fields are `pub(crate)` or private. Consumers access via `server_id()`, `reason()`, `into_server_id()`. Newtypes (`SessionId`, `LoraAdapterId`) have private inner fields with `new()` constructors and `as_str()` getters.
+8. **Commit messages:** `dispatch: <imperative summary>` (e.g., `dispatch: add DispatchToken RAII guard with poison-recovering mutex`).
+9. **Port traits over concrete types.** Dispatcher uses `Arc<dyn ServerStateView>`, `Arc<dyn BackendClient>`, `Arc<dyn ClientManager>` — never `Arc<Router>` or `Arc<ServerManager>`. The only deliberately concrete type is `MetricsIngest` (documented rationale in design doc Section 2.1).
+10. **reqwest confined to `client.rs`.** No other source file in `llamaforge-dispatch` may import `reqwest`. All HTTP interaction goes through the `BackendClient` / `ClientManager` port traits.
+11. **Cross-crate port traits live in `llamaforge-types`.** `SlotDispatchView`, `SlotErasure`, `SlotNotifier`, `SlotError`, `ClientRefreshEvent` are owned by `llamaforge-types`, not `llamaforge-dispatch`. This avoids dependency cycles with `llamaforge-server-mgr` and `llamaforge-queue`.
+12. **Visibility is intentional.** `DispatchTracker::insert()` and `remove()` are `pub(crate)`. `DispatchToken.released` is private. All internal structs (`SlotDispatchMapInner`, `DispatchTrackerRegistry.inner`) are private. See design doc Section 2.7 Visibility Annotations.
 
 ---
 
 ## Dependency Graph (PR merge order)
 
 ```
-PR1 ─── PR2 ──┬── PR3 ──┬── PR5 ─── PR6
-              └── PR4 ──┘
+PR1 ─── PR2 ─── PR3 ─── PR4 ─── PR5 ─── PR6 ─── PR7 ─── PR8
 ```
 
-PR3 and PR4 can be developed concurrently after PR2 merges. PR5 depends on both PR3 and PR4 being merged. PR6 is strictly sequential after PR5.
+PR3 and PR4 are now sequential (PR4 depends on PR3 because `DispatchToken` calls `tracker.insert()`/`remove()` defined in PR3). PR6 → PR7 → PR8 are strictly sequential after PR5.
+
+> **Note:** The original plan had PR3 and PR4 parallelizable, but PR4's `DispatchToken` compiles against `DispatchTracker` from PR3 — they cannot truly be developed on separate branches without stubs. Making them sequential adds ~1 day to the single-engineer path but is the cleanest approach.
 
 ---
 
-## PR1: Crate Scaffold & Port Traits
+## PR1: Crate Scaffold & Shared Types in `llamaforge-types`
 
-**Branch:** `routing/01-scaffold`  
+**Branch:** `dispatch/01-scaffold`  
 **Merge Target:** `main`  
-**Size:** Small (~150 lines)  
+**Size:** Small (~200 lines)  
 **Estimated Time:** 2–3 hours
 
 ### Purpose
 
-Create the `llamaforge-routing` library crate. Define the port trait that Smart Routing owns (`DispatchCountView`) and the three consumer-facing port traits (`CapacityChecker`, `ServerSelector`, `RouteValidator`). Wire workspace dependencies.
+Create the `llamaforge-dispatch` library crate and extend `llamaforge-types` with the cross-crate port traits and types required by Dispatch & Proxy: `SlotDispatchView`, `SlotErasure`, `SlotNotifier`, `SlotError`, `ClientRefreshEvent`, `SlotId`, and `HttpStatus`.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 1.1 | Create `llamaforge-routing` lib crate | `cargo init --lib crates/llamaforge-routing`. This crate owns all Smart Routing logic. | `crates/llamaforge-routing/` |
-| 1.2 | Add workspace member | Add `crates/llamaforge-routing` to workspace `Cargo.toml` `[workspace]` members list. | `Cargo.toml` |
-| 1.3 | Add workspace-level dependencies | `lru = "0.12"`. Verify `thiserror = "2"`, `tracing`, `metrics`, `serde`, `serde_json` already present from prior components. | `Cargo.toml` |
-| 1.4 | Wire crate dependencies | `llamaforge-routing/Cargo.toml` inherits workspace deps: `llamaforge-types`, `llamaforge-config`, `lru`, `tracing`, `metrics`, `thiserror`, `serde`. Dev-deps: `serde_json` (for serde roundtrip tests). | `crates/llamaforge-routing/Cargo.toml` |
-| 1.5 | Create module structure | `lib.rs` declares modules: `pub mod router;`, `pub mod affinity;`, `pub mod types;`, `pub mod weights;`, `pub mod error;`, `pub mod config;`. Stub each module file with `//! Module: <name>` doc comment. | `crates/llamaforge-routing/src/` |
-| 1.6 | Define `DispatchCountView` port trait | `pub trait DispatchCountView: Send + Sync { fn in_flight_count(&self, server_id: &ServerId) -> usize; }`. Doc comment explaining it breaks the bidirectional dependency between routing and dispatch crates. See design doc Section 2.1a. | `src/lib.rs` |
-| 1.7 | Define `CapacityChecker` consumer trait | `pub trait CapacityChecker: Send + Sync { fn has_capacity(&self, target: &ModelTarget) -> bool; }`. Open (unsealed) — test crates can implement this for mocking. Doc comment: "Used by Request Queue's dispatch iterator (Component 04)." See design doc Section 2.1a. Note: if `llamaforge-types` already defines a sealed `CapacityChecker` from Component 04's PR1, unseal it or define this as a separate open trait. Add a code comment documenting the decision. | `src/lib.rs` |
-| 1.8 | Define `ServerSelector` consumer trait | `pub trait ServerSelector: Send + Sync { fn select_server(&self, request: &QueuedRequest) -> Result<RoutingDecision, RoutingError>; }`. Doc comment: "Used by Dispatch & Proxy (Component 06) to select a server after dequeue." | `src/lib.rs` |
-| 1.9 | Define `RouteValidator` consumer trait | `pub trait RouteValidator: Send + Sync { fn validate_routable(&self, model: &ModelTarget, capabilities: &RequestCapabilities) -> Result<(), RoutingError>; }`. Doc comment: "Used by Transport Layer (Component 07) at admission time." | `src/lib.rs` |
-| 1.10 | Set up `lib.rs` re-exports | Re-export key types from submodules so consumers can import from `llamaforge_routing::*`: `Router`, `RoutingDecision`, `RoutingError`, `DispatchCountView`, `CapacityChecker`, `ServerSelector`, `RouteValidator`. Use `pub use` statements. Leave types as stubs for now (PR2 fills them in). | `src/lib.rs` |
-| 1.11 | Verify build | `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`. | — |
+| 1.1 | Create `llamaforge-dispatch` lib crate | `cargo init --lib crates/llamaforge-dispatch`. This crate owns Dispatcher, DispatchToken, proxy tasks, slot tracking, and the reqwest adapter. | `crates/llamaforge-dispatch/` |
+| 1.2 | Add workspace member | Add `llamaforge-dispatch` to workspace `Cargo.toml` `[workspace]` members list. | `Cargo.toml` |
+| 1.3 | Add workspace-level dependencies | `arc-swap = "1"`, `async-trait = "0.1"`, `pin-project-lite = "0.2"`, `futures-core = "0.3"`, `bytes = "1"`. Verify `reqwest`, `dashmap`, `tokio`, `tracing`, `metrics`, `thiserror` already present from prior PRs. **Note:** `pin-project-lite`, `futures-core`, and `bytes` are not listed in the design doc's crate placement section but are essential implementation deps (`futures-core` for `Stream` trait used by `BackendResponseStream`, `bytes` for `Bytes` chunks in SSE parsing, `pin-project-lite` for `Pin` projections in streaming). Update the design doc Section 1.1 deps list in this PR. | `Cargo.toml` |
+| 1.4 | Add `SlotId` newtype to `llamaforge-types` | `pub struct SlotId(pub(crate) u32)`. Derive `Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Display`. Ensure usable as `HashMap` key component. | `crates/llamaforge-types/src/lib.rs` |
+| 1.5 | Add `HttpStatus` newtype to `llamaforge-dispatch` | `pub struct HttpStatus(pub u16)` with `is_server_error()`, `is_client_error()`, `Display` impl. Lives in dispatch crate (domain error type). | `crates/llamaforge-dispatch/src/error.rs` |
+| 1.6 | Add `CancellationPhase` enum to `llamaforge-dispatch` | Four variants: `PreConnect`, `PreStream`, `Streaming`, `Cleanup`. With `Debug, Clone, Copy, PartialEq, Eq` derives and `Display` impl. | `crates/llamaforge-dispatch/src/error.rs` |
+| 1.7 | Add `SlotDispatchView` trait to `llamaforge-types` | `pub trait SlotDispatchView: Send + Sync` with `get_request_for_slot()` and `has_unresolved()`. In `crates/llamaforge-types/src/ports.rs`. | `crates/llamaforge-types/src/ports.rs` |
+| 1.8 | Add `SlotErasure` trait to `llamaforge-types` | `#[async_trait] pub trait SlotErasure: Send + Sync` with `erase_slot()`. Same file. | `crates/llamaforge-types/src/ports.rs` |
+| 1.9 | Add `SlotError` enum to `llamaforge-types` | `ErasureFailed { server_id, slot_id, reason }` and `ServerUnreachable { server_id }`. With `thiserror`. | `crates/llamaforge-types/src/ports.rs` |
+| 1.10 | Add `ClientRefreshEvent` struct to `llamaforge-types` | `pub struct ClientRefreshEvent { pub server_id: ServerId, pub new_port: u16, pub tls_config: Option<TlsConfig> }`. Derive `Debug, Clone`. | `crates/llamaforge-types/src/lib.rs` |
+| 1.10a | Add `SlotNotifier` trait to `llamaforge-types` | `pub trait SlotNotifier: Send + Sync { fn notify_slot_available(&self, server_id: &ServerId); }`. Called by proxy task cleanup (primary path) and by `DispatchToken::Drop` (safety-net path) to wake the scheduler when a slot frees. Lives alongside `SlotDispatchView` and `SlotErasure`. | `crates/llamaforge-types/src/ports.rs` |
+| 1.11 | Wire crate dependencies | `llamaforge-dispatch/Cargo.toml` inherits workspace deps: `llamaforge-types`, `llamaforge-routing`, `llamaforge-config`, `llamaforge-metrics`, `reqwest`, `dashmap`, `arc-swap`, `async-trait`, `tokio`, `tokio-util`, `tracing`, `thiserror`, `metrics`, `bytes`, `futures-core`, `pin-project-lite`. Dev-deps: `tokio` (with `test-util`, `macros`, `rt-multi-thread`), `tokio-stream`, `wiremock`. | `crates/llamaforge-dispatch/Cargo.toml` |
+| 1.12 | Create module structure in `llamaforge-dispatch` | `lib.rs` declares modules: `pub mod dispatcher;`, `pub mod token;`, `pub mod tracker;`, `pub mod slot_map;`, `pub mod proxy;`, `pub mod client;`, `pub mod error;`. Stub each module file with doc comments referencing design doc sections. | `crates/llamaforge-dispatch/src/` |
+| 1.13 | Verify build | `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`. | — |
 
 ### PR1 Acceptance Criteria
 
-- [x] `cargo build --workspace` succeeds with zero warnings
-- [x] `cargo clippy --workspace -- -D warnings` passes clean
-- [x] `Arc<dyn DispatchCountView>` compiles (trait is object-safe)
-- [x] `Arc<dyn CapacityChecker>` compiles (trait is object-safe)
-- [x] `Arc<dyn ServerSelector>` compiles (trait is object-safe)
-- [x] `Arc<dyn RouteValidator>` compiles (trait is object-safe)
-- [x] `CapacityChecker` is NOT sealed — external crates can implement it
+- [ ] `cargo build --workspace` succeeds with zero warnings
+- [ ] `cargo clippy --workspace -- -D warnings` passes clean
+- [ ] `SlotId` compiles with `Eq + Hash` (usable as `HashMap` key)
+- [ ] `Arc<dyn SlotDispatchView>` compiles (trait is object-safe)
+- [ ] `Arc<dyn SlotErasure>` compiles (trait is object-safe)
+- [ ] `Arc<dyn SlotNotifier>` compiles (trait is object-safe)
+- [ ] `ClientRefreshEvent` can cross crate boundaries (no private fields)
+- [ ] `crates/llamaforge-dispatch/src/lib.rs` compiles as a library
 
 ### PR1 Creation Steps
 
 ```bash
-git checkout -b routing/01-scaffold main
-# ... implement tasks 1.1–1.11 ...
-git add -A && git commit -m "routing: bootstrap llamaforge-routing crate with port traits"
-git push -u origin routing/01-scaffold
-# Open PR: "Smart Routing PR1: Crate Scaffold & Port Traits"
-# Description: "Creates llamaforge-routing library crate. Defines DispatchCountView
-# (breaks bidirectional dependency with Dispatch & Proxy), and three consumer-facing
-# port traits: CapacityChecker (open, for Request Queue), ServerSelector (for Dispatch
-# & Proxy), RouteValidator (for Transport Layer). Module stubs for router, affinity,
-# types, weights, error, config.
-# Design doc Sections 1.1, 2.1a."
+git checkout -b dispatch/01-scaffold main
+# ... implement tasks 1.1–1.13 ...
+git add -A && git commit -m "dispatch: bootstrap llamaforge-dispatch crate and shared types"
+git push -u origin dispatch/01-scaffold
+# Open PR: "Dispatch & Proxy PR1: Crate Scaffold & Shared Types"
+# Description: "Creates llamaforge-dispatch library crate and extends llamaforge-types
+# with cross-crate port traits (SlotDispatchView, SlotErasure, SlotNotifier) and types
+# (SlotId, SlotError, ClientRefreshEvent). Design doc Sections 1.1, 2.4, 2.6."
 ```
 
 ---
 
-## PR2: Types, Errors & Weights Builder
+## PR2: Error Types, Domain Types & Port Traits
 
-**Branch:** `routing/02-types`  
+**Branch:** `dispatch/02-types`  
 **Depends on:** PR1 merged to `main`  
-**Size:** Medium (~300 lines)  
+**Size:** Medium (~350 lines)  
 **Estimated Time:** 4–6 hours
 
 ### Purpose
 
-Define every data type from design doc Sections 2.2, 2.1a: routing decision types (`SlotTarget`, `RoutingDecision`, `RoutingReason`), domain newtypes (`SessionId`, `LoraAdapterId`), the `RoutingWeights` builder with validation, `RequestCapabilities`, `RoutingConstraint` enum, error types, and the config DTO. Getting the type foundation right early prevents cascading refactors.
+Define every domain type, error type, and port trait from design doc Sections 2.5, 2.6: `DispatchError`, `StreamError`, `CancellationPhase`, `HttpStatus`, `CompletionRequest`, `BackendResponseStream`, `BackendClient`, `ClientManager`. Getting the type foundation right early prevents cascading refactors.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 2.1 | Implement `SlotTarget` enum | `Auto`, `Pinned(SlotId)`. Derive `Debug, Clone, Copy`. Doc comment: "Eliminates the `-1` sentinel for slot assignment." See design doc Section 2.2. | `src/types.rs` |
-| 2.2 | Implement `RoutingReason` enum | `HighestScore { score: f64 }`, `SessionAffinity { session_id: SessionId }`, `RoundRobin { counter: u64 }`. Derive `Debug, Clone`. | `src/types.rs` |
-| 2.3 | Implement `RoutingDecision` struct | All fields private or `pub(crate)`: `server_id: ServerId` (private), `reason: RoutingReason` (private), `pub(crate) score: f64`, `pub(crate) slot_target: SlotTarget`. Implement getters: `server_id() -> &ServerId`, `reason() -> &RoutingReason`, `into_server_id(self) -> ServerId`. Implement `pub(crate) fn new(server_id, reason, score, slot_target) -> Self` constructor. Derive `Debug, Clone`. | `src/types.rs` |
-| 2.4 | Implement `SessionId` newtype | `pub struct SessionId(Arc<str>)` — private inner field. `new(impl AsRef<str>) -> Result<Self, IdValidationError>` validates non-empty, trimmed, max-length via `llamaforge-types`' `validate_id`. `as_str() -> &str` getter. Derive `Debug, Clone, PartialEq, Eq, Hash`. | `src/types.rs` |
-| 2.5 | Implement `LoraAdapterId` newtype | `pub struct LoraAdapterId(Arc<str>)` — private inner field. Same validation as `SessionId`. `#[derive(Serialize)]` with `#[serde(transparent)]`. Manual `Deserialize` impl routing through validated constructor via `String::deserialize` + `LoraAdapterId::new` + `map_err(serde::de::Error::custom)`. Derive `Debug, Clone, PartialEq, Eq, Hash`. | `src/types.rs` |
-| 2.6 | Implement `RequestCapabilities` struct | `lora_adapter: Option<LoraAdapterId>`, `multimodal: bool`, `embedding: bool`, `reranking: bool`. Derive `Debug, Clone, Default`. **Create in `llamaforge-types`** (not `llamaforge-routing`) so that both Transport Layer and Smart Routing can reference it without a crate dependency on `llamaforge-routing`. `LoraAdapterId` must also live in or be re-exported from `llamaforge-types` for this to work. See design doc Section 2.2, line 198-199. | `crates/llamaforge-types/src/lib.rs` |
-| 2.7 | Implement `RoutingConstraint` enum | `Model`, `LoraAdapter`, `Multimodal`, `Embedding`, `Reranking`, `Architecture`. Derive `Debug, Clone, PartialEq, Eq`. Implement `Display` with snake_case formatting. See design doc Section 2.2. | `src/error.rs` |
-| 2.8 | Implement `RoutingError` enum | Three variants: `ModelNotFound { model: String }`, `NoCapableServer { constraint: RoutingConstraint, requested: String }`, `ModelUnavailable { model: String, server_states: Vec<(ServerId, ServerLifecycle)> }`. Derive `Debug` with `#[derive(thiserror::Error)]`. See design doc Section 2.2. | `src/error.rs` |
-| 2.9 | Implement `WeightsValidationError` enum | `OutOfRange { field: &'static str, value: f64 }`. Derive `Debug` with `#[derive(thiserror::Error)]`. Error message: `"weight '{field}' out of range 0.0..=1.0: {value}"`. | `src/weights.rs` |
-| 2.10 | Implement `RoutingWeights` struct | Private fields: `w_slots: f64` (default 0.4), `w_kv: f64` (default 0.2), `w_queue: f64` (default 0.2), `w_affinity: f64` (default 0.2). Public getters: `w_slots()`, `w_kv()`, `w_queue()`, `w_affinity()`. `builder() -> RoutingWeightsBuilder`. Do NOT derive `Deserialize`. See design doc Section 2.2. | `src/weights.rs` |
-| 2.11 | Implement `RoutingWeightsBuilder` | `Default` impl with (0.4, 0.2, 0.2, 0.2). Setter methods: `w_slots(f64)`, `w_kv(f64)`, `w_queue(f64)`, `w_affinity(f64)` — each consumes and returns `Self`. `build() -> Result<RoutingWeights, WeightsValidationError>`: validate each weight in 0.0..=1.0, warn (not error) if sum != 1.0 via `tracing::warn!`. | `src/weights.rs` |
-| 2.12 | Implement `RoutingWeightsDto` | Serde DTO for config file deserialization. `#[derive(Deserialize)]` with `#[serde(default)]` on all fields. Implement `TryFrom<RoutingWeightsDto> for RoutingWeights` routing through the builder. | `src/config.rs` |
-| 2.13 | Unit tests: `SessionId` validation | Valid ID succeeds, empty string fails, whitespace-only fails. | `src/types.rs` (tests) |
-| 2.14 | Unit tests: `LoraAdapterId` serde roundtrip | Serialize → JSON string → deserialize back → equal. Invalid input during deserialization returns error. | `src/types.rs` (tests) |
-| 2.15 | Unit tests: `RoutingWeightsBuilder` rejects out-of-range | `w_slots(1.5).build()` → `Err(WeightsValidationError::OutOfRange { .. })`. | `src/weights.rs` (tests) |
-| 2.16 | Unit tests: `RoutingWeightsBuilder` warns non-unit sum | Weights summing to 0.5 → `build()` succeeds. Verify `tracing::warn` emitted (using `tracing-test` subscriber). | `src/weights.rs` (tests) |
-| 2.17 | Unit tests: `RoutingWeightsBuilder` default values | Default builder builds successfully with (0.4, 0.2, 0.2, 0.2). | `src/weights.rs` (tests) |
-| 2.18 | Unit tests: `RoutingDecision` encapsulation | Verify `server_id()` and `reason()` getters return correct values. Verify `into_server_id()` consumes the decision. | `src/types.rs` (tests) |
-| 2.19 | Unit tests: `RoutingConstraint` Display | Each variant displays as its snake_case name. Exhaustive match compiles. | `src/error.rs` (tests) |
-| 2.20 | Unit tests: `RoutingWeightsDto` conversion | Valid DTO converts to `RoutingWeights`. DTO with out-of-range value returns error. | `src/config.rs` (tests) |
+| 2.1 | Implement `DispatchError` enum | Four variants: `ConnectionFailed` (opaque `Box<dyn Error>`), `BackendError` (uses `HttpStatus`), `Cancelled` (uses `CancellationPhase`), `Timeout`. All with `thiserror`. See design doc Section 2.6. | `src/error.rs` |
+| 2.2 | Implement `StreamError` enum | Six variants: `BackendDisconnect`, `Timeout`, `Cancelled`, `ChunkParse { reason }`, `ChannelClosed`, `Internal(Box<dyn Error>)`. NOT `anyhow`. See design doc Section 2.6. | `src/error.rs` |
+| 2.3 | Implement `CompletionRequest` struct | `prompt: String`, `n_predict: Option<u32>`, `temperature: f32`, `stream: bool`, `stop: Vec<String>`, `id_slot: Option<SlotId>`. Derive `Debug, Clone`. Does NOT derive `Deserialize`. See design doc Section 2.5. | `src/dispatcher.rs` |
+| 2.4 | Define `BackendResponseStream` type alias | `pub type BackendResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, StreamError>> + Send>>`. See design doc Section 2.5. | `src/client.rs` |
+| 2.5 | Implement `BackendClient` trait | `#[async_trait] pub trait BackendClient: Send + Sync` with `post_completion(&self, server_id, payload) -> Result<BackendResponseStream, DispatchError>`. | `src/client.rs` |
+| 2.6 | Implement `ClientManager` trait | `pub trait ClientManager: Send + Sync` with `refresh(&self, server_id, event)`. | `src/client.rs` |
+| 2.7 | Unit tests: DispatchError Display | Verify all four variants format correctly. Verify `ConnectionFailed.source()` returns the inner error. | `src/error.rs` (tests) |
+| 2.8 | Unit tests: StreamError variants | Verify all six variants format correctly. Verify `Internal` wraps and exposes the inner error. | `src/error.rs` (tests) |
+| 2.9 | Unit tests: HttpStatus helpers | `HttpStatus(500).is_server_error()` → true. `HttpStatus(404).is_client_error()` → true. `HttpStatus(200).is_server_error()` → false. | `src/error.rs` (tests) |
+| 2.10 | Unit tests: CancellationPhase Display | Verify all four variants: `"pre-connect"`, `"pre-stream"`, `"streaming"`, `"cleanup"`. | `src/error.rs` (tests) |
+| 2.11 | Compile-time verification | `Arc<dyn BackendClient>` compiles (object-safe). `BackendResponseStream` is `Send`. | — |
 
 ### PR2 Acceptance Criteria
 
-- [x] All types compile with required derives
-- [x] `SessionId::new("")` returns `Err`
-- [x] `LoraAdapterId` serde roundtrip preserves value
-- [x] `RoutingWeightsBuilder::build()` validates range 0.0..=1.0
-- [x] `RoutingDecision` fields `score` and `slot_target` are NOT accessible outside the crate
-- [x] All error types implement `std::error::Error` via `thiserror`
-- [x] `cargo test --workspace` passes all 8 unit test suites
-- [x] No raw `String` used for domain identifiers — all use newtypes
+- [ ] All error types implement `std::error::Error` via `thiserror`
+- [ ] No `reqwest` types appear in any public error variant
+- [ ] No `anyhow` dependency anywhere in the crate
+- [ ] `BackendClient` and `ClientManager` are object-safe
+- [ ] `CompletionRequest` does NOT derive `Deserialize`
+- [ ] All 4 unit test suites pass
+- [ ] `cargo test --workspace` passes
 
 ### PR2 Creation Steps
 
 ```bash
-git checkout -b routing/02-types main
-# ... implement tasks 2.1–2.20 ...
-git add -A && git commit -m "routing: add routing types, error types, and weights builder"
-git push -u origin routing/02-types
-# Open PR: "Smart Routing PR2: Types, Errors & Weights Builder"
-# Description: "Implements all data types from design doc Sections 2.2, 2.1a.
-# SlotTarget enum (eliminates -1 sentinel), RoutingDecision with private fields
-# and getters, SessionId/LoraAdapterId validated newtypes with Arc<str>,
-# RoutingWeights builder with range validation, RoutingConstraint enum with
-# Display, RoutingError with thiserror, RoutingWeightsDto config DTO.
-# 8 unit test suites."
+git checkout -b dispatch/02-types main
+# ... implement tasks 2.1–2.11 ...
+git add -A && git commit -m "dispatch: add error types, CompletionRequest, and BackendClient port trait"
+git push -u origin dispatch/02-types
+# Open PR: "Dispatch & Proxy PR2: Error Types, Domain Types & Port Traits"
+# Description: "Implements all error types (DispatchError, StreamError with structured
+# variants), domain types (CompletionRequest, BackendResponseStream), and port traits
+# (BackendClient, ClientManager). Design doc Sections 2.5, 2.6. No reqwest or anyhow
+# in public API. 4 test suites."
 ```
 
 ---
@@ -164,280 +158,400 @@ git push -u origin routing/02-types
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-1.1 | Newtype privacy | Attempt to access `SessionId.0` from outside the crate → compiler rejects | Does not compile |
-| VC-1.2 | RoutingDecision encapsulation | Attempt to access `decision.score` from outside the crate → compiler rejects | Does not compile |
-| VC-1.3 | Weights validation | `RoutingWeights::builder().w_slots(-0.1).build()` → `Err(OutOfRange)` | Error variant matches |
-| VC-1.4 | LoraAdapterId deserialization | `serde_json::from_str::<LoraAdapterId>("\"\"")` → deserialization error | Error returned |
-| VC-1.5 | SlotTarget default | All v1 code paths produce `SlotTarget::Auto` | Code inspection |
+| VC-1.1 | Type safety | Attempt to pass `u32` where `SlotId` is expected → compiler rejects | Does not compile |
+| VC-1.2 | HttpStatus safety | Attempt to pass `u16` where `HttpStatus` is expected → compiler rejects | Does not compile |
+| VC-1.3 | No reqwest leak | `grep -rn "reqwest" crates/llamaforge-dispatch/src/ --include="*.rs"` — only in `client.rs` | Only `client.rs` matches |
+| VC-1.4 | Object safety | `let _: Arc<dyn BackendClient> = ...;` compiles | Compiles |
 
 ---
 
-## PR3: Router Core — Scoring & Constraint Filtering
+## PR3: DispatchTracker, DispatchTrackerRegistry & DispatchCountAdapter
 
-**Branch:** `routing/03-router-core`  
+**Branch:** `dispatch/03-tracker`  
 **Depends on:** PR2 merged to `main`  
-**Size:** Medium–Large (~300 lines)  
-**Estimated Time:** 6–8 hours
-
-### Purpose
-
-Implement the `Router` struct with its three public methods: `has_capacity()`, `select_server()`, and `validate_routable()`. This includes the hard constraint filter, the scoring formula with dispatch tracker compensation, round-robin tie-breaking, and recurrent model handling. This is the core routing engine.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 3.1 | Implement `Router` struct | `config: Arc<ConfigHandle>`, `server_state: Arc<dyn ServerStateView>`, `dispatch_counts: Arc<dyn DispatchCountView>`, `round_robin: DashMap<ModelAlias, AtomicU64>`. Constructor takes all three port trait deps. **Note:** `affinity_cache: Mutex<SessionAffinityCache>` is added in PR5 (task 5.1) after PR4 builds the cache. PR3's Router operates without affinity — the `check_affinity()` placeholder (task 3.6) returns `None`. | `src/router.rs` |
-| 3.2 | Implement hard constraint filter | Private method `fn eligible_servers(&self, model: &ModelTarget, capabilities: &RequestCapabilities) -> Result<Vec<ServerSnapshot>, RoutingError>`. Filters by: (1) model match, (2) `Running` state, (3) LoRA adapter availability, (4) multimodal capability, (5) embedding/reranking capability, (6) architecture match. Returns `RoutingError::ModelNotFound` if no servers serve the model at all. Returns `RoutingError::NoCapableServer` with the specific `RoutingConstraint` that failed. Returns `RoutingError::ModelUnavailable` if servers exist but none are `Running` — populate `server_states: Vec<(ServerId, ServerLifecycle)>` by querying `ServerStateView` for ALL servers for the model (including non-Running ones) and collecting their `(id, lifecycle)` pairs. This requires `ServerStateView` to expose server lifecycle state even for non-Running servers (e.g., via `all_servers_for_model()` or equivalent). See design doc Section 3.1. | `src/router.rs` |
-| 3.3 | Implement scoring formula | Private method `fn score_server(&self, server: &ServerSnapshot, weights: &RoutingWeights) -> f64`. Zero-guard: if `total_slots == 0` → `free_ratio = 0.0`. Dispatch compensation: `effective_free = idle_slots.saturating_sub(self.dispatch_counts.in_flight_count(&server.id))`. `free_ratio = effective_free as f64 / total_slots as f64`. Score: `w_slots × free_ratio + w_kv × (1.0 - kv_usage) + w_queue × (1.0 - deferred_ratio) + w_affinity × 0.0`. End with `debug_assert!(score.is_finite())`. See design doc Section 3.1. | `src/router.rs` |
-| 3.4 | Implement recurrent model handling | Inside `score_server`: if `server.model_architecture == "recurrent"` → zero the KV cache and affinity components. Score reduces to: `w_slots × free_ratio + w_queue × (1.0 - deferred_ratio)`. See design doc Section 3.2. | `src/router.rs` |
-| 3.5 | Implement round-robin tie-breaking | Private method `fn break_tie(&self, model: &ModelAlias, candidates: &[ScoredCandidate]) -> usize`. Uses `self.round_robin.entry(model.clone()).or_default()` to handle hot-reloaded models. `AtomicU64::fetch_add(1, Relaxed) % candidates.len()`. Returns index into candidates slice. See design doc Section 3.1. | `src/router.rs` |
-| 3.6 | Implement `Router::select_server()` | Call `eligible_servers()`. **Affinity placeholder:** add a private method `fn check_affinity(&self, ...) -> Option<ServerId>` that returns `None` unconditionally (the real `SessionAffinityCache` is built in PR4 and wired in PR5). Score all eligible servers. Find max score. If tie, use `break_tie()`. Build `RoutingDecision` with `SlotTarget::Auto`. Add a `// TODO(PR5): record affinity after scoring` comment at the call site. See design doc Section 3.1. | `src/router.rs` |
-| 3.7 | Implement `Router::has_capacity()` | For each server serving the model: compute `effective_free = idle_slots.saturating_sub(dispatch_counts.in_flight_count(id))`. If any `effective_free > 0`, return `true`. Otherwise `false`. O(S) where S = servers for the model. See design doc Section 4.2. | `src/router.rs` |
-| 3.8 | Implement `Router::validate_routable()` | Call `eligible_servers()` with the model target and capabilities. If `Ok(_)` (at least one eligible server exists), return `Ok(())`. If `Err(e)`, propagate the `RoutingError`. This is a pure constraint check — no scoring needed. See design doc Section 4.2. | `src/router.rs` |
-| 3.9 | Implement `CapacityChecker` for `Router` | `impl CapacityChecker for Router { fn has_capacity(&self, target: &ModelTarget) -> bool { self.has_capacity(target) } }` | `src/router.rs` |
-| 3.10 | Implement `ServerSelector` for `Router` | `impl ServerSelector for Router { fn select_server(&self, request: &QueuedRequest) -> Result<RoutingDecision, RoutingError> { self.select_server(request) } }` | `src/router.rs` |
-| 3.11 | Implement `RouteValidator` for `Router` | `impl RouteValidator for Router { fn validate_routable(&self, model: &ModelTarget, capabilities: &RequestCapabilities) -> Result<(), RoutingError> { self.validate_routable(model, capabilities) } }` | `src/router.rs` |
-| 3.12 | Add routing metrics | `llamaforge_routing_decisions_total` counter (labels: `reason={score,affinity,round_robin}`), `llamaforge_routing_score` histogram (label: `server_id`), `llamaforge_routing_rejections_total` counter (labels: `reason={not_found,no_capable,unavailable}`). Record at appropriate call sites in `select_server()` and `validate_routable()`. See design doc Section 7.1. | `src/router.rs` |
-| 3.13 | Add routing log events | `routing.selected` at DEBUG (per-dispatch: server_id, score, reason), `routing.rejected` at WARN (on admission reject: model, constraint, error). See design doc Section 7.2. | `src/router.rs` |
-| 3.14 | Unit test: prefers server with more free slots | Server A: 3/4 free, Server B: 1/4 free → A selected. | tests |
-| 3.15 | Unit test: dispatch tracker compensation | Mock `DispatchCountView` returning `in_flight_count=2`. Server: 4 slots, 3 idle. Effective free = 1. `free_ratio = 0.25`. | tests |
-| 3.16 | Unit test: model not found at admission | Request for "nonexistent-model" → `RoutingError::ModelNotFound`. | tests |
-| 3.17 | Unit test: round-robin on tie | Two servers with identical scores. Dispatch 4 requests → 2 to each. | tests |
-| 3.18 | Unit test: zero total slots returns zero score | Server with `total_slots = 0`. Assert `free_ratio = 0.0`, score is finite, no NaN. | tests |
-| 3.19 | Unit test: recurrent model zeroes KV/affinity | Recurrent server → KV and affinity components both 0.0 in score. | tests |
-| 3.20 | Unit test: `has_capacity` with tracker compensation | Server: 4 slots, 4 idle, `in_flight_count=4` → `has_capacity` returns false. Same with `in_flight_count=3` → returns true. | tests |
-| 3.21 | Unit test: `validate_routable` LoRA constraint | Request needs LoRA "my-adapter", no server has it → `NoCapableServer { constraint: LoraAdapter, .. }`. | tests |
-
-### PR3 Acceptance Criteria
-
-- [x] `select_server()` returns `RoutingDecision` with `SlotTarget::Auto` for all v1 decisions
-- [x] Scoring formula matches design doc Section 3.1 exactly
-- [x] `saturating_sub` prevents underflow on dispatch compensation
-- [x] Zero-guard on `total_slots == 0` prevents division by zero / NaN
-- [x] `debug_assert!(score.is_finite())` present after score computation
-- [x] Round-robin uses `AtomicU64` with `.entry().or_default()` for hot-reloaded models
-- [x] Recurrent model detection zeros KV cache and affinity components
-- [x] All 3 port trait impls compile and delegate correctly
-- [x] All 8 unit test suites pass
-- [x] No `unwrap()` in production code
-
-### PR3 Creation Steps
-
-```bash
-git checkout -b routing/03-router-core main
-# ... implement tasks 3.1–3.21 ...
-git add -A && git commit -m "routing: implement Router with scoring formula and constraint filtering"
-git push -u origin routing/03-router-core
-# Open PR: "Smart Routing PR3: Router Core — Scoring & Constraint Filtering"
-# Description: "Implements the Router struct (design doc Sections 2.1, 3.1, 3.2, 3.3, 4.2).
-# Hard constraint filter (model, LoRA, multimodal, architecture), scoring formula with
-# dispatch tracker compensation (saturating_sub, zero-guard), recurrent model handling,
-# round-robin tie-breaking with AtomicU64, all three consumer port trait impls
-# (CapacityChecker, ServerSelector, RouteValidator), 5 Prometheus metrics, 2 log events.
-# 8 unit test suites."
-```
-
----
-
-## PR4: Session Affinity Cache
-
-**Branch:** `routing/04-affinity`  
-**Depends on:** PR2 merged to `main` (can be developed concurrently with PR3)  
-**Size:** Small–Medium (~150 lines)  
-**Estimated Time:** 3–4 hours
-
-### Purpose
-
-Implement the `SessionAffinityCache` — an LRU cache mapping `SessionId → ServerId`. Protected by `std::sync::Mutex` with poison recovery via `into_inner()`. Session affinity is advisory: it yields to scoring when the target server is full.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 4.1 | Implement `SessionAffinityCache` struct | `cache: lru::LruCache<SessionId, ServerId>`. Internal struct (not public). Constructor takes `max_entries: usize` (default 10,000). See design doc Section 2.3. | `src/affinity.rs` |
-| 4.2 | Implement `SessionAffinityCache::get()` | `fn get(&mut self, session_id: &SessionId, available_servers: &[ServerId]) -> Option<ServerId>`. Look up in LRU. If found AND server is in `available_servers`, return `Some`. Otherwise return `None` (stale entry, server went away). LRU touch on hit. | `src/affinity.rs` |
-| 4.3 | Implement `SessionAffinityCache::set()` | `fn set(&mut self, session_id: SessionId, server_id: ServerId)`. Insert/update in LRU. Evicts oldest entry if at capacity. | `src/affinity.rs` |
-| 4.4 | Implement `SessionAffinityCache::invalidate_server()` | `fn invalidate_server(&mut self, server_id: &ServerId)`. Iterate all entries, collect keys where value == server_id, remove them. Called when server enters `Draining` or `Failed` state. | `src/affinity.rs` |
-| 4.5 | Export `SessionAffinityCache` as `pub(crate)` | Mark the struct `pub(crate)` (not `pub`) so that `router.rs` in the same crate can construct and hold it. Export the constructor `pub(crate) fn new(max_entries: usize) -> Self`. | `src/affinity.rs` |
-| 4.8 | Unit test: affinity hit | Set affinity (session1 → serverA). Query with serverA available → returns `Some(serverA)`. | tests |
-| 4.9 | Unit test: affinity miss (server unavailable) | Set affinity (session1 → serverA). Query with only serverB available → returns `None`. | tests |
-| 4.10 | Unit test: invalidate_server removes entries | Set affinity for 3 sessions to serverA. `invalidate_server(serverA)`. All 3 return `None`. | tests |
-| 4.11 | Unit test: LRU eviction | Cache with max_entries=3. Insert 4 entries. Assert oldest evicted. | tests |
-
-### PR4 Acceptance Criteria
-
-- [x] `SessionAffinityCache` is `pub(crate)` — visible within `llamaforge-routing` but not to external crates
-- [x] LRU cache correctly evicts oldest entries at capacity
-- [x] `invalidate_server` removes all entries for the given server
-- [x] PR4 does NOT modify `src/router.rs` — all Router integration deferred to PR5
-- [x] All 4 unit test suites pass
-
-### PR4 Creation Steps
-
-```bash
-git checkout -b routing/04-affinity main
-# ... implement tasks 4.1–4.11 ...
-git add -A && git commit -m "routing: implement SessionAffinityCache with LRU"
-git push -u origin routing/04-affinity
-# Open PR: "Smart Routing PR4: Session Affinity Cache"
-# Description: "Implements SessionAffinityCache in isolation (design doc Section 2.3).
-# LRU cache (lru crate, max 10,000 entries) mapping SessionId → ServerId.
-# Server invalidation for Draining/Failed states. pub(crate) visibility for
-# Router integration in PR5. Does NOT modify router.rs — all Router wiring
-# deferred to PR5 to avoid merge conflicts with concurrent PR3.
-# 4 unit test suites."
-```
-
----
-
-## VC-2: Core Components Verification Checkpoint
-
-**Gate:** PR3 + PR4 merged. Router core and affinity cache work together.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-2.1 | Scoring correctness | Server A (3/4 free, 0.1 KV, 0.0 deferred), Server B (1/4 free, 0.5 KV, 0.3 deferred) → verify A scores higher | Score comparison passes |
-| VC-2.2 | Dispatch compensation | 4 slots, 3 idle, `in_flight_count=3` → `effective_free=0`, `has_capacity=false` | Assertion passes |
-| VC-2.3 | Session affinity lifecycle | Set affinity → hit → invalidate server → miss → fall through to scoring | All assertions pass |
-| VC-2.4 | Constraint filtering | Request with LoRA + multimodal, only 1 of 3 servers has both → that server selected | Server ID matches |
-| VC-2.5 | Round-robin fairness | Two identical servers, 100 dispatches → each gets 50 ± 1 | Count assertion passes |
-| VC-2.6 | Mutex poison recovery | Poison cache, then dispatch 10 requests → all succeed with score-based routing | No panics, 10 decisions |
-
----
-
-## PR5: Integration Wiring & Config Weights Log Event
-
-**Branch:** `routing/05-integration`  
-**Depends on:** PR3 and PR4 both merged to `main`  
-**Size:** Medium (~250 lines)  
-**Estimated Time:** 5–7 hours
-
-### Purpose
-
-Wire the session affinity cache into the Router (moved from PR4 to avoid merge conflicts with concurrent PR3), implement the `startup_wait_secs` grace period for Starting servers, add the `routing.weights_non_unit` log event for config loading, and implement the full integration test suite from the design doc. This PR ensures all components work together as a cohesive routing engine.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 5.1 | Wire `SessionAffinityCache` into Router | Add `affinity_cache: std::sync::Mutex<SessionAffinityCache>` field to `Router` struct. Update `Router::new()` to construct `SessionAffinityCache` with capacity from `config.routing.session_affinity_max_entries` (default 10,000). Replace the placeholder `check_affinity()` (from PR3 task 3.6) with the real implementation. | `src/router.rs` |
-| 5.2 | Implement poison recovery wrapper | Private method `fn get_affinity(&self, session_id: &SessionId, available: &[ServerId]) -> Option<ServerId>`. Wraps `self.affinity_cache.lock()` with `match Ok/Err(poisoned)` pattern. On poison: `tracing::warn!("session affinity cache poisoned, degrading to score-only routing")`, then `poisoned.into_inner().get(...)`. See design doc Cross-Cutting Concerns (Panic Safety). | `src/router.rs` |
-| 5.3 | Implement affinity integration in `select_server` | Replace the PR3 `// TODO(PR5)` stub. After `eligible_servers()` and before scoring: if `request.session_id` is `Some`, call `get_affinity()`. If hit AND target server has `free_ratio > 0`, return immediately with `RoutingReason::SessionAffinity`. If hit but server is full, fall through to scoring. After scoring, call `set_affinity()` to record the decision. See design doc Section 3.1. | `src/router.rs` |
-| 5.4 | Add affinity metrics | `llamaforge_session_affinity_hits_total` counter, `llamaforge_session_affinity_misses_total` counter. Record in `select_server()` after affinity check. See design doc Section 7.1. | `src/router.rs` |
-| 5.5 | Implement `startup_wait_secs` grace period | In `validate_routable()`: if all servers for the model are in `Starting` state AND the Router has been alive for less than `config.routing.startup_wait_secs` (default 30), return `Ok(())` instead of `RoutingError::ModelUnavailable`. This allows the request to enqueue during the startup window. Store `started_at: Instant` in the Router struct (set in `Router::new()`). See design doc Section 4.3, Section 6 config table. | `src/router.rs` |
-| 5.6 | Add `routing.weights_non_unit` log event | On config load/reload: if weights sum != 1.0, emit `tracing::warn!(sum, "routing weights sum to {sum:.3}, not 1.0 — consider normalizing")`. This may already exist in the builder's `build()` method (task 2.11) — verify it fires on config reload path too. The hot-reload path MUST reconstruct weights through the builder (via `TryFrom<RoutingWeightsDto>`) to ensure the warning fires. See design doc Section 7.2. | `src/router.rs` or `src/config.rs` |
-| 5.7 | Integration test: full routing lifecycle | Create Router with mock `ServerStateView` (2 servers), mock `DispatchCountView`. Submit 10 requests → verify all get valid `RoutingDecision`s. Verify decisions spread across servers. | tests |
-| 5.8 | Integration test: affinity + scoring fallback | Set affinity via first dispatch. Second dispatch with same session → affinity server. Make affinity server full → third dispatch falls to scoring. | tests |
-| 5.9 | Integration test: validate_routable → select_server pipeline | Call `validate_routable()` → Ok. Then `select_server()` → valid decision. Then `validate_routable()` with bad capabilities → `NoCapableServer`. | tests |
-| 5.10 | Integration test: config hot-reload weights | Change routing weights via config. Verify next `select_server()` uses new weights (observable via different server selection when weights heavily favor KV cache vs slots). Verify hot-reload path goes through `TryFrom<RoutingWeightsDto>` (and thus through the builder, which fires the non-unit-sum warning). | tests |
-| 5.11 | Integration test: all servers down | All servers in `Failed` state → `select_server()` returns `ModelUnavailable`. `has_capacity()` returns false. `validate_routable()` returns `ModelUnavailable`. | tests |
-| 5.12 | Integration test: `SlotTarget::Auto` in all v1 decisions | Route 20 requests → verify every `RoutingDecision` has `slot_target == SlotTarget::Auto`. | tests |
-| 5.13 | Integration test: mock `DispatchCountView` configurable | Create a reusable `MockDispatchCountView` that returns configurable per-server counts. Verify it works with the Router. This mock will be useful for downstream components' tests. | tests |
-| 5.14 | Integration test: affinity bypassed when full | Affinity → serverA, but serverA has `free_ratio = 0`. Assert scoring selects serverB. | tests |
-| 5.15 | Integration test: mutex poison recovery | Poison the affinity cache mutex (spawn a thread that panics while holding the lock). Call `select_server()` → returns a valid `RoutingDecision` (score-based, no panic). | tests |
-| 5.16 | Integration test: startup grace period | All servers `Starting`, Router age < `startup_wait_secs` → `validate_routable()` returns `Ok(())`. After grace period elapses → returns `ModelUnavailable`. | tests |
-| 5.17 | Expose `Router::invalidate_affinity()` | `pub fn invalidate_affinity(&self, server_id: &ServerId)`. Thin wrapper: locks the affinity cache mutex (with poison recovery), calls `invalidate_server(server_id)`. Intended to be called by the composition root or Dispatch & Proxy when a server enters `Draining`/`Failed`. The caller is NOT wired in this component — documented as integration seam in Integration Points section. | `src/router.rs` |
-
-### PR5 Acceptance Criteria
-
-- [x] `SessionAffinityCache` wired into Router with `Mutex<SessionAffinityCache>` field
-- [x] Mutex poison recovered via `into_inner()` with `tracing::warn!`
-- [x] Affinity is advisory — bypassed when target server is full
-- [x] `startup_wait_secs` grace period allows enqueue during startup window
-- [x] `routing.weights_non_unit` log event fires on config reload with non-unit sum
-- [x] Config hot-reload goes through the builder (via `TryFrom<RoutingWeightsDto>`)
-- [x] Router constructor reads `session_affinity_max_entries` from config
-- [x] All 10 integration test suites pass
-- [x] Mock `DispatchCountView` is reusable for downstream component tests
-- [x] Full lifecycle (validate → select → affinity → fallback) works end-to-end
-- [x] No `unwrap()` on mutex lock — all use `unwrap_or_else(|p| p.into_inner())`
-
-### PR5 Creation Steps
-
-```bash
-git checkout -b routing/05-integration main
-# ... implement tasks 5.1–5.16 ...
-git add -A && git commit -m "routing: wire affinity into Router, add startup grace period, integration tests"
-git push -u origin routing/05-integration
-# Open PR: "Smart Routing PR5: Integration Wiring & Tests"
-# Description: "Wires SessionAffinityCache into Router (design doc Section 2.3),
-# implements Mutex poison recovery via into_inner(), startup_wait_secs grace
-# period for Starting servers (design doc Section 4.3, 6), config reload weights
-# log event (design doc Section 7.2), and 10 integration test suites covering:
-# full routing lifecycle, affinity + scoring fallback, validate → select pipeline,
-# config hot-reload, all-servers-down, SlotTarget::Auto enforcement, affinity
-# bypass when full, mutex poison recovery, startup grace period, and reusable
-# MockDispatchCountView. Design doc Sections 2.3, 3.1, 4.3, 6, 7.2, 8.2."
-```
-
----
-
-## PR6: Design Doc Test Cases & Final Verification
-
-**Branch:** `routing/06-verification`  
-**Depends on:** PR5 merged to `main`  
-**Size:** Medium (~250 lines of tests)  
+**Size:** Medium (~300 lines)  
 **Estimated Time:** 4–6 hours
 
 ### Purpose
 
-The final PR adds all remaining specific test cases from design doc Section 8.2 that weren't covered in PR2–PR5, implements the VC-2 verification checks as automated tests, and performs the final sign-off audit. This PR is pure test code — no production logic changes.
+Implement the per-server in-flight request tracking infrastructure: `DispatchTracker` (mutex-guarded HashSet), `DispatchTrackerRegistry` (DashMap wrapper), and `DispatchCountAdapter` (bridges to Component 05's `DispatchCountView` port trait). This is the accounting foundation that DispatchToken and Router depend on.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 6.1 | Implement `test_routing_with_mock_dispatch_count_view` | Inject stub `DispatchCountView` returning configurable counts. Assert `free_ratio` correctly compensated. See design doc Section 8.2. | `tests/design_doc_tests.rs` |
-| 6.2 | Implement `test_routing_constraint_exhaustive_match` | Match on `RoutingConstraint` in `NoCapableServer` error. Ensures compile-time exhaustiveness. See design doc Section 8.2. | `tests/design_doc_tests.rs` |
-| 6.3 | Implement `test_routing_decision_field_encapsulation` | From an external test crate, verify `server_id()` and `reason()` getters work. Attempt to access `decision.score` → compile error (manual verification, add code comment). See design doc Section 8.2. | `tests/design_doc_tests.rs` |
-| 6.4 | Implement `test_slot_target_auto_in_v1_decisions` | Route multiple requests. Assert all have `SlotTarget::Auto`. | `tests/design_doc_tests.rs` |
-| 6.5 | Implement `test_weights_builder_rejects_negative` | `w_kv(-0.5).build()` → error. | `tests/design_doc_tests.rs` |
-| 6.6 | Implement `test_stale_slot_compensation_floor` | `in_flight_count` > `idle_slots` → `effective_free = 0` (not negative). `free_ratio = 0.0`. | `tests/design_doc_tests.rs` |
-| 6.7 | Implement VC-2 checks as automated tests | All 6 VC-2 checks from the verification checkpoint above, each as a separate `#[test]` function. | `tests/vc2_routing.rs` |
-| 6.8 | Add `#[ignore]` for slow tests | Tag any stress tests (e.g., round-robin 100 dispatches) with `#[ignore]`. Run with `cargo test -- --ignored`. | — |
-| 6.9 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`. | — |
+| 3.1 | Implement `DispatchTracker` struct | `inner: std::sync::Mutex<HashSet<RequestId>>`. Four methods: `count()` (pub), `insert()` (pub(crate)), `remove()` (pub(crate)), `snapshot_ids()` (pub). All use `unwrap_or_else(|p| { tracing::warn!(...); p.into_inner() })`. See design doc Section 2.3. | `src/tracker.rs` |
+| 3.2 | Implement `DispatchTrackerRegistry` struct | `inner: DashMap<ServerId, Arc<DispatchTracker>>` (private). Methods: `get()`, `get_or_create()`. Wraps DashMap — external code never sees DashMap directly. | `src/tracker.rs` |
+| 3.3 | Implement `DispatchCountAdapter` struct | `trackers: Arc<DispatchTrackerRegistry>`. Implements `DispatchCountView` from `llamaforge-routing`. `in_flight_count()` delegates to `trackers.get(server_id).map(|t| t.count()).unwrap_or(0)`. | `src/tracker.rs` |
+| 3.4 | Add tracing to poison recovery | All four `DispatchTracker` lock sites emit `tracing::warn!("DispatchTracker mutex poisoned, recovering")` on poison. | `src/tracker.rs` |
+| 3.5 | Unit tests: insert/remove/count | Insert 3 IDs → count == 3. Remove 1 → count == 2. Remove non-existent → returns false, count unchanged. | tests |
+| 3.6 | Unit tests: snapshot_ids | Insert 5 IDs → `snapshot_ids()` returns all 5 (order-independent). Remove 2 → snapshot returns 3. | tests |
+| 3.7 | Unit tests: DispatchTrackerRegistry get_or_create | `get(unknown)` → None. `get_or_create(id)` → creates and returns. Second `get(id)` → returns same tracker (Arc identity). | tests |
+| 3.8 | Unit tests: DispatchCountAdapter | Registry with server A (3 in-flight), server B (0 in-flight). `in_flight_count(A)` → 3. `in_flight_count(B)` → 0. `in_flight_count(unknown)` → 0. | tests |
+| 3.9 | Unit tests: concurrent insert/remove stress | Spawn 50 tasks: 25 insert, 25 remove (overlapping IDs). Assert: no panics, final count consistent with net operations. | tests |
+| 3.10 | Unit tests: visibility enforcement | `DispatchTracker::insert()` is callable from within `llamaforge-dispatch` but NOT from external crates. Document this as a compile-time check in the test. | tests |
 
-### PR6 Acceptance Criteria
+### PR3 Acceptance Criteria
 
-- [x] All design doc Section 8.2 test cases implemented and passing
-- [x] All 6 VC-2 verification checks pass as automated tests
-- [x] `cargo test --workspace` passes (excluding `#[ignore]` tests)
-- [x] `cargo test --workspace -- --ignored` passes (including slow tests)
-- [x] `cargo clippy --workspace -- -D warnings` passes
-- [x] No production code changes in this PR — test code only
+- [ ] All mutex locks use poison recovery pattern (zero bare `unwrap()`)
+- [ ] `insert()` and `remove()` are `pub(crate)` — external crates cannot bypass DispatchToken
+- [ ] `DispatchTrackerRegistry` encapsulates DashMap (no `DashMap` in public API)
+- [ ] `DispatchCountAdapter` correctly implements `DispatchCountView`
+- [ ] All 6 test suites pass
+- [ ] Concurrent stress test passes without panics
 
-### PR6 Creation Steps
+### PR3 Creation Steps
 
 ```bash
-git checkout -b routing/06-verification main
-# ... implement tasks 6.1–6.9 ...
-git add -A && git commit -m "routing: add design doc test cases and VC-2 verification"
-git push -u origin routing/06-verification
-# Open PR: "Smart Routing PR6: Design Doc Tests & Final Verification"
-# Description: "Pure test PR. Adds remaining design doc Section 8.2 test cases,
-# 6 VC-2 verification checks as automated tests, and final CI validation.
-# Total: ~15 new test functions. No production code changes."
+git checkout -b dispatch/03-tracker main
+# ... implement tasks 3.1–3.10 ...
+git add -A && git commit -m "dispatch: add DispatchTracker, Registry, and DispatchCountAdapter"
+git push -u origin dispatch/03-tracker
+# Open PR: "Dispatch & Proxy PR3: Tracker Infrastructure"
+# Description: "Implements per-server in-flight tracking (design doc Sections 2.3, 2.7).
+# DispatchTracker with poison-recovering mutex, DispatchTrackerRegistry DashMap wrapper,
+# DispatchCountAdapter bridging to DispatchCountView port trait. 6 test suites
+# including concurrent stress test."
 ```
 
 ---
 
-## VC-3: Final Sign-Off Checkpoint
+## PR4: DispatchToken, SlotDispatchMap & SlotDispatchView Impl
 
-**Gate:** All 6 PRs merged. Smart Routing is complete.
+**Branch:** `dispatch/04-token-slotmap`  
+**Depends on:** PR3 merged to `main` (`DispatchToken` calls `tracker.insert()`/`remove()` which are defined in PR3)  
+**Size:** Medium (~350 lines)  
+**Estimated Time:** 5–7 hours
+
+### Purpose
+
+Implement the RAII slot accounting guard (`DispatchToken`) and the bidirectional reconciliation map (`SlotDispatchMap` with `SlotDispatchView` trait impl). These are the two data structures that ensure GPU slots are never leaked and orphaned slots are always detected.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 4.1 | Implement `DispatchToken` struct | `tracker: Arc<DispatchTracker>`, `request_id: RequestId`, `server_id: ServerId`, `slot_notifier: Arc<dyn SlotNotifier>`, `released: bool` (private). `#[must_use]` attribute. See design doc Section 2.2. | `src/token.rs` |
+| 4.2 | Implement `DispatchToken::new()` | Calls `tracker.insert(request_id)`. Returns Self. | `src/token.rs` |
+| 4.3 | Implement `DispatchToken::release()` | If `!self.released`: call `tracker.remove()`, set `released = true`. If already released: no-op. | `src/token.rs` |
+| 4.4 | Implement `DispatchToken::server_id()` | Returns `&ServerId`. | `src/token.rs` |
+| 4.5 | Implement `Drop for DispatchToken` | If `!self.released`: call `tracker.remove()` and `slot_notifier.notify_slot_available(&self.server_id)`. The `Drop` is a safety net for panics — in the normal path, the proxy task's cleanup (PR6 task 6.5 step 3) calls `notify_slot_available()` explicitly after `release()`. In the panic case, the scheduler tolerates a missed or duplicate notification (next poll cycle picks it up). | `src/token.rs` |
+| 4.6 | Implement `SlotDispatchMap` struct | `inner: std::sync::Mutex<SlotDispatchMapInner>`. `SlotDispatchMapInner` is private: `by_request: HashMap<RequestId, (ServerId, SlotId, Instant)>`, `by_slot: HashMap<(ServerId, SlotId), RequestId>`. | `src/slot_map.rs` |
+| 4.7 | Implement `SlotDispatchMap` inherent methods | `insert()`, `remove()`, `get_slot_for_request()`, `get_dispatched_at()`. All use poison recovery. Forward and reverse maps always updated together under the same lock. | `src/slot_map.rs` |
+| 4.8 | Implement `SlotDispatchView for SlotDispatchMap` | `get_request_for_slot()` and `has_unresolved()` exposed only through the trait (not as inherent methods). Delegate to lock-guarded inner maps. **Split API rationale:** inherent methods (`insert`, `remove`, `get_slot_for_request`, `get_dispatched_at`) are used within `llamaforge-dispatch` only; trait methods (`get_request_for_slot`, `has_unresolved`) are the cross-crate boundary consumed by `llamaforge-server-mgr` via `Arc<dyn SlotDispatchView>`. Callers of `get_request_for_slot` must `use SlotDispatchView;`. Add a doc comment on the trait impl explaining this split. Optionally add a `trybuild` compile-fail test showing `map.get_request_for_slot()` fails without the trait import. | `src/slot_map.rs` |
+| 4.9 | Add tracing to SlotDispatchMap poison recovery | All lock sites emit `tracing::warn!("SlotDispatchMap mutex poisoned")` on poison. | `src/slot_map.rs` |
+| 4.10 | Unit tests: DispatchToken RAII — drop releases | Create token → count == 1. Drop → count == 0. | tests |
+| 4.11 | Unit tests: DispatchToken explicit release | Create → release() → count == 0. Drop after release → still count == 0 (no double-decrement). | tests |
+| 4.12 | Unit tests: DispatchToken must_use | Verify `#[must_use]` attribute compiles. Document that creating and immediately discarding produces a compiler warning. | tests |
+| 4.13 | Unit tests: SlotDispatchMap bidirectional consistency | Insert 3 entries. `get_slot_for_request(r1)` → correct `(server, slot)`. `get_request_for_slot(s1, slot1)` → correct request. Remove r1 → both forward and reverse maps updated. | tests |
+| 4.14 | Unit tests: SlotDispatchMap dispatched_at | Insert with known time. `get_dispatched_at()` returns correct `Instant`. Remove → returns None. | tests |
+| 4.15 | Unit tests: SlotDispatchView has_unresolved | Insert entry for server A. `has_unresolved(A)` → true. Remove entry. `has_unresolved(A)` → false. `has_unresolved(unknown)` → false. | tests |
+| 4.16 | Unit tests: SlotDispatchMap empty after full remove cycle | Insert 10 entries. Remove all 10. Both maps empty. `has_unresolved` → false for all servers. | tests |
+
+### PR4 Acceptance Criteria
+
+- [ ] `DispatchToken::Drop` always releases the slot (verified by unit test)
+- [ ] Double-release via `release()` + `Drop` does not double-decrement
+- [ ] `SlotDispatchMap` maintains bidirectional consistency through all mutations
+- [ ] `get_request_for_slot` and `has_unresolved` are only accessible via `SlotDispatchView` trait
+- [ ] All mutex locks use poison recovery
+- [ ] All 7 test suites pass
+
+### PR4 Creation Steps
+
+```bash
+git checkout -b dispatch/04-token-slotmap main
+# ... implement tasks 4.1–4.16 ...
+git add -A && git commit -m "dispatch: add DispatchToken RAII guard and SlotDispatchMap"
+git push -u origin dispatch/04-token-slotmap
+# Open PR: "Dispatch & Proxy PR4: DispatchToken & SlotDispatchMap"
+# Description: "Implements RAII slot accounting (design doc Section 2.2) and bidirectional
+# reconciliation map (design doc Section 2.4). DispatchToken with #[must_use], explicit
+# release, and Drop guard. SlotDispatchMap with SlotDispatchView trait impl.
+# 7 test suites."
+```
+
+---
+
+## VC-2: Core Data Structures Verification Checkpoint
+
+**Gate:** PR3 + PR4 merged. Tracker and slot map work independently.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-3.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
-| VC-3.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
-| VC-3.3 | Code coverage | Run `cargo llvm-cov --workspace`. Target > 85% line coverage for `llamaforge-routing`. Note: error paths in `eligible_servers()` (especially `ModelUnavailable` with Starting grace period) and the Mutex poison recovery path require deliberate test construction — PR5 tasks 5.15/5.16 and PR3 tasks 3.16/3.21 cover these. | Coverage report generated |
-| VC-3.4 | Public API audit | Review `lib.rs` re-exports. Verify only intended types are public. `SessionAffinityCache` is NOT public. `ScoredCandidate` (if any) is NOT public. | Manual review |
-| VC-3.5 | Design doc compliance | Cross-check every Section in `05_SMART_ROUTING.md` against the implementation. Checklist of all specified behaviors. | Manual review with checklist |
-| VC-3.6 | Documentation | Every public type, trait, method, and enum variant has a doc comment. `cargo doc --no-deps -p llamaforge-routing` builds without warnings. | `cargo doc` succeeds |
-| VC-3.7 | Dependency audit | `cargo deny check` passes. No duplicate dependency versions. | `cargo deny` green |
-| VC-3.8 | No `unwrap()` audit | `grep -rn "unwrap()" crates/llamaforge-routing/src/ --include="*.rs"` — only `unwrap_or_else` for poison recovery. Zero bare `unwrap()`. | Zero matches |
-| VC-3.9 | Memory bounds check | Session affinity LRU at max capacity (10,000 entries × ~150 bytes) < 2 MB. Scoring is stack-only. | Memory assertion or calculation |
-| VC-3.10 | Port trait audit | Router depends on `dyn ServerStateView` + `dyn DispatchCountView` only. Consumers depend on `dyn CapacityChecker` / `dyn ServerSelector` / `dyn RouteValidator` only. No concrete cross-crate type imports. | `grep` for concrete types |
+| VC-2.1 | Token RAII panic safety | Spawn task, create DispatchToken, panic → verify count decremented (Drop fired) | Count assertion passes |
+| VC-2.2 | Slot map consistency | Insert 50 random entries, remove 25 randomly → verify `by_request.len() == by_slot.len()` | Assertion passes |
+| VC-2.3 | DispatchCountAdapter accuracy | Insert 10 requests across 3 servers → verify `in_flight_count()` matches per-server `count()` | All counts match |
+| VC-2.4 | Concurrent token lifecycle | Spawn 100 tasks, each creates + drops a DispatchToken → final count == 0, no panics | Count and no-panic assertions |
+
+---
+
+## PR5: ReqwestClientStore Adapter & Dispatcher Struct
+
+**Branch:** `dispatch/05-dispatcher`  
+**Depends on:** PR3 and PR4 both merged to `main`  
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 6–8 hours
+
+### Purpose
+
+Wire the infrastructure layer (`ReqwestClientStore` implementing `BackendClient` + `ClientManager`) and the `Dispatcher` struct itself: construction via `new()`, the `dispatch()` method that spawns proxy tasks, and the `refresh_client()` method. The proxy task body is a stub in this PR — full streaming comes in PR6.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 5.1 | Implement `ReqwestClientStore` struct | `clients: DashMap<ServerId, arc_swap::ArcSwap<reqwest::Client>>` (private). Constructor takes server configs and builds initial clients. | `src/client.rs` |
+| 5.2 | Implement `ReqwestClientStore::build_client()` | Private helper. Configures `reqwest::ClientBuilder` with: `pool_idle_timeout(10s)`, `pool_max_idle_per_host(max(parallel_slots, 16))`, `SO_KEEPALIVE(idle=10s, interval=5s, probes=3)`. See design doc Section 6 (Adapter-specific config). | `src/client.rs` |
+| 5.3 | Implement `BackendClient for ReqwestClientStore` | `post_completion()`: load client via `ArcSwap::load()`, build POST to `http://127.0.0.1:{port}/completion`, serialize `CompletionRequest` to llama-server JSON format, send request, wrap `reqwest::Response` into `BackendResponseStream`. Map `reqwest::Error` → `DispatchError::ConnectionFailed` with `Box<dyn Error>`. | `src/client.rs` |
+| 5.4 | Implement `ClientManager for ReqwestClientStore` | `refresh()`: build new client from `ClientRefreshEvent`, atomically swap via `ArcSwap::store()`. Old client drains naturally. Log at `tracing::info!`. | `src/client.rs` |
+| 5.5 | Implement `Dispatcher` struct | All fields per design doc Section 2.1: `server_state: Arc<dyn ServerStateView>`, `metrics_ingest: MetricsIngest`, `trackers: Arc<DispatchTrackerRegistry>`, `slot_dispatch_map: Arc<SlotDispatchMap>`, `config: Arc<ConfigHandle>`, `backend_client: Arc<dyn BackendClient>`, `client_manager: Arc<dyn ClientManager>`, `slot_notifier: Arc<dyn SlotNotifier>`, `proxy_tasks: Mutex<JoinSet<()>>` (tracks spawned proxy tasks for graceful shutdown — design doc Graceful Shutdown step 5). All fields private. | `src/dispatcher.rs` |
+| 5.6 | Implement `Dispatcher::new()` | Constructor accepting all dependencies. | `src/dispatcher.rs` |
+| 5.7 | Implement `Dispatcher::dispatch()` | Step 1: Get or create tracker for `routing.server_id`. Step 2: Create `DispatchToken` (pass `Arc::clone(&self.slot_notifier)`). Step 3: Build `CompletionRequest` from `DispatchCandidate`. Step 4: Add task to `proxy_tasks` JoinSet via `self.proxy_tasks.lock()...spawn(proxy_task(...))` — pass `slot_notifier` clone for explicit cleanup notification. Step 5: Return handle. The `proxy_task` body is a stub for now (PR6 fills it in). | `src/dispatcher.rs` |
+| 5.8 | Implement `Dispatcher::tracker()` | Delegate to `trackers.get()`. | `src/dispatcher.rs` |
+| 5.9 | Implement `Dispatcher::slot_dispatch_map()` | Return `Arc::clone(&self.slot_dispatch_map)`. | `src/dispatcher.rs` |
+| 5.10 | Implement `Dispatcher::refresh_client()` | Delegate to `client_manager.refresh()`. | `src/dispatcher.rs` |
+| 5.10a | Implement `Dispatcher::shutdown()` | Async method. Waits for all proxy tasks in `JoinSet` to complete with a 5s timeout (`tokio::time::timeout(Duration::from_secs(5), join_set.join_all())`). On timeout: log warning with count of remaining tasks, return. See design doc Graceful Shutdown step 5. | `src/dispatcher.rs` |
+| 5.10b | Implement `Dispatcher::drain_server()` | Async method taking `server_id: &ServerId`. Cancel the per-server `CancellationToken`, then await only that server's tasks. Used by Server Manager when stopping a single backend. Returns number of drained tasks. | `src/dispatcher.rs` |
+| 5.11 | Implement stub `proxy_task()` | Async fn that takes all context (token, client, request, channels). Stub: immediately release token and send a placeholder response. PR6 replaces this with the real streaming logic. | `src/proxy.rs` |
+| 5.12 | Unit tests: Dispatcher construction | Construct with mock `BackendClient`, mock `ClientManager`, mock `ServerStateView`. Verify all fields accessible. | tests |
+| 5.13 | Unit tests: dispatch creates token | Call `dispatch()` → verify `tracker.count() == 1`. Drop the returned token → count == 0. | tests |
+| 5.14 | Unit tests: refresh_client delegates | Call `refresh_client()` with mock `ClientManager` → verify mock received the event. | tests |
+| 5.15 | Unit tests: ReqwestClientStore ArcSwap | Create store, call `refresh()` → verify new client is returned by subsequent loads. Old loads still work (Arc reference). | tests |
+| 5.16 | Integration test: dispatch + stub proxy | Dispatch a request → verify stub proxy completes, token released, response channel receives something. | tests |
+
+### PR5 Acceptance Criteria
+
+- [ ] `Dispatcher::new()` accepts only port traits (no concrete types except `MetricsIngest`)
+- [ ] `dispatch()` spawns a tokio task into the `proxy_tasks` JoinSet
+- [ ] `shutdown()` and `drain_server()` methods compile and handle empty JoinSet gracefully
+- [ ] `ReqwestClientStore` is the ONLY file importing `reqwest`
+- [ ] `ArcSwap::store()` atomically swaps client (no blocking)
+- [ ] All 5 test suites pass
+- [ ] Stub proxy task releases token and sends response
+
+### PR5 Creation Steps
+
+```bash
+git checkout -b dispatch/05-dispatcher main
+# ... implement tasks 5.1–5.16 ...
+git add -A && git commit -m "dispatch: add ReqwestClientStore adapter and Dispatcher struct"
+git push -u origin dispatch/05-dispatcher
+# Open PR: "Dispatch & Proxy PR5: Dispatcher & ReqwestClientStore"
+# Description: "Implements Dispatcher struct (design doc Section 2.1) with all dependencies
+# injected as port traits. ReqwestClientStore adapter (design doc Section 2.5) with
+# ArcSwap for atomic client rotation. Proxy task is a stub — streaming comes in PR6.
+# 5 test suites."
+```
+
+---
+
+## PR6: Proxy Task — Streaming, Backpressure & Cancellation
+
+**Branch:** `dispatch/06-proxy`  
+**Depends on:** PR5 merged to `main`  
+**Size:** Large (~400 lines)  
+**Estimated Time:** 8–10 hours
+
+### Purpose
+
+Replace the stub proxy task with the real streaming implementation: two-phase `select!` loop, cancellation handling, backpressure timeout, slot release before audit, and all stream lifecycle events. This is the highest-risk code in the entire component.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 6.1 | Implement `proxy_task()` Phase 1: connect | Call `backend_client.post_completion()`. Handle `DispatchError::ConnectionFailed` → release token, send error to response channel. Handle `DispatchError::BackendError` → release token, send error. Record `CancellationPhase::PreConnect` on cancel. | `src/proxy.rs` |
+| 6.2 | Implement `proxy_task()` Phase 2: streaming loop | Two-phase `select!` loop per design doc Section 3.3. Phase 1: `biased` select between `cancel_token.cancelled()` and `backend_stream.chunk()`. Phase 2: `biased` select between `cancel_token.cancelled()` and `response_channel.send(parsed)`. | `src/proxy.rs` |
+| 6.3 | Implement backpressure timeout | In Phase 2: if `response_channel.send()` fails, apply `tokio::time::timeout(2s, response_channel.reserve())`. On timeout: break loop, disconnect. See design doc Section 3.3 and FM-5. | `src/proxy.rs` |
+| 6.4 | Implement SSE chunk parsing | `parse_sse_chunk(&chunk) -> Result<ParsedChunk, StreamError::ChunkParse>`. Extract `data:` fields from SSE stream. Handle `data: [DONE]` sentinel. | `src/proxy.rs` |
+| 6.5 | Implement `proxy_task()` Phase 3: cleanup | Step 1: `drop(response_handle)` (close TCP). Step 2: `dispatch_token.release()` (free slot — tracker decremented, but `Drop` notification suppressed since `released=true`). Step 3: `slot_notifier.notify_slot_available(&server_id)` (explicit primary-path notification). Step 4: Detached `tokio::spawn` for audit write with `timeout(10s, audit_tx.send(record))`. Slot is already freed — audit stall never holds hardware. See design doc Section 3.1 steps 6–7. | `src/proxy.rs` |
+| 6.6 | Record `CancellationPhase` correctly | `PreConnect` (before POST), `PreStream` (after POST, before first chunk), `Streaming` (during chunk loop), `Cleanup` (during cleanup phase). On cancellation during `Streaming` phase: write a structured `FINISH_REASON_UPSTREAM_FAILURE` error payload to the response channel before breaking, so the client receives a clean termination signal (see design doc Graceful Shutdown step 3). | `src/proxy.rs` |
+| 6.7 | Update slot_dispatch_map | After successful slot assignment (from `/slots` poll correlation or `id_slot` header): call `slot_dispatch_map.insert()`. On cleanup: call `slot_dispatch_map.remove()`. | `src/proxy.rs` |
+| 6.8 | Add dispatch metrics | Record `llamaforge_dispatches_total`, `llamaforge_dispatch_duration_seconds`, `llamaforge_ttft_seconds`, `llamaforge_tokens_completion_total`, `llamaforge_backpressure_disconnects_total`, `llamaforge_pending_dispatches`. See design doc Section 7.1. | `src/proxy.rs` |
+| 6.9 | Add dispatch tracing spans | `dispatch.started` (DEBUG), `dispatch.completed` (DEBUG), `dispatch.failed` (WARN), `dispatch.cancelled` (DEBUG), `dispatch.backpressure` (WARN). See design doc Section 7.2. | `src/proxy.rs` |
+| 6.10 | Tokio test: successful streaming | Mock backend returns 5 SSE chunks. Verify: all 5 received by response channel, token released, audit record sent. | tests |
+| 6.11 | Tokio test: cancellation before first chunk | Cancel token immediately after dispatch. Verify: `StreamError::Cancelled` yielded, token released, `CancellationPhase::PreStream`. | tests |
+| 6.12 | Tokio test: cancellation mid-stream | Mock backend returns 3 chunks, cancel after 2nd. Verify: 2 chunks received, then `Cancelled`, token released. | tests |
+| 6.13 | Tokio test: backend disconnect | Mock backend sends 2 chunks then drops connection. Verify: 2 chunks received, then `BackendDisconnect`, token released. | tests |
+| 6.14 | Tokio test: backpressure timeout | Mock slow consumer (never reads). Verify: proxy disconnects after 2s, token released, `backpressure_disconnects_total` incremented. | tests |
+| 6.15 | Tokio test: slot released before audit | Mock audit channel that blocks forever. Verify: slot freed within 1ms of stream end, audit send eventually times out (10s), slot was never held during audit wait. | tests |
+| 6.16 | Tokio test: connection refused | Mock backend returns connection error. Verify: `DispatchError::ConnectionFailed`, token released, no stream started. | tests |
+| 6.17 | Tokio test: backend HTTP 500 | Mock backend returns 500. Verify: `DispatchError::BackendError { status: HttpStatus(500) }`, token released. | tests |
+| 6.18 | Tokio test: TTFT metric recorded | Mock backend sends first chunk after 100ms. Verify: `llamaforge_ttft_seconds` histogram recorded with value ≈ 0.1s. | tests |
+| 6.19 | Tokio test: graceful shutdown | Dispatch 3 requests with slow mock backends (500ms each). Call `dispatcher.shutdown()`. Verify: all 3 proxy tasks receive cancellation, write `FINISH_REASON_UPSTREAM_FAILURE`, complete within 5s timeout. JoinSet empty after shutdown. | tests |
+| 6.20 | Tokio test: drain_server | Dispatch 2 requests to server A, 1 to server B. Call `drain_server(A)`. Verify: server A tasks cancelled and drained, server B task unaffected and still running. | tests |
+
+### PR6 Acceptance Criteria
+
+- [ ] Two-phase `select!` loop is correct (no cross-branch variable references)
+- [ ] Cancellation checked with `biased` in both phases
+- [ ] Slot released BEFORE audit send (invariant #1)
+- [ ] Backpressure timeout disconnects after 2s (FM-5)
+- [ ] `CancellationPhase` correctly recorded for all cancel paths
+- [ ] Graceful shutdown: `dispatcher.shutdown()` drains all proxy tasks within 5s timeout
+- [ ] `drain_server()` cancels only the targeted server's tasks
+- [ ] `FINISH_REASON_UPSTREAM_FAILURE` written on cancellation during streaming phase
+- [ ] All 11 test suites pass
+- [ ] No `.unwrap()` in production code
+
+### PR6 Creation Steps
+
+```bash
+git checkout -b dispatch/06-proxy main
+# ... implement tasks 6.1–6.18 ...
+git add -A && git commit -m "dispatch: implement proxy task with streaming, backpressure, and cancellation"
+git push -u origin dispatch/06-proxy
+# Open PR: "Dispatch & Proxy PR6: Proxy Task"
+# Description: "Full proxy task implementation (design doc Sections 3.1, 3.3, 3.4).
+# Two-phase select! streaming loop, cooperative cancellation with CancellationPhase,
+# 2s backpressure timeout, slot release before audit, SSE chunk parsing, all dispatch
+# metrics and tracing spans. 9 test suites including TTFT measurement."
+```
+
+---
+
+## VC-3: Full Dispatch Pipeline Verification Checkpoint
+
+**Gate:** PR1–PR6 merged. The entire dispatch → proxy → release pipeline works.
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-3.1 | Full lifecycle | Dispatch request → stream 10 chunks → complete → verify: token released, slot_dispatch_map empty, audit sent, metrics recorded | All assertions pass |
+| VC-3.2 | Token never leaked | Dispatch 5 requests. Cancel 2 mid-stream, let 2 complete, disconnect 1. Verify: tracker count == 0 for all servers | Count assertion passes |
+| VC-3.3 | Cancellation priority | Cancel token and backend chunk arrive simultaneously → verify cancel wins (biased select) | `StreamError::Cancelled` yielded |
+| VC-3.4 | Client refresh | Dispatch → backend "restarts" → `ClientRefreshEvent` → next dispatch uses new client | New client verified |
+| VC-3.5 | Backpressure disconnect | Slow consumer → verify disconnect after 2s, token released, metric incremented | Timer and metric assertions |
+| VC-3.6 | Connection pool poisoning recovery | Stale connection → `ConnectionFailed` → token released → subsequent dispatch with fresh client succeeds | Second dispatch succeeds |
+| VC-3.7 | Concurrent dispatches | 32 concurrent dispatches → all complete or error → tracker count == 0 | No leaked tokens |
+| VC-3.8 | Panic safety | Inject panic in chunk parsing → verify DispatchToken::Drop fires → tracker count decremented | Count assertion passes |
+
+**Integration test file:** `tests/vc3_dispatch_pipeline.rs`
+
+---
+
+## PR7: Reconciliation Logic
+
+**Branch:** `dispatch/07-reconciliation`  
+**Depends on:** PR6 merged to `main`  
+**Size:** Medium (~250 lines)  
+**Estimated Time:** 4–6 hours
+
+### Purpose
+
+Implement the bidirectional reconciliation logic (forward: detect orphaned slots; reverse: detect completed requests) and its scheduling. This is the safety net that catches state drift between LlamaForge and llama-server.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 7.1 | Implement `first_seen_processing` tracker | `HashMap<(ServerId, SlotId), Instant>`. Tracks when we first observe a slot processing that isn't in `slot_dispatch_map`. Cleaned every cycle. | `src/dispatcher.rs` (or `src/reconciliation.rs`) |
+| 7.2 | Implement forward reconciliation | For each slot with `is_processing=true` not in `slot_dispatch_map`: add to `first_seen_processing`. If age > `grace_period`: call `slot_erasure.erase_slot()` (fire-and-forget with 5s timeout). Grace = `max(30s, ctx_size / 500)`. See design doc Section 3.2. | same |
+| 7.3 | Implement reverse reconciliation | For each entry in `slot_dispatch_map` for this server: if slot NOT processing AND `dispatched_at > grace_period` → remove from `slot_dispatch_map`. Skip entirely if `has_unresolved()` is true. | same |
+| 7.4 | Implement cleanup | Remove `first_seen_processing` entries for slots that are: (a) now in `slot_dispatch_map`, or (b) no longer `is_processing`. | same |
+| 7.5 | Implement reconciliation scheduling | Runs on every `/slots` poll (5 seconds). Called by Server Manager after each poll cycle. | same |
+| 7.6 | Add reconciliation metrics | `llamaforge_reconciliation_erasures_total` counter with `direction={forward,reverse}` label. | same |
+| 7.7 | Add reconciliation tracing | `reconciliation.erasure` (INFO), `reconciliation.skipped` (DEBUG). See design doc Section 7.2. | same |
+| 7.8 | Unit test: forward reconciliation detects orphan | Slot processing, not in map, age > grace → erasure called. | tests |
+| 7.9 | Unit test: forward reconciliation respects grace | Slot processing, not in map, age < grace → no erasure. | tests |
+| 7.10 | Unit test: dynamic grace period | Server with `ctx_size = 128000` → grace = `max(30, 256) = 256s`. Server with `ctx_size = 4000` → grace = `max(30, 8) = 30s`. | tests |
+| 7.11 | Unit test: reverse reconciliation cleans stale entry | Entry in map, slot not processing, age > grace → entry removed. | tests |
+| 7.12 | Unit test: reverse reconciliation skips when unresolved | Server has unresolved dispatches → reverse reconciliation skipped entirely. | tests |
+| 7.13 | Unit test: first_seen_processing cleanup | Entry cleaned when slot enters `slot_dispatch_map` or stops processing. | tests |
+| 7.14 | Tokio test: end-to-end reconciliation cycle | Dispatch request → backend completes without our knowledge (simulate by clearing slot_dispatch_map) → next reconciliation detects stale entry → cleanup. | tests |
+
+### PR7 Acceptance Criteria
+
+- [ ] Forward reconciliation uses `slot_erasure.erase_slot()` (not direct HTTP)
+- [ ] Reverse reconciliation skips when `has_unresolved()` is true
+- [ ] Dynamic grace period formula: `max(30s, ctx_size / 500)`
+- [ ] `first_seen_processing` cleaned every cycle (no memory leak)
+- [ ] All 7 test suites pass
+
+### PR7 Creation Steps
+
+```bash
+git checkout -b dispatch/07-reconciliation main
+# ... implement tasks 7.1–7.14 ...
+git add -A && git commit -m "dispatch: add bidirectional reconciliation with dynamic grace periods"
+git push -u origin dispatch/07-reconciliation
+# Open PR: "Dispatch & Proxy PR7: Reconciliation"
+# Description: "Implements bidirectional slot reconciliation (design doc Section 3.2).
+# Forward: detects orphaned slots via SlotErasure port trait. Reverse: cleans stale
+# map entries. Dynamic grace period (max(30s, ctx_size/500)). Cleanup prevents
+# memory leaks. 7 test suites."
+```
+
+---
+
+## PR8: Property Tests, VC-3 Integration Tests & Design Doc Test Cases
+
+**Branch:** `dispatch/08-verification`  
+**Depends on:** PR7 merged to `main`  
+**Size:** Medium (~350 lines of tests)  
+**Estimated Time:** 5–7 hours
+
+### Purpose
+
+The final PR adds all integration tests (VC-3), the specific test cases from the design doc Section 8.3, and stress/property tests for the dispatch pipeline. This PR is pure test code — no production logic changes.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 8.1 | Implement VC-3 integration tests | All 8 checks from VC-3. Each as a separate `#[tokio::test]` function with mock BackendClient. | `tests/vc3_dispatch_pipeline.rs` |
+| 8.2 | Implement design doc Section 8.3 test cases (non-duplicate only) | 5 unique tests for `design_doc_tests.rs`: `test_cancellation_checked_before_chunk`, `test_slot_released_before_audit_send`, `test_client_refresh_on_server_restart`, `test_backpressure_timeout_disconnects`, `test_non_streaming_absolute_timeout`. The remaining 3 design doc tests are already covered: `test_dispatch_token_released_on_drop` (PR4 task 4.10), `test_dispatch_token_explicit_release_before_audit` (PR4 task 4.11), `test_reconciliation_grace_period` (PR7 task 7.10). Add doc comments in `design_doc_tests.rs` cross-referencing the earlier PRs. | `tests/design_doc_tests.rs` |
+| 8.3 | Property test: token lifecycle | `∀ dispatch: after completion or error, tracker.count() for that server decrements by 1` | `tests/proptest_dispatch.rs` |
+| 8.4 | Property test: slot_dispatch_map consistency | `∀ operations: by_request.len() == by_slot.len()` | `tests/proptest_dispatch.rs` |
+| 8.5 | Property test: reconciliation bounded | `∀ cycle: first_seen_processing.len() ≤ total_slots` | `tests/proptest_dispatch.rs` |
+| 8.6 | Property test: grace period monotonic | `∀ (ctx_a, ctx_b) where ctx_a > ctx_b: grace(ctx_a) >= grace(ctx_b)` | `tests/proptest_dispatch.rs` |
+| 8.7 | Stress test: 100 concurrent dispatches | All complete or error. Final tracker count == 0. No panics. No leaked tokens. | `tests/stress.rs` |
+| 8.8 | Stress test: rapid client refresh | 10 refreshes interleaved with 50 dispatches → all dispatches complete, no stale connections used after refresh. | `tests/stress.rs` |
+| 8.9 | Add `#[ignore]` slow tests | Tag property-based and stress tests with `#[ignore]`. Run with `cargo test -- --ignored`. | — |
+| 8.10 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`. | — |
+
+### PR8 Acceptance Criteria
+
+- [ ] All 8 VC-3 integration tests pass
+- [ ] All 5 unique design doc Section 8.3 test cases pass (3 already covered in PR4/PR7)
+- [ ] All 4 property tests pass (256 cases each)
+- [ ] Both stress tests pass without panics or leaked tokens
+- [ ] `cargo test --workspace` passes (excluding `#[ignore]`)
+- [ ] `cargo test --workspace -- --ignored` passes (including slow tests)
+- [ ] No production code changes in this PR — test code only
+
+### PR8 Creation Steps
+
+```bash
+git checkout -b dispatch/08-verification main
+# ... implement tasks 8.1–8.10 ...
+git add -A && git commit -m "dispatch: add integration tests, property tests, and stress tests"
+git push -u origin dispatch/08-verification
+# Open PR: "Dispatch & Proxy PR8: Verification & Stress Tests"
+# Description: "Pure test PR. Adds 8 VC-3 integration tests, 8 design doc test cases,
+# 4 proptest property-based tests, and 2 stress tests (100 concurrent dispatches,
+# rapid client refresh). Total: 22 new test functions. No production code changes."
+```
+
+---
+
+## VC-4: Final Sign-Off Checkpoint
+
+**Gate:** All 8 PRs merged. Dispatch & Proxy is complete.
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-4.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
+| VC-4.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
+| VC-4.3 | Code coverage | Run `cargo llvm-cov --workspace`. Target > 80% line coverage for `llamaforge-dispatch`. | Coverage report generated |
+| VC-4.4 | Public API audit | Review `lib.rs` re-exports. Verify only intended types are public. `SlotDispatchMapInner` is NOT public. `ReqwestClientStore.clients` is NOT public. `DispatchTracker::insert()`/`remove()` are `pub(crate)`. | Manual review |
+| VC-4.5 | Design doc compliance | Cross-check every Section in `06_DISPATCH_AND_PROXY.md` against the implementation. Check all 8 Key Invariants. | Manual review with checklist |
+| VC-4.6 | Documentation | Every public type, trait, method, and enum variant has a doc comment. `cargo doc --no-deps -p llamaforge-dispatch` builds without warnings. | `cargo doc` succeeds |
+| VC-4.7 | Dependency audit | `cargo deny check` passes. No duplicate dependency versions. | `cargo deny` green |
+| VC-4.8 | No `unwrap()` audit | `grep -rn "unwrap()" crates/llamaforge-dispatch/src/ --include="*.rs"` — only `unwrap_or_else` for poison recovery. Zero bare `unwrap()`. | Zero matches |
+| VC-4.9 | reqwest isolation audit | `grep -rn "reqwest" crates/llamaforge-dispatch/src/ --include="*.rs"` — only in `client.rs`. | Only `client.rs` matches |
+| VC-4.10 | Memory bounds | Run dispatch pipeline with 32 concurrent slots across 8 servers. Measure RSS → verify < 5 MB (design doc: ~3.1 MB worst case + overhead). | Memory within bounds |
+| VC-4.11 | Lock ordering audit | Verify no code path holds `SlotDispatchMap.inner` and `DispatchTracker.inner` simultaneously. Each lock is independent. | Manual review |
 
 ---
 
@@ -445,15 +559,17 @@ git push -u origin routing/06-verification
 
 | PR | Key Files Created/Modified | LOC (est.) |
 |----|---------------------------|------------|
-| PR1 | `crates/llamaforge-routing/Cargo.toml`, `src/lib.rs`, module stubs | ~150 |
-| PR2 | `src/types.rs`, `src/error.rs`, `src/weights.rs`, `src/config.rs`, `crates/llamaforge-types/src/lib.rs` (`RequestCapabilities`) | ~300 |
-| PR3 | `src/router.rs` | ~300 |
-| PR4 | `src/affinity.rs` | ~100 |
-| PR5 | `src/router.rs` (affinity wiring, poison recovery, startup grace, `invalidate_affinity`), integration tests | ~250 |
-| PR6 | `tests/design_doc_tests.rs`, `tests/vc2_routing.rs` | ~250 |
-| **Total** | | **~1,350** |
+| PR1 | `crates/llamaforge-types/src/ports.rs` (incl. `SlotNotifier`), `crates/llamaforge-dispatch/src/lib.rs`, `Cargo.toml` | ~200 |
+| PR2 | `src/error.rs`, `src/client.rs` (types only), `src/dispatcher.rs` (types only) | ~350 |
+| PR3 | `src/tracker.rs` | ~300 |
+| PR4 | `src/token.rs`, `src/slot_map.rs` | ~350 |
+| PR5 | `src/client.rs` (adapter impl), `src/dispatcher.rs` (incl. JoinSet, shutdown, drain), `src/proxy.rs` (stub) | ~450 |
+| PR6 | `src/proxy.rs` (full impl incl. graceful shutdown tests) | ~450 |
+| PR7 | `src/reconciliation.rs` (or `src/dispatcher.rs` additions) | ~250 |
+| PR8 | `tests/vc3_dispatch_pipeline.rs`, `tests/design_doc_tests.rs`, `tests/proptest_dispatch.rs`, `tests/stress.rs` | ~350 |
+| **Total** | | **~2,700** |
 
-> Note: LOC estimate is lower than design doc's ~1,500 because the design doc includes padding for doc comments and module boilerplate. Actual production code is ~900 lines, tests ~450 lines.
+> Note: LOC estimate exceeds the design doc's ~2,500 because tests account for ~750 lines, the adapter code (ReqwestClientStore) adds ~100 lines, and graceful shutdown infrastructure (JoinSet, `shutdown()`, `drain_server()`) adds ~50 lines. Production code is ~1,900 lines.
 
 ---
 
@@ -461,22 +577,32 @@ git push -u origin routing/06-verification
 
 | Day | Work | PRs |
 |-----|------|-----|
-| Day 1 | Crate scaffold + port traits + all types/errors/weights | PR1, PR2 |
-| Day 2 | Router core — scoring formula, constraint filtering | PR3 (part 1) |
-| Day 3 | Router core — round-robin, recurrent, trait impls, metrics | PR3 (part 2) |
-| Day 4 | Session affinity cache + mutex poison recovery | PR4 |
-| Day 5 | Integration wiring + integration tests | PR5 |
-| Day 6 | Design doc test cases + VC-2 + final verification | PR6 |
-| Day 7 | VC-3 sign-off, code review fixes, docs | — |
+| Day 1 | Crate scaffold + shared types in llamaforge-types | PR1 |
+| Day 2 | Error types, domain types, port traits | PR2 |
+| Day 3 | DispatchTracker, Registry, DispatchCountAdapter | PR3 |
+| Day 4 | DispatchToken, SlotDispatchMap, SlotDispatchView | PR4 |
+| Day 5 | ReqwestClientStore adapter + Dispatcher struct | PR5 |
+| Day 6 | Proxy task: connect phase, streaming loop | PR6 (part 1) |
+| Day 7 | Proxy task: backpressure, cancellation, metrics | PR6 (part 2) |
+| Day 8 | Reconciliation logic + scheduling | PR7 |
+| Day 9 | Integration tests, property tests, stress tests | PR8 |
+| Day 10 | Final verification (VC-4), code review fixes, docs | — |
+| Day 11 | Buffer for review feedback and edge cases | — |
 
 ## Timeline (Two Engineers)
 
 | Day | Engineer A | Engineer B |
 |-----|-----------|-----------|
-| Day 1 | PR1 (scaffold) + PR2 (types) | Reviews PR1/PR2, writes mock `ServerStateView` + `DispatchCountView` test doubles |
-| Day 2 | PR3 (router core) | PR4 (session affinity) — parallel after PR2 |
-| Day 3 | PR5 (integration wiring + tests) | PR6 (design doc tests + VC-2) |
-| Day 4 | VC-3 sign-off, code review fixes | Code review fixes, docs |
+| Day 1 | PR1 (scaffold) + PR2 (types) | Reviews PR1/PR2, writes mock BackendClient and test fixtures |
+| Day 2 | PR3 (tracker infrastructure) | Reviews PR3, writes test harness for PR4/PR5 |
+| Day 3 | PR4 (DispatchToken + SlotDispatchMap) | Reviews PR4, starts PR6 mock backend harness |
+| Day 4 | PR5 (ReqwestClientStore + Dispatcher) | Reviews PR5 |
+| Day 5 | PR6 (proxy task — full impl, pair programming) | PR6 (pair programming — both engineers on `proxy.rs`, same branch) |
+| Day 6 | PR7 (reconciliation) | PR8 (integration tests, property tests) |
+| Day 7 | VC-4 verification, docs | Stress tests, code review fixes |
+| Day 8 | Buffer for review feedback | Buffer for edge cases |
+
+> **Note on Day 5:** PR6 is a single PR modifying `src/proxy.rs`. Both engineers work on the same branch via pair programming or sequential commits — NOT parallel branches. This is the highest-risk code (streaming select! loop, backpressure, cancellation) and benefits from real-time review.
 
 ---
 
@@ -484,26 +610,26 @@ git push -u origin routing/06-verification
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| `ServerStateView` trait not yet defined in `llamaforge-types` | Medium | Medium | Define a minimal stub in `llamaforge-types` or use a local trait alias. Coordinate with Server Manager (Component 03) author. |
-| Sealed `CapacityChecker` in `llamaforge-types` conflicts with open trait needed here | Medium | Low | Design doc Section 2.1a explicitly calls this out. Unseal in `llamaforge-types`, or define a separate open `CapacityChecker` in `llamaforge-routing` and deprecate the sealed one. |
-| `lru` crate API changes between versions | Low | Low | Pin `lru = "0.12"`. API is stable and minimal (get, put, iter). |
-| `DashMap` contention on `round_robin` counters | Low | Low | Contention is bounded by model count (typically 1-4). Each entry is `AtomicU64` — no lock held during scoring. |
-| Stale `/slots` data causes brief over-dispatch | Medium | Low | By design: dispatch tracker compensation reduces the window. Worst case is 1 extra request per /slots poll interval (5s). Self-correcting. |
-| Session affinity cache memory at max capacity | Low | Low | 10,000 entries × ~150 bytes = 1.5 MB. Well within bounds. LRU eviction prevents growth. |
-| Mutex poison on affinity cache | Low | Low | Recovered via `into_inner()`. Scoring continues without affinity. Logged as warning. |
-| `QueuedRequest` type not yet available from `llamaforge-queue` | Medium | Medium | Use a local stub type during development. Replace with real import when Component 04 is merged. Or define in `llamaforge-types`. |
-| `invalidate_server()` call site not wired | Medium | Low | `SessionAffinityCache::invalidate_server()` is implemented (PR4 task 4.4) but no task wires it to server lifecycle changes. The call site depends on Server Manager's state change notification mechanism (Component 03), which may not exist yet. The composition root or Dispatch & Proxy (Component 06) should subscribe to server state changes and call `Router::invalidate_affinity(server_id)` (a thin wrapper around `affinity_cache.lock().invalidate_server()`). Add this public method to Router in PR5 but defer the caller wiring to the composition root PR. |
-| `RequestCapabilities` + `LoraAdapterId` in `llamaforge-types` may pull serde into types crate | Low | Low | `LoraAdapterId` has `Serialize` + manual `Deserialize`. If `llamaforge-types` doesn't already depend on `serde`, this adds a new dependency. Verify workspace-level `serde` is already present. |
+| Two-phase `select!` incorrectly structured | Medium | High | Design doc Section 3.3 documents the original logic error and correct pattern. PR6 tests verify cancellation wins over ready chunk. Code review must verify no cross-branch variable references. |
+| `reqwest` leaks into domain types | Medium | Medium | Ground rule #10 + VC-4.9 grep audit. `client.rs` is the only file importing reqwest. PR2 verifies no reqwest in error types. |
+| Mutex poison recovery masks data corruption | Low | Medium | Critical section is pure HashMap manipulation. Poison only happens on logic bug panic. Recovery allows continued operation at risk of 1 misplaced entry. Logged as `tracing::warn!`. |
+| `ArcSwap` performance under contention | Low | Low | `ArcSwap::load()` is wait-free. `store()` only called on server restart (rare). Concurrent loads (dispatch) never block. |
+| Backpressure timeout too aggressive (2s) | Medium | Low | Hardcoded in v1. If operators report false disconnects on slow networks: make configurable in v1.1. `llamaforge_backpressure_disconnects_total` metric alerts to the issue. |
+| Reconciliation grace period too short | Low | Medium | Dynamic formula `max(30s, ctx_size/500)`. For 128K context: 262s grace. Test with real llama-server prefill times during integration. `llamaforge_reconciliation_erasures_total` metric alerts to premature erasures. |
+| SlotDispatchMap grows unbounded | Low | Medium | Bounded by `total_slots` across all servers (128 max). Reconciliation cleans stale entries every 5s. Memory bounds table in design doc: 25KB worst case. |
+| Tokio task leak from proxy tasks | Low | High | `DispatchToken::Drop` ensures cleanup even on panic. VC-3.2 and VC-3.7 verify zero leaked tokens. `llamaforge_pending_dispatches` gauge alerts to drift. JoinSet for task monitoring. |
+| `arc-swap` crate version conflicts | Low | Low | Pin in workspace `Cargo.toml`. Already a workspace dependency from PR1. |
+| `first_seen_processing` HashMap grows without bound | Low | Low | Cleaned every reconciliation cycle (5s). Bounded by total_slots (128). Design doc Section 3.2 explicitly documents cleanup. |
 
 ---
 
 ## Integration Points (for next component)
 
-After Smart Routing is complete, the following integration seams are ready:
+After Dispatch & Proxy is complete, the following integration seams are ready:
 
-1. **Request Queue (Component 04)** holds `Arc<dyn CapacityChecker>` and calls `has_capacity()` in the model-aware dispatch scan. The composition root coerces `Arc<Router>` to `Arc<dyn CapacityChecker>`.
-2. **Dispatch & Proxy (Component 06)** holds `Arc<dyn ServerSelector>` and calls `select_server()` after dequeue. It also implements `DispatchCountView` on its `DispatchTracker` — the composition root injects `Arc<DispatchTracker>` as `Arc<dyn DispatchCountView>` into the Router. When a server enters `Draining` or `Failed`, the composition root (or Dispatch & Proxy) calls `Router::invalidate_affinity(server_id)` to purge stale session affinity entries.
-3. **Transport Layer (Component 07)** holds `Arc<dyn RouteValidator>` and calls `validate_routable()` at admission time.
-4. **`main.rs` (composition root)** constructs: `Arc<Router>::new(config, server_state, dispatch_counts)` → coerce to `Arc<dyn CapacityChecker>` for Request Queue, `Arc<dyn ServerSelector>` for Dispatch & Proxy, `Arc<dyn RouteValidator>` for Transport Layer.
-5. **Config Manager** provides `Arc<ConfigHandle>` for `RoutingWeights` reads and hot-reload.
-6. **Server Manager** provides `Arc<dyn ServerStateView>` for slot state snapshots.
+1. **Request Queue** holds `Arc<dyn SlotNotifier>` (trait defined in `llamaforge-types` — PR1 task 1.10a; implemented by Dispatcher — PR5). The proxy task's cleanup phase calls `notify_slot_available()` after `dispatch_token.release()` (primary path). `DispatchToken::Drop` also calls it as a safety net for panics. `DispatchCandidate` is consumed by `Dispatcher::dispatch()`.
+2. **Smart Routing** provides `RoutingDecision` consumed by `dispatch()`. `DispatchCountAdapter` implements `DispatchCountView` for Router's scoring. `ServerStateView` provides read-only slot state.
+3. **Server Manager** provides `ClientRefreshEvent` on backend restart. Consumes `Arc<dyn SlotDispatchView>` for reconciliation reads. Implements `SlotErasure` for orphan slot erasure. Calls `Dispatcher::drain_server()` before SIGTERM and `Dispatcher::shutdown()` on global shutdown — both with 5s timeout (design doc Graceful Shutdown step 5).
+4. **Transport Layer** consumes `BackendResponseStream` (`Pin<Box<dyn Stream<Item = Result<Bytes, StreamError>> + Send>>`). Handles `StreamError` variants for client-facing error messages.
+5. **Metrics & Storage** provides `MetricsIngest` (audit channel). Receives audit records via fire-and-forget 10s timeout send.
+6. **`main.rs`** (composition root) constructs: `Arc<DispatchTrackerRegistry>` → `Arc<DispatchCountAdapter>` (inject into Router) → `Arc<SlotDispatchMap>` → `ReqwestClientStore` (as `Arc<dyn BackendClient>` + `Arc<dyn ClientManager>`) → `Dispatcher` impl as `Arc<dyn SlotNotifier>` (inject into Request Queue) → `Dispatcher::new()`.
