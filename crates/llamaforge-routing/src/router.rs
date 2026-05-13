@@ -334,6 +334,37 @@ impl Router {
 
         let eligible = self.eligible_servers(model, capabilities)?;
 
+        // Affinity check
+        if let Some(session_id) = request.session_id() {
+            let available_ids: Vec<_> = eligible.iter().map(|s| s.id).collect();
+            if let Some(affinity_server) = self.get_affinity(session_id, &available_ids) {
+                // Find it in eligible to check free ratio
+                if let Some(server) = eligible.iter().find(|s| s.id == affinity_server) {
+                    let total = server.total_slots;
+                    let idle = server.idle_slots;
+                    let in_flight = self.dispatch_counts.in_flight_count(&server.id);
+                    let effective_free = idle.saturating_sub(in_flight as u32);
+
+                    if total > 0 && effective_free > 0 {
+                        metrics::counter!("llamaforge_session_affinity_hits_total").increment(1);
+
+                        let decision = RoutingDecision::new(
+                            server.id,
+                            RoutingReason::SessionAffinity { session_id: session_id.clone() },
+                            0.0, // score sentinel — affinity bypassed scoring; see Section 3.1
+                            SlotTarget::Auto,
+                        );
+
+                        // We must set affinity even on hit to update LRU touch
+                        self.set_affinity(session_id.clone(), server.id);
+
+                        return Ok(decision);
+                    }
+                }
+            }
+            metrics::counter!("llamaforge_session_affinity_misses_total").increment(1);
+        }
+
         let weights = match config.routing.weights.clone().try_into() {
             Ok(w) => w,
             Err(e) => {
