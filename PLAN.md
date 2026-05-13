@@ -75,14 +75,14 @@ Create the `llamaforge-dispatch` library crate and extend `llamaforge-types` wit
 
 ### PR1 Acceptance Criteria
 
-- [ ] `cargo build --workspace` succeeds with zero warnings
-- [ ] `cargo clippy --workspace -- -D warnings` passes clean
-- [ ] `SlotId` compiles with `Eq + Hash` (usable as `HashMap` key)
-- [ ] `Arc<dyn SlotDispatchView>` compiles (trait is object-safe)
-- [ ] `Arc<dyn SlotErasure>` compiles (trait is object-safe)
-- [ ] `Arc<dyn SlotNotifier>` compiles (trait is object-safe)
-- [ ] `ClientRefreshEvent` can cross crate boundaries (no private fields)
-- [ ] `crates/llamaforge-dispatch/src/lib.rs` compiles as a library
+- [x] `cargo build --workspace` succeeds with zero warnings
+- [x] `cargo clippy --workspace -- -D warnings` passes clean
+- [x] `SlotId` compiles with `Eq + Hash` (usable as `HashMap` key)
+- [x] `Arc<dyn SlotDispatchView>` compiles (trait is object-safe)
+- [x] `Arc<dyn SlotErasure>` compiles (trait is object-safe)
+- [x] `Arc<dyn SlotNotifier>` compiles (trait is object-safe)
+- [x] `ClientRefreshEvent` can cross crate boundaries (no private fields)
+- [x] `crates/llamaforge-dispatch/src/lib.rs` compiles as a library
 
 ### PR1 Creation Steps
 

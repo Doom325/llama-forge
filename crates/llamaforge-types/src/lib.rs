@@ -4,6 +4,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub mod traits;
+pub mod ports;
 
 /// Error returned when an ID is invalid.
 #[derive(Debug, thiserror::Error)]
@@ -131,8 +132,8 @@ impl fmt::Display for RequestId {
 /// Identifies a specific slot on a specific server.
 ///
 /// See design doc Section 2.3.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SlotId(u32);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SlotId(pub(crate) u32);
 
 impl SlotId {
     pub fn new(id: u32) -> Self {
@@ -305,4 +306,18 @@ mod tests {
         let res: Result<LoraAdapterId, _> = serde_json::from_str("\"   \"");
         assert!(res.is_err());
     }
+}
+
+/// TLS configuration for backend connection.
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    // Stub implementation
+}
+
+/// Event emitted when a server restarts, signaling that clients should reconnect.
+#[derive(Debug, Clone)]
+pub struct ClientRefreshEvent {
+    pub server_id: ServerId,
+    pub new_port: u16,
+    pub tls_config: Option<TlsConfig>,
 }
