@@ -2,7 +2,11 @@
 //!
 //! See design doc Section 2.1 for the port trait definition.
 
+#[cfg(any(test, feature = "test-utils"))]
+pub mod memory;
+#[cfg(not(any(test, feature = "test-utils")))]
 pub(crate) mod memory;
+
 pub mod toml_file;
 
 use crate::error::{ConfigLoadError, WritebackError};
@@ -28,6 +32,7 @@ pub(crate) mod private {
     pub trait Sealed {}
 }
 
+impl private::Sealed for memory::InMemoryConfigSource {}
 impl private::Sealed for toml_file::TomlFileConfigSource {}
 
 #[cfg(test)]

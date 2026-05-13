@@ -5,7 +5,12 @@ pub(crate) mod diff;
 pub(crate) mod error;
 pub(crate) mod handle;
 pub(crate) mod instrumented;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub mod source;
+#[cfg(not(any(test, feature = "test-utils")))]
 pub(crate) mod source;
+
 pub(crate) mod traits;
 pub(crate) mod types;
 
