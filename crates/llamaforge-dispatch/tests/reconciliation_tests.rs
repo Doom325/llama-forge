@@ -210,6 +210,26 @@ async fn test_7_13_first_seen_processing_cleanup() {
 
 #[tokio::test(start_paused = true)]
 async fn test_7_14_end_to_end_reconciliation_cycle() {
-    // End to end cycle involves dispatching, clearing map, and doing reconciliation.
-    // This is tested adequately by 7.11 and 7.12 above, and the integration tests in VC3.
+    let map = Arc::new(SlotDispatchMap::new());
+    let erasure = Arc::new(MockSlotErasure::new());
+    let s1 = ServerId::new(Uuid::now_v7());
+    let d = create_dispatcher(4000, map.clone(), erasure.clone(), s1);
+    
+    let req1 = RequestId::new(Uuid::now_v7());
+    let slot = SlotId::new(5);
+
+    // Insert dispatch into slot_dispatch_map
+    map.insert(req1, s1, slot);
+    
+    // Track the dispatch so it's formally active but not "unresolved"
+    let _token = llamaforge_dispatch::token::DispatchToken::new(d.trackers().get_or_create(&s1), req1, s1, Arc::new(MockSlotNotifier));
+
+    // Advance past grace
+    tokio::time::advance(Duration::from_secs(31)).await;
+
+    // Reconcile with empty processing_slots (simulate backend completing it without LlamaForge knowing)
+    d.reconcile_slots(&s1, &[]).await;
+
+    // Assert cleanup
+    assert!(map.get_slot_for_request(&req1).is_none());
 }
