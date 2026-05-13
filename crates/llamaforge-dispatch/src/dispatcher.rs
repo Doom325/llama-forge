@@ -3,8 +3,7 @@
 //! See design doc Section 2.1
 
 use crate::client::{BackendClient, ClientManager};
-use crate::error::StreamError;
-use crate::proxy::{proxy_task, AuditRecord, ParsedChunk};
+use crate::proxy::proxy_task;
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
@@ -17,7 +16,6 @@ use llamaforge_types::ports::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -99,15 +97,11 @@ impl Dispatcher {
         }
     }
 
-    /// Dispatches a request to a server, returning a receiver for the response stream.
+    /// Dispatches a request to a server, returning an abort handle to the task.
     pub async fn dispatch(
         &self,
         candidate: DispatchCandidate,
-        audit_tx: mpsc::Sender<AuditRecord>,
-    ) -> (
-        tokio::task::AbortHandle,
-        mpsc::Receiver<Result<ParsedChunk, StreamError>>,
-    ) {
+    ) -> tokio::task::AbortHandle {
         let server_id = *candidate.routing.server_id();
 
         // Step 1: Get or create tracker for `routing.server_id`.
@@ -136,20 +130,15 @@ impl Dispatcher {
 
         let backend_client = Arc::clone(&self.backend_client);
         let cancel_token = self.cancellation_tokens.entry(server_id).or_default().clone();
-        let slot_notifier = Arc::clone(&self.slot_notifier);
 
-        let (response_tx, response_rx) = mpsc::channel(32);
-
-        let handle = tasks.spawn(async move {
+        tasks.spawn(async move {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     // Implicitly drops token and notifies slot available
                 }
-                _ = proxy_task(token, backend_client, request, response_tx, slot_notifier, audit_tx) => {}
+                _ = proxy_task(token, backend_client, request) => {}
             }
-        });
-
-        (handle, response_rx)
+        })
     }
 
     /// Accessor for the trackers registry.
@@ -254,8 +243,8 @@ mod tests {
         let trackers = Arc::new(DispatchTrackerRegistry::new());
         let slot_map = Arc::new(SlotDispatchMap::new());
         let config = create_test_config();
-        let (metrics_tx, _) = mpsc::channel(1);
-        let (audit_tx, _) = mpsc::channel(1);
+        let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
+        let (audit_tx, _) = tokio::sync::mpsc::channel(1);
         let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
 
         let dispatcher = Dispatcher::new(
@@ -278,8 +267,8 @@ mod tests {
         let trackers = Arc::new(DispatchTrackerRegistry::new());
         let slot_map = Arc::new(SlotDispatchMap::new());
         let config = create_test_config();
-        let (metrics_tx, _) = mpsc::channel(1);
-        let (audit_tx, _) = mpsc::channel(1);
+        let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
+        let (audit_tx, _) = tokio::sync::mpsc::channel(1);
         let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
 
         let dispatcher = Dispatcher::new(
@@ -295,7 +284,6 @@ mod tests {
 
         let server_id = ServerId::new(Uuid::now_v7());
         let request_id = RequestId::new(Uuid::now_v7());
-        let (audit_tx_dispatch, _) = mpsc::channel(1);
 
         let candidate = DispatchCandidate {
             request_id,
@@ -309,7 +297,7 @@ mod tests {
             routing: RoutingDecision::new_for_test(server_id),
         };
 
-        let (_handle, _rx) = dispatcher.dispatch(candidate, audit_tx_dispatch).await;
+        let _handle = dispatcher.dispatch(candidate).await;
 
         let tracker = trackers.get(&server_id).unwrap();
         assert_eq!(tracker.count(), 1);
