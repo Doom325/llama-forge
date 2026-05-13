@@ -234,7 +234,9 @@ impl Router {
             + weights.w_queue() * (1.0 - server.deferred_ratio)
             + affinity_component;
 
-        debug_assert!(score.is_finite());
+        if !score.is_finite() {
+            return f64::NEG_INFINITY;
+        }
         score
     }
 
@@ -247,9 +249,13 @@ impl Router {
 
     /// Check if we have any capacity for the model.
     pub fn has_capacity(&self, target: &ModelTarget) -> bool {
+        let config = self.config.snapshot();
         // Fast path check without constraint checking (since capabilities might not be known yet).
         let all_servers = self.server_state.all_servers();
         let mut model_matches = Vec::new();
+        let mut all_starting = true;
+        let mut any_servers = false;
+
         for server in all_servers {
             let serves_model = match target {
                 ModelTarget::Exact(alias) => server.models.contains(alias),
@@ -258,8 +264,21 @@ impl Router {
                 }
                 ModelTarget::AnyWithCapability(cap) => server.capabilities.contains(cap),
             };
-            if serves_model && server.lifecycle == llamaforge_types::ServerLifecycle::Running {
-                model_matches.push(server);
+            if serves_model {
+                any_servers = true;
+                if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
+                    all_starting = false;
+                    model_matches.push(server);
+                } else if server.lifecycle != llamaforge_types::ServerLifecycle::Starting {
+                    all_starting = false;
+                }
+            }
+        }
+
+        if any_servers && all_starting {
+            let wait_secs = config.routing.startup_wait_secs;
+            if self.started_at.elapsed().as_secs() < wait_secs {
+                return true;
             }
         }
 
@@ -387,9 +406,14 @@ impl Router {
 
         // Filter to those tying for max score (allowing for floating point inaccuracy)
         let mut top_candidates = Vec::new();
-        for cand in candidates {
-            if (cand.score - max_score).abs() < f64::EPSILON {
-                top_candidates.push(cand);
+        if !max_score.is_finite() {
+            tracing::warn!("routing.all_servers_unhealthy");
+            top_candidates = candidates;
+        } else {
+            for cand in candidates {
+                if (cand.score - max_score).abs() < f64::EPSILON {
+                    top_candidates.push(cand);
+                }
             }
         }
 
@@ -678,5 +702,85 @@ mod tests {
             res,
             Err(RoutingError::NoCapableServer { constraint: RoutingConstraint::LoraAdapter, .. })
         ));
+    }
+
+    #[test]
+    fn test_nan_score_dropped() {
+        let mut s1 = default_server(1, "model1");
+        let s2 = default_server(2, "model1");
+        s1.kv_usage = f64::NAN; // Cause NaN score
+
+        let s2_id = s2.id;
+        let router = create_mock_router(vec![s1.clone(), s2], MockDispatchCountView::new());
+
+        let score1 = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        assert_eq!(score1, f64::NEG_INFINITY);
+
+        let req = MockRequest {
+            model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
+            caps: Default::default(),
+            session: None,
+        };
+
+        let decision = router.select_server(&req).unwrap();
+        assert_eq!(*decision.server_id(), s2_id);
+    }
+
+    #[test]
+    fn test_has_capacity_startup_grace_period() {
+        let mut s1 = default_server(1, "model1");
+        s1.lifecycle = llamaforge_types::ServerLifecycle::Starting;
+
+        // Custom router with 0s wait_secs
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "[global]\n[routing]\nstartup_wait_secs = 0\n").unwrap();
+        let paths = llamaforge_config::ConfigPaths::new(
+            tmp.path().to_path_buf(),
+            tmp.path().to_path_buf(),
+            tmp.path().parent().unwrap().to_path_buf(),
+        );
+        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
+        let config = Arc::new(ConfigHandle::load(source).unwrap());
+
+        let dispatch = MockDispatchCountView::new();
+        let router_no_grace = Router::new(
+            config,
+            Arc::new(MockServerStateView { servers: vec![s1.clone()] }),
+            Arc::new(dispatch),
+        );
+
+        let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
+
+        // Since grace period is 0s, it should return false
+        assert!(!router_no_grace.has_capacity(&model));
+
+        // Default router has 30s wait_secs
+        let router_with_grace = create_mock_router(vec![s1], MockDispatchCountView::new());
+        assert!(router_with_grace.has_capacity(&model));
+    }
+
+    #[test]
+    fn test_all_nan_servers_no_panic() {
+        let mut s1 = default_server(1, "model1");
+        let mut s2 = default_server(2, "model1");
+        s1.kv_usage = f64::NAN;
+        s2.kv_usage = f64::NAN;
+
+        let router = create_mock_router(vec![s1.clone(), s2.clone()], MockDispatchCountView::new());
+
+        let score1 = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        let score2 = router.score_server(&s2, &crate::weights::RoutingWeights::default());
+        assert_eq!(score1, f64::NEG_INFINITY);
+        assert_eq!(score2, f64::NEG_INFINITY);
+
+        let req = MockRequest {
+            model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
+            caps: Default::default(),
+            session: None,
+        };
+
+        let decision = router.select_server(&req).unwrap();
+        // It should pick one of them without panicking, and the reason should be RoundRobin
+        assert!(matches!(decision.reason(), RoutingReason::RoundRobin { .. }));
     }
 }
