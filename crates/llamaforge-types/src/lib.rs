@@ -310,9 +310,7 @@ mod tests {
 
 /// TLS configuration for backend connection.
 #[derive(Debug, Clone)]
-pub struct TlsConfig {
-    // Stub implementation
-}
+pub struct TlsConfig;
 
 /// Event emitted when a server restarts, signaling that clients should reconnect.
 #[derive(Debug, Clone)]

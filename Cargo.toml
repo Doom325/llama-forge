@@ -67,6 +67,7 @@ async-trait = "0.1"
 tokio-stream = "0.1"
 tracing-opentelemetry = "0.28"
 lru = "0.16"
+wiremock = "0.6"
 
 [profile.release]
 lto = "thin"
