@@ -226,6 +226,12 @@ impl Dispatcher {
         }
     }
 
+    /// Returns the number of entries in the first_seen_processing map.
+    #[doc(hidden)]
+    pub fn get_reconciliation_map_size(&self) -> usize {
+        self.first_seen_processing.len()
+    }
+
     /// Reconciles slot states based on the periodic server status update.
     pub async fn reconcile_slots(&self, server_id: &ServerId, processing_slots: &[SlotId]) {
         use llamaforge_config::ConfigReader;

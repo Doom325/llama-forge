@@ -112,7 +112,7 @@ pub async fn proxy_task(
         slot_dispatch_map.insert(request_id, server_id, slot);
     }
 
-    loop {
+    'outer: loop {
         tokio::select! {
             biased;
             _ = cancel_token.cancelled() => {
@@ -127,7 +127,7 @@ pub async fn proxy_task(
                     })).await;
                 }
                 success = false;
-                break;
+                break 'outer;
             }
             chunk_res = stream.next() => {
                 let chunk = match chunk_res {
@@ -136,11 +136,11 @@ pub async fn proxy_task(
                         tracing::warn!(error = %e, "dispatch.failed");
                         let _ = response_tx.send(Err(e)).await;
                         success = false;
-                        break;
+                        break 'outer;
                     }
                     None => {
                         // Stream ended
-                        break;
+                        break 'outer;
                     }
                 };
 
@@ -194,14 +194,14 @@ pub async fn proxy_task(
                         Ok(Err(_)) => {
                             warn!("Response channel closed by client");
                             success = false;
-                            break;
+                            break 'outer;
                         }
                         Err(_) => {
                             warn!("dispatch.backpressure");
                             metrics::counter!("llamaforge_backpressure_disconnects_total").increment(1);
                             let _ = response_tx.try_send(Err(StreamError::Timeout));
                             success = false;
-                            break;
+                            break 'outer;
                         }
                     }
                 }
