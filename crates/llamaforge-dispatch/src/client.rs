@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use dashmap::DashMap;
 use futures_core::Stream;
+use futures_util::StreamExt;
 use llamaforge_config::ServerConfig;
 use llamaforge_types::{ClientRefreshEvent, ServerId};
 use reqwest::Client;
@@ -141,8 +142,9 @@ impl BackendClient for ReqwestClientStore {
             });
         }
 
-        // Streaming implementation is separated from the dispatcher component.
-        let stream = tokio_stream::empty();
+        let stream = response.bytes_stream().map(|res| {
+            res.map_err(|e| StreamError::Internal(Box::new(e)))
+        });
         Ok(Box::pin(stream))
     }
 }

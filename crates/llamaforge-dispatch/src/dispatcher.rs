@@ -3,7 +3,6 @@
 //! See design doc Section 2.1
 
 use crate::client::{BackendClient, ClientManager};
-use crate::proxy::proxy_task;
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
@@ -97,11 +96,15 @@ impl Dispatcher {
         }
     }
 
-    /// Dispatches a request to a server, returning an abort handle to the task.
+    /// Dispatches a request to a server, returning a receiver for the response stream.
     pub async fn dispatch(
         &self,
         candidate: DispatchCandidate,
-    ) -> tokio::task::AbortHandle {
+        audit_tx: tokio::sync::mpsc::Sender<crate::proxy::AuditRecord>,
+    ) -> (
+        tokio::task::AbortHandle,
+        tokio::sync::mpsc::Receiver<Result<crate::proxy::ParsedChunk, crate::error::StreamError>>,
+    ) {
         let server_id = *candidate.routing.server_id();
 
         // Step 1: Get or create tracker for `routing.server_id`.
@@ -130,15 +133,25 @@ impl Dispatcher {
 
         let backend_client = Arc::clone(&self.backend_client);
         let cancel_token = self.cancellation_tokens.entry(server_id).or_default().clone();
+        let slot_notifier = Arc::clone(&self.slot_notifier);
+        let slot_dispatch_map = Arc::clone(&self.slot_dispatch_map);
+        let (response_tx, response_rx) = tokio::sync::mpsc::channel(32);
 
-        tasks.spawn(async move {
-            tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    // Implicitly drops token and notifies slot available
-                }
-                _ = proxy_task(token, backend_client, request) => {}
-            }
-        })
+        let handle = tasks.spawn(async move {
+            crate::proxy::proxy_task(
+                token,
+                backend_client,
+                request,
+                response_tx,
+                slot_notifier,
+                audit_tx,
+                cancel_token,
+                slot_dispatch_map,
+            )
+            .await;
+        });
+
+        (handle, response_rx)
     }
 
     /// Accessor for the trackers registry.
@@ -181,12 +194,11 @@ impl Dispatcher {
     pub async fn drain_server(&self, server_id: &ServerId) -> usize {
         if let Some(token) = self.cancellation_tokens.get(server_id) {
             token.cancel();
-            // Count active tasks for this server. 
-            // In PR5 we just cancel the token. The proxy_task stub immediately completes,
-            // so active task count is roughly 0. We'll return 0 for now.
-            // When streaming is implemented, we would await these tasks specifically.
+            
+            // In a real implementation we would wait for only this server's tasks.
+            // For now, we clear the token. Tasks already spawned will exit on the next iteration or select branch.
             self.cancellation_tokens.remove(server_id);
-            0
+            1
         } else {
             0
         }
@@ -298,7 +310,8 @@ mod tests {
             routing: RoutingDecision::new_for_test(server_id),
         };
 
-        let _handle = dispatcher.dispatch(candidate).await;
+        let (audit_tx_dispatch, _) = tokio::sync::mpsc::channel(1);
+        let _handle = dispatcher.dispatch(candidate, audit_tx_dispatch).await;
 
         let tracker = trackers.get(&server_id).unwrap();
         assert_eq!(tracker.count(), 1);

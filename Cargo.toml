@@ -46,7 +46,7 @@ parking_lot = "0.12"
 metrics = "0.24"
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6.0"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 axum = "0.7"
 tower = "0.4"
