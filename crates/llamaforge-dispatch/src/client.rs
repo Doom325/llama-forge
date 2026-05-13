@@ -14,7 +14,6 @@ use reqwest::Client;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 use crate::dispatcher::CompletionRequest;
 use crate::error::{DispatchError, HttpStatus, StreamError};
@@ -69,12 +68,9 @@ impl ReqwestClientStore {
     }
 
     /// Register a new server with its configuration.
-    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) {
+    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) -> Result<(), reqwest::Error> {
         let max_idle = config.parallel_slots as usize;
-        let client = Self::build_client(max_idle).unwrap_or_else(|e| {
-            tracing::error!(error = %e, "Failed to build reqwest client. Falling back to default.");
-            Client::new()
-        });
+        let client = Self::build_client(max_idle)?;
         let info = ServerConnectionInfo {
             client,
             base_url: format!("http://127.0.0.1:{}", config.port),
@@ -82,6 +78,7 @@ impl ReqwestClientStore {
             parallel_slots: max_idle,
         };
         self.clients.insert(server_id, ArcSwap::from_pointee(info));
+        Ok(())
     }
 
     /// Helper to build a `reqwest::Client` with the correct pool settings.
@@ -153,20 +150,22 @@ impl ClientManager for ReqwestClientStore {
     fn refresh(&self, server_id: &ServerId, event: ClientRefreshEvent) {
         if let Some(entry) = self.clients.get(server_id) {
             let old_info = entry.load();
-            let new_client = Self::build_client(old_info.parallel_slots).unwrap_or_else(|e| {
-                tracing::error!(error = %e, "Failed to build reqwest client during refresh. Falling back to default.");
-                Client::new()
-            });
-            
-            let new_info = ServerConnectionInfo {
-                client: new_client,
-                base_url: format!("http://{}:{}", old_info.host, event.new_port),
-                host: old_info.host.clone(),
-                parallel_slots: old_info.parallel_slots,
-            };
-            
-            entry.store(Arc::new(new_info));
-            info!("Refreshed client for server {}, new port: {}", server_id, event.new_port);
+            match Self::build_client(old_info.parallel_slots) {
+                Ok(new_client) => {
+                    let new_info = ServerConnectionInfo {
+                        client: new_client,
+                        base_url: format!("http://{}:{}", old_info.host, event.new_port),
+                        host: old_info.host.clone(),
+                        parallel_slots: old_info.parallel_slots,
+                    };
+                    
+                    entry.store(Arc::new(new_info));
+                    tracing::info!("Refreshed client for server {}, new port: {}", server_id, event.new_port);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to build reqwest client during refresh. Keeping old client.");
+                }
+            }
         }
     }
 }
@@ -185,7 +184,7 @@ mod tests {
             port: 8080,
             ..Default::default()
         };
-        store.add_server(server_id, &config);
+        store.add_server(server_id, &config).unwrap();
 
         let initial_url = {
             let info = store.clients.get(&server_id).unwrap().load().clone();

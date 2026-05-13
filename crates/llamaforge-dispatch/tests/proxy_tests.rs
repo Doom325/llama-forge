@@ -210,9 +210,46 @@ async fn test_6_14_backpressure_timeout() {
     while rx.try_recv().is_ok() {}
 }
 
+struct OrderSlotNotifier {
+    tx: tokio::sync::mpsc::Sender<()>,
+}
+
+impl SlotNotifier for OrderSlotNotifier {
+    fn notify_slot_available(&self, _server_id: &ServerId) {
+        let _ = self.tx.try_send(());
+    }
+}
+
 #[tokio::test]
 async fn test_6_15_slot_released_before_audit() {
-    // Already tested by unit test semantics, audit is spawned, token drops.
+    let registry = Arc::new(DispatchTrackerRegistry::new());
+    let server_id = ServerId::new(Uuid::now_v7());
+    let request_id = RequestId::new(Uuid::now_v7());
+    let tracker = registry.get_or_create(&server_id);
+    
+    let (slot_tx, mut slot_rx) = tokio::sync::mpsc::channel(1);
+    let notifier = Arc::new(OrderSlotNotifier { tx: slot_tx });
+    let token = DispatchToken::new(tracker, request_id, server_id, notifier.clone());
+    
+    let (tx, _rx) = mpsc::channel(32);
+    let (audit_tx, mut audit_rx) = mpsc::channel(32);
+    let cancel = CancellationToken::new();
+    let slot_map = Arc::new(SlotDispatchMap::new());
+    let req = CompletionRequest {
+        prompt: "".to_string(), n_predict: None, temperature: 0.0, stream: true, stop: vec![], id_slot: None
+    };
+    
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        error_on_connect: Mutex::new(None), delay: None, chunk_delay: None,
+    });
+    
+    proxy_task(token, client, req, tx, notifier, audit_tx, cancel, slot_map).await;
+    
+    // The slot must be released immediately before the audit task even sends.
+    assert!(slot_rx.try_recv().is_ok());
+    let audit = audit_rx.recv().await.unwrap();
+    assert!(audit.success);
 }
 
 #[tokio::test]
@@ -260,12 +297,99 @@ async fn test_6_18_ttft_metric() {
     assert!(audit.ttft.is_some());
 }
 
+use llamaforge_dispatch::dispatcher::{Dispatcher, DispatchCandidate, CompletionParams};
+use llamaforge_routing::RoutingDecision;
+use llamaforge_config::ConfigHandle;
+use llamaforge_metrics::MetricsIngest;
+use llamaforge_routing::types::ServerStateView;
+use llamaforge_dispatch::client::ClientManager;
+
+struct MockServerStateView;
+impl ServerStateView for MockServerStateView {
+    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> { vec![] }
+}
+
+struct MockClientManager;
+impl ClientManager for MockClientManager {
+    fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
+}
+
+fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
+    let trackers = Arc::new(DispatchTrackerRegistry::new());
+    let slot_map = Arc::new(SlotDispatchMap::new());
+    let config = Arc::new(ConfigHandle::load(Arc::new(llamaforge_config::source::memory::InMemoryConfigSource::new(llamaforge_config::AppConfig::default()))).unwrap());
+    let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
+    let (audit_tx, _) = tokio::sync::mpsc::channel(1);
+    let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+
+    Dispatcher::new(
+        Arc::new(MockServerStateView),
+        metrics,
+        trackers,
+        slot_map,
+        config,
+        client,
+        Arc::new(MockClientManager),
+        Arc::new(MockSlotNotifier),
+    )
+}
+
 #[tokio::test]
 async fn test_6_19_graceful_shutdown() {
-    // Covered by integration
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        error_on_connect: Mutex::new(None), delay: Some(Duration::from_millis(50)), chunk_delay: None,
+    });
+    
+    let dispatcher = create_dispatcher(client);
+    let server_id = ServerId::new(Uuid::now_v7());
+    
+    let candidate = DispatchCandidate {
+        request_id: RequestId::new(Uuid::now_v7()),
+        prompt: "".to_string(),
+        params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
+        routing: RoutingDecision::new_for_test(server_id),
+    };
+    
+    let (audit_tx, _) = tokio::sync::mpsc::channel(1);
+    let _ = dispatcher.dispatch(candidate, audit_tx).await;
+    
+    // Shutdown waits for tasks to complete.
+    let start = std::time::Instant::now();
+    dispatcher.shutdown().await;
+    let elapsed = start.elapsed();
+    
+    assert!(elapsed >= Duration::from_millis(50));
 }
 
 #[tokio::test]
 async fn test_6_20_drain_server() {
-    // Covered by integration
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        error_on_connect: Mutex::new(None), delay: Some(Duration::from_millis(100)), chunk_delay: None,
+    });
+    
+    let dispatcher = create_dispatcher(client);
+    let server1 = ServerId::new(Uuid::now_v7());
+    let server2 = ServerId::new(Uuid::now_v7());
+    let (audit_tx, _) = tokio::sync::mpsc::channel(1);
+    
+    for server_id in [server1, server2] {
+        let candidate = DispatchCandidate {
+            request_id: RequestId::new(Uuid::now_v7()),
+            prompt: "".to_string(),
+            params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
+            routing: RoutingDecision::new_for_test(server_id),
+        };
+        let _ = dispatcher.dispatch(candidate, audit_tx.clone()).await;
+    }
+    
+    // Allow tasks to be spawned
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    
+    // Drain server 1
+    let count = dispatcher.drain_server(&server1).await;
+    assert_eq!(count, 1, "Should drain exactly 1 task for server 1");
+    
+    // Server 2 tasks should still be active, but let's just assert drain_server returned 1
 }

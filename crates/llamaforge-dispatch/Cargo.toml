@@ -35,3 +35,4 @@ wiremock = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 tempfile = { workspace = true }
 llamaforge-metrics = { workspace = true, features = ["test-utils"] }
+llamaforge-config = { workspace = true, features = ["test-utils"] }
