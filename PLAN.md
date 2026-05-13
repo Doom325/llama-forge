@@ -193,12 +193,12 @@ Implement the per-server in-flight request tracking infrastructure: `DispatchTra
 
 ### PR3 Acceptance Criteria
 
-- [ ] All mutex locks use poison recovery pattern (zero bare `unwrap()`)
-- [ ] `insert()` and `remove()` are `pub(crate)` — external crates cannot bypass DispatchToken
-- [ ] `DispatchTrackerRegistry` encapsulates DashMap (no `DashMap` in public API)
-- [ ] `DispatchCountAdapter` correctly implements `DispatchCountView`
-- [ ] All 6 test suites pass
-- [ ] Concurrent stress test passes without panics
+- [x] All mutex locks use poison recovery pattern (zero bare `unwrap()`)
+- [x] `insert()` and `remove()` are `pub(crate)` — external crates cannot bypass DispatchToken
+- [x] `DispatchTrackerRegistry` encapsulates DashMap (no `DashMap` in public API)
+- [x] `DispatchCountAdapter` correctly implements `DispatchCountView`
+- [x] All 6 test suites pass
+- [x] Concurrent stress test passes without panics
 
 ### PR3 Creation Steps
 
