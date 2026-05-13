@@ -301,34 +301,34 @@ Wire the infrastructure layer (`ReqwestClientStore` implementing `BackendClient`
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `ReqwestClientStore` struct | `clients: DashMap<ServerId, arc_swap::ArcSwap<reqwest::Client>>` (private). Constructor takes server configs and builds initial clients. | `src/client.rs` |
-| 5.2 | Implement `ReqwestClientStore::build_client()` | Private helper. Configures `reqwest::ClientBuilder` with: `pool_idle_timeout(10s)`, `pool_max_idle_per_host(max(parallel_slots, 16))`, `SO_KEEPALIVE(idle=10s, interval=5s, probes=3)`. See design doc Section 6 (Adapter-specific config). | `src/client.rs` |
-| 5.3 | Implement `BackendClient for ReqwestClientStore` | `post_completion()`: load client via `ArcSwap::load()`, build POST to `http://127.0.0.1:{port}/completion`, serialize `CompletionRequest` to llama-server JSON format, send request, wrap `reqwest::Response` into `BackendResponseStream`. Map `reqwest::Error` → `DispatchError::ConnectionFailed` with `Box<dyn Error>`. | `src/client.rs` |
-| 5.4 | Implement `ClientManager for ReqwestClientStore` | `refresh()`: build new client from `ClientRefreshEvent`, atomically swap via `ArcSwap::store()`. Old client drains naturally. Log at `tracing::info!`. | `src/client.rs` |
-| 5.5 | Implement `Dispatcher` struct | All fields per design doc Section 2.1: `server_state: Arc<dyn ServerStateView>`, `metrics_ingest: MetricsIngest`, `trackers: Arc<DispatchTrackerRegistry>`, `slot_dispatch_map: Arc<SlotDispatchMap>`, `config: Arc<ConfigHandle>`, `backend_client: Arc<dyn BackendClient>`, `client_manager: Arc<dyn ClientManager>`, `slot_notifier: Arc<dyn SlotNotifier>`, `proxy_tasks: Mutex<JoinSet<()>>` (tracks spawned proxy tasks for graceful shutdown — design doc Graceful Shutdown step 5). All fields private. | `src/dispatcher.rs` |
-| 5.6 | Implement `Dispatcher::new()` | Constructor accepting all dependencies. | `src/dispatcher.rs` |
-| 5.7 | Implement `Dispatcher::dispatch()` | Step 1: Get or create tracker for `routing.server_id`. Step 2: Create `DispatchToken` (pass `Arc::clone(&self.slot_notifier)`). Step 3: Build `CompletionRequest` from `DispatchCandidate`. Step 4: Add task to `proxy_tasks` JoinSet via `self.proxy_tasks.lock()...spawn(proxy_task(...))` — pass `slot_notifier` clone for explicit cleanup notification. Step 5: Return handle. The `proxy_task` body is a stub for now (PR6 fills it in). | `src/dispatcher.rs` |
-| 5.8 | Implement `Dispatcher::tracker()` | Delegate to `trackers.get()`. | `src/dispatcher.rs` |
-| 5.9 | Implement `Dispatcher::slot_dispatch_map()` | Return `Arc::clone(&self.slot_dispatch_map)`. | `src/dispatcher.rs` |
-| 5.10 | Implement `Dispatcher::refresh_client()` | Delegate to `client_manager.refresh()`. | `src/dispatcher.rs` |
-| 5.10a | Implement `Dispatcher::shutdown()` | Async method. Waits for all proxy tasks in `JoinSet` to complete with a 5s timeout (`tokio::time::timeout(Duration::from_secs(5), join_set.join_all())`). On timeout: log warning with count of remaining tasks, return. See design doc Graceful Shutdown step 5. | `src/dispatcher.rs` |
-| 5.10b | Implement `Dispatcher::drain_server()` | Async method taking `server_id: &ServerId`. Cancel the per-server `CancellationToken`, then await only that server's tasks. Used by Server Manager when stopping a single backend. Returns number of drained tasks. | `src/dispatcher.rs` |
-| 5.11 | Implement stub `proxy_task()` | Async fn that takes all context (token, client, request, channels). Stub: immediately release token and send a placeholder response. PR6 replaces this with the real streaming logic. | `src/proxy.rs` |
-| 5.12 | Unit tests: Dispatcher construction | Construct with mock `BackendClient`, mock `ClientManager`, mock `ServerStateView`. Verify all fields accessible. | tests |
-| 5.13 | Unit tests: dispatch creates token | Call `dispatch()` → verify `tracker.count() == 1`. Drop the returned token → count == 0. | tests |
-| 5.14 | Unit tests: refresh_client delegates | Call `refresh_client()` with mock `ClientManager` → verify mock received the event. | tests |
-| 5.15 | Unit tests: ReqwestClientStore ArcSwap | Create store, call `refresh()` → verify new client is returned by subsequent loads. Old loads still work (Arc reference). | tests |
-| 5.16 | Integration test: dispatch + stub proxy | Dispatch a request → verify stub proxy completes, token released, response channel receives something. | tests |
+| 5.1 | Implement `ReqwestClientStore` struct | [x] `clients: DashMap<ServerId, arc_swap::ArcSwap<reqwest::Client>>` (private). Constructor takes server configs and builds initial clients. | `src/client.rs` |
+| 5.2 | Implement `ReqwestClientStore::build_client()` | [x] Private helper. Configures `reqwest::ClientBuilder` with: `pool_idle_timeout(10s)`, `pool_max_idle_per_host(max(parallel_slots, 16))`, `SO_KEEPALIVE(idle=10s, interval=5s, probes=3)`. See design doc Section 6 (Adapter-specific config). | `src/client.rs` |
+| 5.3 | Implement `BackendClient for ReqwestClientStore` | [x] `post_completion()`: load client via `ArcSwap::load()`, build POST to `http://127.0.0.1:{port}/completion`, serialize `CompletionRequest` to llama-server JSON format, send request, wrap `reqwest::Response` into `BackendResponseStream`. Map `reqwest::Error` → `DispatchError::ConnectionFailed` with `Box<dyn Error>`. | `src/client.rs` |
+| 5.4 | Implement `ClientManager for ReqwestClientStore` | [x] `refresh()`: build new client from `ClientRefreshEvent`, atomically swap via `ArcSwap::store()`. Old client drains naturally. Log at `tracing::info!`. | `src/client.rs` |
+| 5.5 | Implement `Dispatcher` struct | [x] All fields per design doc Section 2.1: `server_state: Arc<dyn ServerStateView>`, `metrics_ingest: MetricsIngest`, `trackers: Arc<DispatchTrackerRegistry>`, `slot_dispatch_map: Arc<SlotDispatchMap>`, `config: Arc<ConfigHandle>`, `backend_client: Arc<dyn BackendClient>`, `client_manager: Arc<dyn ClientManager>`, `slot_notifier: Arc<dyn SlotNotifier>`, `proxy_tasks: Mutex<JoinSet<()>>` (tracks spawned proxy tasks for graceful shutdown — design doc Graceful Shutdown step 5). All fields private. | `src/dispatcher.rs` |
+| 5.6 | Implement `Dispatcher::new()` | [x] Constructor accepting all dependencies. | `src/dispatcher.rs` |
+| 5.7 | Implement `Dispatcher::dispatch()` | [x] Step 1: Get or create tracker for `routing.server_id`. Step 2: Create `DispatchToken` (pass `Arc::clone(&self.slot_notifier)`). Step 3: Build `CompletionRequest` from `DispatchCandidate`. Step 4: Add task to `proxy_tasks` JoinSet via `self.proxy_tasks.lock()...spawn(proxy_task(...))` — pass `slot_notifier` clone for explicit cleanup notification. Step 5: Return handle. The `proxy_task` body is a stub for now (PR6 fills it in). | `src/dispatcher.rs` |
+| 5.8 | Implement `Dispatcher::tracker()` | [x] Delegate to `trackers.get()`. | `src/dispatcher.rs` |
+| 5.9 | Implement `Dispatcher::slot_dispatch_map()` | [x] Return `Arc::clone(&self.slot_dispatch_map)`. | `src/dispatcher.rs` |
+| 5.10 | Implement `Dispatcher::refresh_client()` | [x] Delegate to `client_manager.refresh()`. | `src/dispatcher.rs` |
+| 5.10a | Implement `Dispatcher::shutdown()` | [x] Async method. Waits for all proxy tasks in `JoinSet` to complete with a 5s timeout (`tokio::time::timeout(Duration::from_secs(5), join_set.join_all())`). On timeout: log warning with count of remaining tasks, return. See design doc Graceful Shutdown step 5. | `src/dispatcher.rs` |
+| 5.10b | Implement `Dispatcher::drain_server()` | [x] Async method taking `server_id: &ServerId`. Cancel the per-server `CancellationToken`, then await only that server's tasks. Used by Server Manager when stopping a single backend. Returns number of drained tasks. | `src/dispatcher.rs` |
+| 5.11 | Implement stub `proxy_task()` | [x] Async fn that takes all context (token, client, request, channels). Stub: immediately release token and send a placeholder response. PR6 replaces this with the real streaming logic. | `src/proxy.rs` |
+| 5.12 | Unit tests: Dispatcher construction | [x] Construct with mock `BackendClient`, mock `ClientManager`, mock `ServerStateView`. Verify all fields accessible. | tests |
+| 5.13 | Unit tests: dispatch creates token | [x] Call `dispatch()` → verify `tracker.count() == 1`. Drop the returned token → count == 0. | tests |
+| 5.14 | Unit tests: refresh_client delegates | [x] Call `refresh_client()` with mock `ClientManager` → verify mock received the event. | tests |
+| 5.15 | Unit tests: ReqwestClientStore ArcSwap | [x] Create store, call `refresh()` → verify new client is returned by subsequent loads. Old loads still work (Arc reference). | tests |
+| 5.16 | Integration test: dispatch + stub proxy | [x] Dispatch a request → verify stub proxy completes, token released, response channel receives something. | tests |
 
 ### PR5 Acceptance Criteria
 
-- [ ] `Dispatcher::new()` accepts only port traits (no concrete types except `MetricsIngest`)
-- [ ] `dispatch()` spawns a tokio task into the `proxy_tasks` JoinSet
-- [ ] `shutdown()` and `drain_server()` methods compile and handle empty JoinSet gracefully
-- [ ] `ReqwestClientStore` is the ONLY file importing `reqwest`
-- [ ] `ArcSwap::store()` atomically swaps client (no blocking)
-- [ ] All 5 test suites pass
-- [ ] Stub proxy task releases token and sends response
+- [x] `Dispatcher::new()` accepts only port traits (no concrete types except `MetricsIngest`)
+- [x] `dispatch()` spawns a tokio task into the `proxy_tasks` JoinSet
+- [x] `shutdown()` and `drain_server()` methods compile and handle empty JoinSet gracefully
+- [x] `ReqwestClientStore` is the ONLY file importing `reqwest`
+- [x] `ArcSwap::store()` atomically swaps client (no blocking)
+- [x] All 5 test suites pass
+- [x] Stub proxy task releases token and sends response
 
 ### PR5 Creation Steps
 
