@@ -247,10 +247,9 @@ impl Router {
         ((val % candidates.len() as u64) as usize, val)
     }
 
-    /// Check if we have any capacity for the model.
-    pub fn has_capacity(&self, target: &ModelTarget) -> bool {
+    /// Check if we have any capacity for the model and capabilities.
+    pub fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
         let config = self.config.snapshot();
-        // Fast path check without constraint checking (since capabilities might not be known yet).
         let all_servers = self.server_state.all_servers();
         let mut model_matches = Vec::new();
         let mut all_starting = true;
@@ -264,13 +263,40 @@ impl Router {
                 }
                 ModelTarget::AnyWithCapability(cap) => server.capabilities.contains(cap),
             };
+
             if serves_model {
-                any_servers = true;
-                if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
-                    all_starting = false;
-                    model_matches.push(server);
-                } else if server.lifecycle != llamaforge_types::ServerLifecycle::Starting {
-                    all_starting = false;
+                let mut server_capable = true;
+
+                if let Some(lora) = &capabilities.lora_adapter {
+                    if !server.lora_adapters.contains(lora) {
+                        server_capable = false;
+                    }
+                }
+                if server_capable && capabilities.multimodal && !server.multimodal {
+                    server_capable = false;
+                }
+                if server_capable && capabilities.embedding && !server.embedding {
+                    server_capable = false;
+                }
+                if server_capable && capabilities.reranking && !server.reranking {
+                    server_capable = false;
+                }
+                if server_capable {
+                    if let Some(arch) = &capabilities.architecture {
+                        if server.architecture != *arch {
+                            server_capable = false;
+                        }
+                    }
+                }
+
+                if server_capable {
+                    any_servers = true;
+                    if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
+                        all_starting = false;
+                        model_matches.push(server);
+                    } else if server.lifecycle != llamaforge_types::ServerLifecycle::Starting {
+                        all_starting = false;
+                    }
                 }
             }
         }
@@ -471,8 +497,8 @@ impl Router {
 }
 
 impl CapacityChecker for Router {
-    fn has_capacity(&self, target: &ModelTarget) -> bool {
-        self.has_capacity(target)
+    fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
+        self.has_capacity(target, capabilities)
     }
 }
 
@@ -678,12 +704,12 @@ mod tests {
         let router = create_mock_router(vec![s1.clone()], dispatch);
         let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
-        assert!(!router.has_capacity(&model));
+        assert!(!router.has_capacity(&model, &Default::default()));
 
         let mut dispatch2 = MockDispatchCountView::new();
         dispatch2.counts.insert(s1.id, 3);
         let router2 = create_mock_router(vec![s1], dispatch2);
-        assert!(router2.has_capacity(&model));
+        assert!(router2.has_capacity(&model, &Default::default()));
     }
 
     #[test]
@@ -752,11 +778,11 @@ mod tests {
         let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
         // Since grace period is 0s, it should return false
-        assert!(!router_no_grace.has_capacity(&model));
+        assert!(!router_no_grace.has_capacity(&model, &Default::default()));
 
         // Default router has 30s wait_secs
         let router_with_grace = create_mock_router(vec![s1], MockDispatchCountView::new());
-        assert!(router_with_grace.has_capacity(&model));
+        assert!(router_with_grace.has_capacity(&model, &Default::default()));
     }
 
     #[test]

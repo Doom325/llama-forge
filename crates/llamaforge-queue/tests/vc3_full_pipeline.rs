@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn has_capacity(&self, _: &ModelTarget) -> bool {
+    fn has_capacity(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
         true
     }
 }
@@ -326,7 +326,11 @@ async fn test_vc3_9_graceful_shutdown_drain() {
     // Use a custom capacity checker that always returns false so nothing dispatches
     struct NoCapacityChecker;
     impl CapacityChecker for NoCapacityChecker {
-        fn has_capacity(&self, _: &ModelTarget) -> bool {
+        fn has_capacity(
+            &self,
+            _: &ModelTarget,
+            _: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
             false
         }
     }

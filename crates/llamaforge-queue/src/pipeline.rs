@@ -255,7 +255,11 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
     // and then send ShuttingDown.
     struct DrainChecker;
     impl CapacityChecker for DrainChecker {
-        fn has_capacity(&self, _: &ModelTarget) -> bool {
+        fn has_capacity(
+            &self,
+            _: &ModelTarget,
+            _: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
             true
         }
     }

@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn has_capacity(&self, _: &ModelTarget) -> bool {
+    fn has_capacity(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
         true
     }
 }
@@ -82,6 +82,57 @@ fn mock_incoming(id: uuid::Uuid) -> (IncomingRequest, oneshot::Receiver<Dispatch
     )
 }
 
+#[tokio::test]
+async fn test_capability_constrained_request_stays_queued() {
+    let config = test_config();
+    let queue_depth = Arc::new(AtomicU32::new(0));
+
+    struct CapAwareChecker {
+        // True during admission, false during dispatch to simulate a server becoming busy
+        has_free_slots: std::sync::atomic::AtomicBool,
+    }
+    impl CapacityChecker for CapAwareChecker {
+        fn has_capacity(
+            &self,
+            _: &ModelTarget,
+            caps: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
+            // Must have free slots AND not be multimodal
+            self.has_free_slots.load(Ordering::SeqCst) && !caps.multimodal
+        }
+    }
+
+    let checker =
+        Arc::new(CapAwareChecker { has_free_slots: std::sync::atomic::AtomicBool::new(true) });
+
+    let admission =
+        Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), checker.clone()));
+    let queue = Arc::new(DispatchQueue::new(config, queue_depth.clone()));
+    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let pipeline = RequestPipeline::new(admission, queue.clone(), health);
+
+    // 1. Submit request WITHOUT multimodal (has capacity)
+    let (mut req, mut rx) = mock_incoming(uuid::Uuid::now_v7());
+    req.capabilities.multimodal = false;
+
+    let res = pipeline.submit(req);
+    assert!(res.is_ok());
+    assert_eq!(queue_depth.load(Ordering::SeqCst), 1);
+
+    // 2. Server becomes busy
+    checker.has_free_slots.store(false, Ordering::SeqCst);
+
+    // 3. Try to dispatch. The queue should check capacity, checker returns false,
+    // so it stays in the queue and we don't get a candidate out.
+    let candidate = queue.try_dispatch(&*checker);
+    assert!(candidate.is_none());
+
+    // The request should still be in the queue (depth = 1) and not cancelled.
+    assert_eq!(queue_depth.load(Ordering::SeqCst), 1);
+
+    // Quick check that rx hasn't received a Cancellation
+    assert!(rx.try_recv().is_err());
+}
 #[tokio::test]
 async fn test_pipeline_submit_happy_path() {
     let config = test_config();
@@ -333,7 +384,11 @@ async fn test_health_signals() {
 
     struct NoCapacityChecker;
     impl CapacityChecker for NoCapacityChecker {
-        fn has_capacity(&self, _: &ModelTarget) -> bool {
+        fn has_capacity(
+            &self,
+            _: &ModelTarget,
+            _: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
             false
         }
     }
