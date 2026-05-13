@@ -23,6 +23,8 @@ pub enum ConfigChange {
     GlobalChanged,
     /// Priority or scheduling rules changed.
     PriorityRulesChanged,
+    /// Routing configuration changed.
+    RoutingConfigChanged,
     /// A new server was added.
     ServerAdded { id: ServerId },
     /// A server was removed.
@@ -136,6 +138,10 @@ pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff {
 
     if old.priority_rules != new.priority_rules {
         changes.push(ConfigChange::PriorityRulesChanged);
+    }
+
+    if old.routing != new.routing {
+        changes.push(ConfigChange::RoutingConfigChanged);
     }
 
     // Servers added or changed

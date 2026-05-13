@@ -85,6 +85,12 @@ impl RoutingDecision {
         &self.reason
     }
 
+    /// Exposes the internal score for integration tests.
+    #[doc(hidden)]
+    pub fn score(&self) -> f64 {
+        self.score
+    }
+
     /// Consumes the decision and returns the server ID.
     pub fn into_server_id(self) -> ServerId {
         self.server_id

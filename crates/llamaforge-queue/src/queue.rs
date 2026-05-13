@@ -436,6 +436,7 @@ mod tests {
                 requestor_class: RequestorClass::new(Arc::from("default")),
                 model_target: ModelTarget::Exact(ModelAlias::new(Arc::from(model))),
                 capabilities: Default::default(),
+                session_id: None,
                 effective_priority: prio,
                 base_priority: prio,
                 requestor_bonus: 0,

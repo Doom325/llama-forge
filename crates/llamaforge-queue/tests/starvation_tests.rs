@@ -51,6 +51,7 @@ fn mock_incoming() -> (IncomingRequest, oneshot::Receiver<DispatchResult>) {
             requestor_class: RequestorClass::new(Arc::from("default")),
             model_target: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
             capabilities: Default::default(),
+            session_id: None,
             explicit_override: None,
             response_tx: tx,
             cancel_token: CancellationToken::new(),
