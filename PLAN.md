@@ -512,13 +512,13 @@ The final PR adds all integration tests (VC-3), the specific test cases from the
 
 ### PR8 Acceptance Criteria
 
-- [ ] All 8 VC-3 integration tests pass
-- [ ] All 5 unique design doc Section 8.3 test cases pass (3 already covered in PR4/PR7)
-- [ ] All 4 property tests pass (256 cases each)
-- [ ] Both stress tests pass without panics or leaked tokens
-- [ ] `cargo test --workspace` passes (excluding `#[ignore]`)
-- [ ] `cargo test --workspace -- --ignored` passes (including slow tests)
-- [ ] No production code changes in this PR — test code only
+- [x] All 8 VC-3 integration tests pass
+- [x] All 5 unique design doc Section 8.3 test cases pass (3 already covered in PR4/PR7)
+- [x] All 4 property tests pass (256 cases each)
+- [x] Both stress tests pass without panics or leaked tokens
+- [x] `cargo test --workspace` passes (excluding `#[ignore]`)
+- [x] `cargo test --workspace -- --ignored` passes (including slow tests)
+- [x] No production code changes in this PR — test code only
 
 ### PR8 Creation Steps
 
