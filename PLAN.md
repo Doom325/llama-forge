@@ -341,17 +341,17 @@ Wire the session affinity cache into the Router (moved from PR4 to avoid merge c
 
 ### PR5 Acceptance Criteria
 
-- [ ] `SessionAffinityCache` wired into Router with `Mutex<SessionAffinityCache>` field
-- [ ] Mutex poison recovered via `into_inner()` with `tracing::warn!`
-- [ ] Affinity is advisory — bypassed when target server is full
-- [ ] `startup_wait_secs` grace period allows enqueue during startup window
-- [ ] `routing.weights_non_unit` log event fires on config reload with non-unit sum
-- [ ] Config hot-reload goes through the builder (via `TryFrom<RoutingWeightsDto>`)
-- [ ] Router constructor reads `session_affinity_max_entries` from config
-- [ ] All 10 integration test suites pass
-- [ ] Mock `DispatchCountView` is reusable for downstream component tests
-- [ ] Full lifecycle (validate → select → affinity → fallback) works end-to-end
-- [ ] No `unwrap()` on mutex lock — all use `unwrap_or_else(|p| p.into_inner())`
+- [x] `SessionAffinityCache` wired into Router with `Mutex<SessionAffinityCache>` field
+- [x] Mutex poison recovered via `into_inner()` with `tracing::warn!`
+- [x] Affinity is advisory — bypassed when target server is full
+- [x] `startup_wait_secs` grace period allows enqueue during startup window
+- [x] `routing.weights_non_unit` log event fires on config reload with non-unit sum
+- [x] Config hot-reload goes through the builder (via `TryFrom<RoutingWeightsDto>`)
+- [x] Router constructor reads `session_affinity_max_entries` from config
+- [x] All 10 integration test suites pass
+- [x] Mock `DispatchCountView` is reusable for downstream component tests
+- [x] Full lifecycle (validate → select → affinity → fallback) works end-to-end
+- [x] No `unwrap()` on mutex lock — all use `unwrap_or_else(|p| p.into_inner())`
 
 ### PR5 Creation Steps
 
