@@ -181,11 +181,12 @@ impl Dispatcher {
     pub async fn drain_server(&self, server_id: &ServerId) -> usize {
         if let Some(token) = self.cancellation_tokens.get(server_id) {
             token.cancel();
-            // In a real implementation we would wait for only this server's tasks.
-            // For now, we return a stub count and clear the token.
-            // Tasks already spawned will exit on the next iteration or select branch.
+            // Count active tasks for this server. 
+            // In PR5 we just cancel the token. The proxy_task stub immediately completes,
+            // so active task count is roughly 0. We'll return 0 for now.
+            // When streaming is implemented, we would await these tasks specifically.
             self.cancellation_tokens.remove(server_id);
-            1
+            0
         } else {
             0
         }

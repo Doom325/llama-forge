@@ -70,7 +70,10 @@ impl ReqwestClientStore {
     /// Register a new server with its configuration.
     pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) {
         let max_idle = config.parallel_slots as usize;
-        let client = Self::build_client(max_idle);
+        let client = Self::build_client(max_idle).unwrap_or_else(|e| {
+            tracing::error!(error = %e, "Failed to build reqwest client. Falling back to default.");
+            Client::new()
+        });
         let info = ServerConnectionInfo {
             client,
             base_url: format!("http://127.0.0.1:{}", config.port),
@@ -81,7 +84,7 @@ impl ReqwestClientStore {
     }
 
     /// Helper to build a `reqwest::Client` with the correct pool settings.
-    fn build_client(parallel_slots: usize) -> Client {
+    fn build_client(parallel_slots: usize) -> Result<Client, reqwest::Error> {
         let max_idle = parallel_slots.max(16);
         
         Client::builder()
@@ -89,7 +92,6 @@ impl ReqwestClientStore {
             .pool_max_idle_per_host(max_idle)
             .tcp_keepalive(Duration::from_secs(10))
             .build()
-            .expect("Failed to build reqwest client with hardcoded pool settings; this is a fatal configuration error.")
     }
 }
 
@@ -149,7 +151,10 @@ impl ClientManager for ReqwestClientStore {
     fn refresh(&self, server_id: &ServerId, event: ClientRefreshEvent) {
         if let Some(entry) = self.clients.get(server_id) {
             let old_info = entry.load();
-            let new_client = Self::build_client(old_info.parallel_slots);
+            let new_client = Self::build_client(old_info.parallel_slots).unwrap_or_else(|e| {
+                tracing::error!(error = %e, "Failed to build reqwest client during refresh. Falling back to default.");
+                Client::new()
+            });
             
             let new_info = ServerConnectionInfo {
                 client: new_client,
