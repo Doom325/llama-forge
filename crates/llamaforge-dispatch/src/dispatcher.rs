@@ -11,10 +11,11 @@ use llamaforge_config::ConfigHandle;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::RoutingDecision;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_types::ports::SlotNotifier;
+use llamaforge_types::ports::{SlotErasure, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::time::Instant;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -65,8 +66,10 @@ pub struct Dispatcher {
     backend_client: Arc<dyn BackendClient>,
     client_manager: Arc<dyn ClientManager>,
     slot_notifier: Arc<dyn SlotNotifier>,
+    slot_erasure: Arc<dyn SlotErasure>,
     proxy_tasks: DashMap<ServerId, Mutex<JoinSet<()>>>,
     cancellation_tokens: DashMap<ServerId, CancellationToken>,
+    first_seen_processing: DashMap<(ServerId, SlotId), Instant>,
 }
 
 impl Dispatcher {
@@ -81,6 +84,7 @@ impl Dispatcher {
         backend_client: Arc<dyn BackendClient>,
         client_manager: Arc<dyn ClientManager>,
         slot_notifier: Arc<dyn SlotNotifier>,
+        slot_erasure: Arc<dyn SlotErasure>,
     ) -> Self {
         Self {
             server_state,
@@ -91,8 +95,10 @@ impl Dispatcher {
             backend_client,
             client_manager,
             slot_notifier,
+            slot_erasure,
             proxy_tasks: DashMap::new(),
             cancellation_tokens: DashMap::new(),
+            first_seen_processing: DashMap::new(),
         }
     }
 
@@ -219,6 +225,81 @@ impl Dispatcher {
             0
         }
     }
+
+    /// Reconciles slot states based on the periodic server status update.
+    pub async fn reconcile_slots(&self, server_id: &ServerId, processing_slots: &[SlotId]) {
+        use llamaforge_config::ConfigReader;
+        let grace_period = {
+            let config = self.config.snapshot();
+            let config_server_id = llamaforge_config::ServerId::from(server_id.to_string());
+            if let Some(server_config) = config.servers.get(&config_server_id) {
+                Duration::from_secs(30.max(server_config.ctx_size as u64 / 500))
+            } else {
+                Duration::from_secs(30)
+            }
+        };
+
+        // Forward reconciliation: detects orphaned slots
+        use llamaforge_types::ports::SlotDispatchView;
+        for &slot_id in processing_slots {
+            if self.slot_dispatch_map.get_request_for_slot(server_id, &slot_id).is_none() {
+                let key = (*server_id, slot_id);
+                let first_seen = *self.first_seen_processing.entry(key).or_insert_with(Instant::now);
+                if first_seen.elapsed() > grace_period {
+                    metrics::counter!("llamaforge_reconciliation_erasures_total", "direction" => "forward").increment(1);
+                    tracing::info!(server_id = %server_id, slot_id = %slot_id.into_inner(), "reconciliation.erasure.forward");
+                    
+                    let erasure = Arc::clone(&self.slot_erasure);
+                    let s_id = *server_id;
+                    tokio::spawn(async move {
+                        let _ = tokio::time::timeout(Duration::from_secs(5), erasure.erase_slot(&s_id, &slot_id)).await;
+                    });
+                }
+            }
+        }
+        
+        // Cleanup first_seen_processing
+        let mut keys_to_remove = Vec::new();
+        for entry in self.first_seen_processing.iter() {
+            let (srv, slot) = entry.key();
+            if srv == server_id {
+                let in_map = self.slot_dispatch_map.get_request_for_slot(srv, slot).is_some();
+                let is_processing = processing_slots.contains(slot);
+                if in_map || !is_processing {
+                    keys_to_remove.push((*srv, *slot));
+                }
+            }
+        }
+        for k in keys_to_remove {
+            self.first_seen_processing.remove(&k);
+        }
+
+        let has_unresolved = {
+            let tracked_ids = self.trackers.get_or_create(server_id).snapshot_ids();
+            let mut unresolved = false;
+            for id in tracked_ids {
+                if self.slot_dispatch_map.get_slot_for_request(&id).is_none() {
+                    unresolved = true;
+                    break;
+                }
+            }
+            unresolved
+        };
+
+        // Reverse reconciliation: cleans stale map entries
+        if has_unresolved {
+            tracing::debug!(server_id = %server_id, "reconciliation.skipped.reverse");
+        } else {
+            let active_slots = self.slot_dispatch_map.get_dispatched_slots_for_server(server_id);
+            for (req_id, slot_id, dispatched_at) in active_slots {
+                if !processing_slots.contains(&slot_id) && dispatched_at.elapsed() > grace_period {
+                    metrics::counter!("llamaforge_reconciliation_erasures_total", "direction" => "reverse").increment(1);
+                    tracing::info!(server_id = %server_id, request_id = %req_id, slot_id = %slot_id.into_inner(), "reconciliation.erasure.reverse");
+                    self.slot_dispatch_map.remove(&req_id);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -259,6 +340,14 @@ mod tests {
         fn notify_slot_available(&self, _server_id: &ServerId) {}
     }
 
+    struct MockSlotErasure;
+    #[async_trait::async_trait]
+    impl SlotErasure for MockSlotErasure {
+        async fn erase_slot(&self, _server_id: &ServerId, _slot_id: &SlotId) -> Result<(), llamaforge_types::ports::SlotError> {
+            Ok(())
+        }
+    }
+
     fn create_test_config() -> Arc<ConfigHandle> {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let path = temp.path().to_path_buf();
@@ -285,6 +374,7 @@ mod tests {
             Arc::new(MockBackendClient),
             Arc::new(MockClientManager),
             Arc::new(MockSlotNotifier),
+            Arc::new(MockSlotErasure),
         );
 
         assert!(Arc::ptr_eq(&dispatcher.trackers(), &trackers));
@@ -309,6 +399,7 @@ mod tests {
             Arc::new(MockBackendClient),
             Arc::new(MockClientManager),
             Arc::new(MockSlotNotifier),
+            Arc::new(MockSlotErasure),
         );
 
         let server_id = ServerId::new(Uuid::now_v7());

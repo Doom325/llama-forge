@@ -462,11 +462,11 @@ Implement the bidirectional reconciliation logic (forward: detect orphaned slots
 
 ### PR7 Acceptance Criteria
 
-- [ ] Forward reconciliation uses `slot_erasure.erase_slot()` (not direct HTTP)
-- [ ] Reverse reconciliation skips when `has_unresolved()` is true
-- [ ] Dynamic grace period formula: `max(30s, ctx_size / 500)`
-- [ ] `first_seen_processing` cleaned every cycle (no memory leak)
-- [ ] All 7 test suites pass
+- [x] Forward reconciliation uses `slot_erasure.erase_slot()` (not direct HTTP)
+- [x] Reverse reconciliation skips when `has_unresolved()` is true
+- [x] Dynamic grace period formula: `max(30s, ctx_size / 500)`
+- [x] `first_seen_processing` cleaned every cycle (no memory leak)
+- [x] All 7 test suites pass
 
 ### PR7 Creation Steps
 
