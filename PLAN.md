@@ -400,12 +400,12 @@ The final PR adds all remaining specific test cases from design doc Section 8.2 
 
 ### PR6 Acceptance Criteria
 
-- [ ] All design doc Section 8.2 test cases implemented and passing
-- [ ] All 6 VC-2 verification checks pass as automated tests
-- [ ] `cargo test --workspace` passes (excluding `#[ignore]` tests)
-- [ ] `cargo test --workspace -- --ignored` passes (including slow tests)
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] No production code changes in this PR — test code only
+- [x] All design doc Section 8.2 test cases implemented and passing
+- [x] All 6 VC-2 verification checks pass as automated tests
+- [x] `cargo test --workspace` passes (excluding `#[ignore]` tests)
+- [x] `cargo test --workspace -- --ignored` passes (including slow tests)
+- [x] `cargo clippy --workspace -- -D warnings` passes
+- [x] No production code changes in this PR — test code only
 
 ### PR6 Creation Steps
 
