@@ -3,32 +3,30 @@
 //! See design doc Section 2.1.
 
 use crate::error::{ConfigLoadError, WritebackError};
-use crate::source::{private, ConfigSource};
+use crate::source::ConfigSource;
 use crate::types::{AppConfig, ConfigMutation};
 use parking_lot::Mutex;
 
 /// In-memory implementation of ConfigSource for internal testing.
 ///
 /// R17/R20: This is pub(crate) to keep the stable API focused on production sources.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct InMemoryConfigSource {
+#[cfg_attr(not(any(test, feature = "test-utils")), allow(dead_code))]
+pub struct InMemoryConfigSource {
     pub(crate) config: Mutex<AppConfig>,
 }
 
 impl InMemoryConfigSource {
     /// Create a new InMemoryConfigSource with the given config.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg_attr(not(any(test, feature = "test-utils")), allow(dead_code))]
     pub fn new(config: AppConfig) -> Self {
         Self { config: Mutex::new(config) }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn replace_config(&self, new_config: AppConfig) {
         *self.config.lock() = new_config;
     }
 }
-
-impl private::Sealed for InMemoryConfigSource {}
 
 impl ConfigSource for InMemoryConfigSource {
     fn load(&self) -> Result<AppConfig, ConfigLoadError> {

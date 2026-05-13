@@ -85,6 +85,14 @@ impl RoutingDecision {
         &self.reason
     }
 
+    /// Returns the target slot if specific, or None if auto.
+    pub fn slot_target(&self) -> Option<llamaforge_types::SlotId> {
+        match self.slot_target {
+            SlotTarget::Pinned(id) => Some(id),
+            SlotTarget::Auto => None,
+        }
+    }
+
     /// Exposes the internal score for integration tests.
     #[doc(hidden)]
     pub fn score(&self) -> f64 {
