@@ -6,7 +6,7 @@ use llamaforge_types::{RequestId, ServerId, SlotId};
 use llamaforge_types::ports::SlotDispatchView;
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use tokio::time::Instant;
 use tracing::warn;
 
 #[derive(Debug, Default)]
@@ -77,6 +77,20 @@ impl SlotDispatchMap {
         });
         
         guard.by_request.get(request_id).map(|&(_, _, instant)| instant)
+    }
+
+    /// Retrieves all active slots assigned to a given server.
+    pub fn get_dispatched_slots_for_server(&self, server_id: &ServerId) -> Vec<(RequestId, SlotId, Instant)> {
+        let guard = self.inner.lock().unwrap_or_else(|p| {
+            warn!("SlotDispatchMap mutex poisoned");
+            p.into_inner()
+        });
+        
+        guard.by_request
+            .iter()
+            .filter(|(_, (srv, _, _))| srv == server_id)
+            .map(|(req, (_, slot, instant))| (*req, *slot, *instant))
+            .collect()
     }
 }
 

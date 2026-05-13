@@ -314,6 +314,14 @@ impl ClientManager for MockClientManager {
     fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
 }
 
+struct MockSlotErasure;
+#[async_trait::async_trait]
+impl llamaforge_types::ports::SlotErasure for MockSlotErasure {
+    async fn erase_slot(&self, _server_id: &ServerId, _slot_id: &llamaforge_types::SlotId) -> Result<(), llamaforge_types::ports::SlotError> {
+        Ok(())
+    }
+}
+
 fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
     let trackers = Arc::new(DispatchTrackerRegistry::new());
     let slot_map = Arc::new(SlotDispatchMap::new());
@@ -331,6 +339,7 @@ fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
         client,
         Arc::new(MockClientManager),
         Arc::new(MockSlotNotifier),
+        Arc::new(MockSlotErasure),
     )
 }
 
