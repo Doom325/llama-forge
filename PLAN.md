@@ -128,13 +128,13 @@ Define every domain type, error type, and port trait from design doc Sections 2.
 
 ### PR2 Acceptance Criteria
 
-- [ ] All error types implement `std::error::Error` via `thiserror`
-- [ ] No `reqwest` types appear in any public error variant
-- [ ] No `anyhow` dependency anywhere in the crate
-- [ ] `BackendClient` and `ClientManager` are object-safe
-- [ ] `CompletionRequest` does NOT derive `Deserialize`
-- [ ] All 4 unit test suites pass
-- [ ] `cargo test --workspace` passes
+- [x] All error types implement `std::error::Error` via `thiserror`
+- [x] No `reqwest` types appear in any public error variant
+- [x] No `anyhow` dependency anywhere in the crate
+- [x] `BackendClient` and `ClientManager` are object-safe
+- [x] `CompletionRequest` does NOT derive `Deserialize`
+- [x] All 4 unit test suites pass
+- [x] `cargo test --workspace` passes
 
 ### PR2 Creation Steps
 
@@ -158,10 +158,10 @@ git push -u origin dispatch/02-types
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-1.1 | Type safety | Attempt to pass `u32` where `SlotId` is expected → compiler rejects | Does not compile |
-| VC-1.2 | HttpStatus safety | Attempt to pass `u16` where `HttpStatus` is expected → compiler rejects | Does not compile |
-| VC-1.3 | No reqwest leak | `grep -rn "reqwest" crates/llamaforge-dispatch/src/ --include="*.rs"` — only in `client.rs` | Only `client.rs` matches |
-| VC-1.4 | Object safety | `let _: Arc<dyn BackendClient> = ...;` compiles | Compiles |
+| VC-1.1 | Type safety | Attempt to pass `u32` where `SlotId` is expected → compiler rejects | [x] Does not compile |
+| VC-1.2 | HttpStatus safety | Attempt to pass `u16` where `HttpStatus` is expected → compiler rejects | [x] Does not compile |
+| VC-1.3 | No reqwest leak | `grep -rn "reqwest" crates/llamaforge-dispatch/src/ --include="*.rs"` — only in `client.rs` | [x] Only `client.rs` matches |
+| VC-1.4 | Object safety | `let _: Arc<dyn BackendClient> = ...;` compiles | [x] Compiles |
 
 ---
 
