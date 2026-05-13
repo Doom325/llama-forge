@@ -51,6 +51,11 @@ impl DispatchToken {
         }
     }
 
+    /// The ID of the request associated with this token.
+    pub fn request_id(&self) -> &RequestId {
+        &self.request_id
+    }
+
     /// The ID of the server this token is dispatched to.
     pub fn server_id(&self) -> &ServerId {
         &self.server_id

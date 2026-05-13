@@ -88,6 +88,16 @@ pub enum StreamError {
     Internal(#[source] Box<dyn Error + Send + Sync>),
 }
 
+impl From<DispatchError> for StreamError {
+    fn from(e: DispatchError) -> Self {
+        match e {
+            DispatchError::Cancelled { .. } => StreamError::Cancelled,
+            DispatchError::Timeout => StreamError::Timeout,
+            other => StreamError::Internal(Box::new(other)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

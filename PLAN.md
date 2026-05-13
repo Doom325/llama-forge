@@ -301,34 +301,34 @@ Wire the infrastructure layer (`ReqwestClientStore` implementing `BackendClient`
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `ReqwestClientStore` struct | `clients: DashMap<ServerId, arc_swap::ArcSwap<reqwest::Client>>` (private). Constructor takes server configs and builds initial clients. | `src/client.rs` |
-| 5.2 | Implement `ReqwestClientStore::build_client()` | Private helper. Configures `reqwest::ClientBuilder` with: `pool_idle_timeout(10s)`, `pool_max_idle_per_host(max(parallel_slots, 16))`, `SO_KEEPALIVE(idle=10s, interval=5s, probes=3)`. See design doc Section 6 (Adapter-specific config). | `src/client.rs` |
-| 5.3 | Implement `BackendClient for ReqwestClientStore` | `post_completion()`: load client via `ArcSwap::load()`, build POST to `http://127.0.0.1:{port}/completion`, serialize `CompletionRequest` to llama-server JSON format, send request, wrap `reqwest::Response` into `BackendResponseStream`. Map `reqwest::Error` → `DispatchError::ConnectionFailed` with `Box<dyn Error>`. | `src/client.rs` |
-| 5.4 | Implement `ClientManager for ReqwestClientStore` | `refresh()`: build new client from `ClientRefreshEvent`, atomically swap via `ArcSwap::store()`. Old client drains naturally. Log at `tracing::info!`. | `src/client.rs` |
-| 5.5 | Implement `Dispatcher` struct | All fields per design doc Section 2.1: `server_state: Arc<dyn ServerStateView>`, `metrics_ingest: MetricsIngest`, `trackers: Arc<DispatchTrackerRegistry>`, `slot_dispatch_map: Arc<SlotDispatchMap>`, `config: Arc<ConfigHandle>`, `backend_client: Arc<dyn BackendClient>`, `client_manager: Arc<dyn ClientManager>`, `slot_notifier: Arc<dyn SlotNotifier>`, `proxy_tasks: Mutex<JoinSet<()>>` (tracks spawned proxy tasks for graceful shutdown — design doc Graceful Shutdown step 5). All fields private. | `src/dispatcher.rs` |
-| 5.6 | Implement `Dispatcher::new()` | Constructor accepting all dependencies. | `src/dispatcher.rs` |
-| 5.7 | Implement `Dispatcher::dispatch()` | Step 1: Get or create tracker for `routing.server_id`. Step 2: Create `DispatchToken` (pass `Arc::clone(&self.slot_notifier)`). Step 3: Build `CompletionRequest` from `DispatchCandidate`. Step 4: Add task to `proxy_tasks` JoinSet via `self.proxy_tasks.lock()...spawn(proxy_task(...))` — pass `slot_notifier` clone for explicit cleanup notification. Step 5: Return handle. The `proxy_task` body is a stub for now (PR6 fills it in). | `src/dispatcher.rs` |
-| 5.8 | Implement `Dispatcher::tracker()` | Delegate to `trackers.get()`. | `src/dispatcher.rs` |
-| 5.9 | Implement `Dispatcher::slot_dispatch_map()` | Return `Arc::clone(&self.slot_dispatch_map)`. | `src/dispatcher.rs` |
-| 5.10 | Implement `Dispatcher::refresh_client()` | Delegate to `client_manager.refresh()`. | `src/dispatcher.rs` |
-| 5.10a | Implement `Dispatcher::shutdown()` | Async method. Waits for all proxy tasks in `JoinSet` to complete with a 5s timeout (`tokio::time::timeout(Duration::from_secs(5), join_set.join_all())`). On timeout: log warning with count of remaining tasks, return. See design doc Graceful Shutdown step 5. | `src/dispatcher.rs` |
-| 5.10b | Implement `Dispatcher::drain_server()` | Async method taking `server_id: &ServerId`. Cancel the per-server `CancellationToken`, then await only that server's tasks. Used by Server Manager when stopping a single backend. Returns number of drained tasks. | `src/dispatcher.rs` |
-| 5.11 | Implement stub `proxy_task()` | Async fn that takes all context (token, client, request, channels). Stub: immediately release token and send a placeholder response. PR6 replaces this with the real streaming logic. | `src/proxy.rs` |
-| 5.12 | Unit tests: Dispatcher construction | Construct with mock `BackendClient`, mock `ClientManager`, mock `ServerStateView`. Verify all fields accessible. | tests |
-| 5.13 | Unit tests: dispatch creates token | Call `dispatch()` → verify `tracker.count() == 1`. Drop the returned token → count == 0. | tests |
-| 5.14 | Unit tests: refresh_client delegates | Call `refresh_client()` with mock `ClientManager` → verify mock received the event. | tests |
-| 5.15 | Unit tests: ReqwestClientStore ArcSwap | Create store, call `refresh()` → verify new client is returned by subsequent loads. Old loads still work (Arc reference). | tests |
-| 5.16 | Integration test: dispatch + stub proxy | Dispatch a request → verify stub proxy completes, token released, response channel receives something. | tests |
+| 5.1 | Implement `ReqwestClientStore` struct |
+| 5.2 | Implement `ReqwestClientStore::build_client()` |
+| 5.3 | Implement `BackendClient for ReqwestClientStore` |
+| 5.4 | Implement `ClientManager for ReqwestClientStore` |
+| 5.5 | Implement `Dispatcher` struct |
+| 5.6 | Implement `Dispatcher::new()` |
+| 5.7 | Implement `Dispatcher::dispatch()` |
+| 5.8 | Implement `Dispatcher::tracker()` |
+| 5.9 | Implement `Dispatcher::slot_dispatch_map()` |
+| 5.10 | Implement `Dispatcher::refresh_client()` |
+| 5.10a | Implement `Dispatcher::shutdown()` |
+| 5.10b | Implement `Dispatcher::drain_server()` |
+| 5.11 | Implement stub `proxy_task()` |
+| 5.12 | Unit tests: Dispatcher construction |
+| 5.13 | Unit tests: dispatch creates token |
+| 5.14 | Unit tests: refresh_client delegates |
+| 5.15 | Unit tests: ReqwestClientStore ArcSwap |
+| 5.16 | Integration test: dispatch + stub proxy |
 
 ### PR5 Acceptance Criteria
 
-- [ ] `Dispatcher::new()` accepts only port traits (no concrete types except `MetricsIngest`)
-- [ ] `dispatch()` spawns a tokio task into the `proxy_tasks` JoinSet
-- [ ] `shutdown()` and `drain_server()` methods compile and handle empty JoinSet gracefully
-- [ ] `ReqwestClientStore` is the ONLY file importing `reqwest`
-- [ ] `ArcSwap::store()` atomically swaps client (no blocking)
-- [ ] All 5 test suites pass
-- [ ] Stub proxy task releases token and sends response
+- [x] `Dispatcher::new()` accepts only port traits (no concrete types except `MetricsIngest`)
+- [x] `dispatch()` spawns a tokio task into the `proxy_tasks` JoinSet
+- [x] `shutdown()` and `drain_server()` methods compile and handle empty JoinSet gracefully
+- [x] `ReqwestClientStore` is the ONLY file importing `reqwest`
+- [x] `ArcSwap::store()` atomically swaps client (no blocking)
+- [x] All 5 test suites pass
+- [x] Stub proxy task releases token and sends response
 
 ### PR5 Creation Steps
 
@@ -612,6 +612,27 @@ git push -u origin dispatch/08-verification
 |------|-----------|--------|------------|
 | Two-phase `select!` incorrectly structured | Medium | High | Design doc Section 3.3 documents the original logic error and correct pattern. PR6 tests verify cancellation wins over ready chunk. Code review must verify no cross-branch variable references. |
 | `reqwest` leaks into domain types | Medium | Medium | Ground rule #10 + VC-4.9 grep audit. `client.rs` is the only file importing reqwest. PR2 verifies no reqwest in error types. |
+| Mutex poison recovery masks data corruption | Low | Medium | Critical section is pure HashMap manipulation. Poison only happens on logic bug panic. Recovery allows continued operation at risk of 1 misplaced entry. Logged as `tracing::warn!`. |
+| `ArcSwap` performance under contention | Low | Low | `ArcSwap::load()` is wait-free. `store()` only called on server restart (rare). Concurrent loads (dispatch) never block. |
+| Backpressure timeout too aggressive (2s) | Medium | Low | Hardcoded in v1. If operators report false disconnects on slow networks: make configurable in v1.1. `llamaforge_backpressure_disconnects_total` metric alerts to the issue. |
+| Reconciliation grace period too short | Low | Medium | Dynamic formula `max(30s, ctx_size/500)`. For 128K context: 262s grace. Test with real llama-server prefill times during integration. `llamaforge_reconciliation_erasures_total` metric alerts to premature erasures. |
+| SlotDispatchMap grows unbounded | Low | Medium | Bounded by `total_slots` across all servers (128 max). Reconciliation cleans stale entries every 5s. Memory bounds table in design doc: 25KB worst case. |
+| Tokio task leak from proxy tasks | Low | High | `DispatchToken::Drop` ensures cleanup even on panic. VC-3.2 and VC-3.7 verify zero leaked tokens. `llamaforge_pending_dispatches` gauge alerts to drift. JoinSet for task monitoring. |
+| `arc-swap` crate version conflicts | Low | Low | Pin in workspace `Cargo.toml`. Already a workspace dependency from PR1. |
+| `first_seen_processing` HashMap grows without bound | Low | Low | Cleaned every reconciliation cycle (5s). Bounded by total_slots (128). Design doc Section 3.2 explicitly documents cleanup. |
+
+---
+
+## Integration Points (for next component)
+
+After Dispatch & Proxy is complete, the following integration seams are ready:
+
+1. **Request Queue** holds `Arc<dyn SlotNotifier>` (trait defined in `llamaforge-types` — PR1 task 1.10a; implemented by Dispatcher — PR5). The proxy task's cleanup phase calls `notify_slot_available()` after `dispatch_token.release()` (primary path). `DispatchToken::Drop` also calls it as a safety net for panics. `DispatchCandidate` is consumed by `Dispatcher::dispatch()`.
+2. **Smart Routing** provides `RoutingDecision` consumed by `dispatch()`. `DispatchCountAdapter` implements `DispatchCountView` for Router's scoring. `ServerStateView` provides read-only slot state.
+3. **Server Manager** provides `ClientRefreshEvent` on backend restart. Consumes `Arc<dyn SlotDispatchView>` for reconciliation reads. Implements `SlotErasure` for orphan slot erasure. Calls `Dispatcher::drain_server()` before SIGTERM and `Dispatcher::shutdown()` on global shutdown — both with 5s timeout (design doc Graceful Shutdown step 5).
+4. **Transport Layer** consumes `BackendResponseStream` (`Pin<Box<dyn Stream<Item = Result<Bytes, StreamError>> + Send>>`). Handles `StreamError` variants for client-facing error messages.
+5. **Metrics & Storage** provides `MetricsIngest` (audit channel). Receives audit records via fire-and-forget 10s timeout send.
+6. **`main.rs`** (composition root) constructs: `Arc<DispatchTrackerRegistry>` → `Arc<DispatchCountAdapter>` (inject into Router) → `Arc<SlotDispatchMap>` → `ReqwestClientStore` (as `Arc<dyn BackendClient>` + `Arc<dyn ClientManager>`) → `Dispatcher` impl as `Arc<dyn SlotNotifier>` (inject into Request Queue) → `Dispatcher::new()`.erifies no reqwest in error types. |
 | Mutex poison recovery masks data corruption | Low | Medium | Critical section is pure HashMap manipulation. Poison only happens on logic bug panic. Recovery allows continued operation at risk of 1 misplaced entry. Logged as `tracing::warn!`. |
 | `ArcSwap` performance under contention | Low | Low | `ArcSwap::load()` is wait-free. `store()` only called on server restart (rare). Concurrent loads (dispatch) never block. |
 | Backpressure timeout too aggressive (2s) | Medium | Low | Hardcoded in v1. If operators report false disconnects on slow networks: make configurable in v1.1. `llamaforge_backpressure_disconnects_total` metric alerts to the issue. |

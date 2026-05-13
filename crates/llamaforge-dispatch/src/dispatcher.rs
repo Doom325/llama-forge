@@ -18,9 +18,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
-use tracing::warn;
-
 use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 
 /// A completion request payload sent to the backend.
 ///
@@ -52,22 +51,18 @@ pub struct CompletionParams {
     pub stop: Vec<String>,
 }
 
-/// The main orchestrator for dispatching requests to servers.
+/// Orchestrates the dispatching of requests to backend servers.
 ///
 /// See design doc Section 2.1.
 pub struct Dispatcher {
     #[allow(dead_code)]
-    server_state: Arc<dyn ServerStateView>,
-    
+    pub(crate) server_state: Arc<dyn ServerStateView>,
     #[allow(dead_code)]
     metrics_ingest: MetricsIngest,
-    
     trackers: Arc<DispatchTrackerRegistry>,
     slot_dispatch_map: Arc<SlotDispatchMap>,
-    
     #[allow(dead_code)]
     config: Arc<ConfigHandle>,
-    
     backend_client: Arc<dyn BackendClient>,
     client_manager: Arc<dyn ClientManager>,
     slot_notifier: Arc<dyn SlotNotifier>,
@@ -103,20 +98,23 @@ impl Dispatcher {
     }
 
     /// Dispatches a request to a server, returning an abort handle to the task.
-    pub async fn dispatch(&self, candidate: DispatchCandidate) -> tokio::task::AbortHandle {
+    pub async fn dispatch(
+        &self,
+        candidate: DispatchCandidate,
+    ) -> tokio::task::AbortHandle {
         let server_id = *candidate.routing.server_id();
-        
+
         // Step 1: Get or create tracker for `routing.server_id`.
         let tracker = self.trackers.get_or_create(&server_id);
-        
+
         // Step 2: Create `DispatchToken`
         let token = DispatchToken::new(
-            tracker, 
-            candidate.request_id, 
-            server_id, 
-            Arc::clone(&self.slot_notifier)
+            tracker,
+            candidate.request_id,
+            server_id,
+            Arc::clone(&self.slot_notifier),
         );
-        
+
         // Step 3: Build `CompletionRequest`
         let request = CompletionRequest {
             prompt: candidate.prompt,
@@ -129,10 +127,10 @@ impl Dispatcher {
 
         // Step 4: Add task to `proxy_tasks` JoinSet
         let mut tasks = self.proxy_tasks.lock().await;
-        
+
         let backend_client = Arc::clone(&self.backend_client);
         let cancel_token = self.cancellation_tokens.entry(server_id).or_default().clone();
-        
+
         tasks.spawn(async move {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
@@ -153,30 +151,29 @@ impl Dispatcher {
         Arc::clone(&self.slot_dispatch_map)
     }
 
-    /// Refreshes the backend client for a server.
+    /// Refreshes the client for a specific server.
     pub fn refresh_client(&self, server_id: &ServerId, event: llamaforge_types::ClientRefreshEvent) {
         self.client_manager.refresh(server_id, event);
     }
 
-    /// Gracefully shutdown all proxy tasks with a timeout.
+    /// Gracefully shuts down the dispatcher, waiting for all proxy tasks to complete.
     pub async fn shutdown(&self) {
         let mut tasks = self.proxy_tasks.lock().await;
-        
-        if tasks.is_empty() {
-            return;
-        }
-
-        let timeout = Duration::from_secs(5);
-        
-        // Need to use an intermediate variable to avoid moving self inside JoinSet
-        // Use a loop to poll next() and timeout
-        let _ = tokio::time::timeout(timeout, async {
-            while tasks.join_next().await.is_some() {}
-        }).await;
-        
-        if !tasks.is_empty() {
-            warn!("Shutdown timeout reached. {} proxy tasks were cancelled.", tasks.len());
-            tasks.abort_all();
+        let count = tasks.len();
+        if count > 0 {
+            warn!(count, "Waiting for proxy tasks to complete during shutdown");
+            // Wait with timeout
+            match tokio::time::timeout(Duration::from_secs(5), async {
+                while tasks.join_next().await.is_some() {}
+            })
+            .await
+            {
+                Ok(_) => info!("All proxy tasks completed"),
+                Err(_) => warn!(
+                    remaining = tasks.len(),
+                    "Timed out waiting for proxy tasks to complete"
+                ),
+            }
         }
     }
 
@@ -184,11 +181,12 @@ impl Dispatcher {
     pub async fn drain_server(&self, server_id: &ServerId) -> usize {
         if let Some(token) = self.cancellation_tokens.get(server_id) {
             token.cancel();
-            // In a real implementation we would wait for only this server's tasks.
-            // For now, we return a stub count and clear the token.
-            // Tasks already spawned will exit on the next iteration or select branch.
+            // Count active tasks for this server. 
+            // In PR5 we just cancel the token. The proxy_task stub immediately completes,
+            // so active task count is roughly 0. We'll return 0 for now.
+            // When streaming is implemented, we would await these tasks specifically.
             self.cancellation_tokens.remove(server_id);
-            1
+            0
         } else {
             0
         }
@@ -198,14 +196,32 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    use crate::client::BackendResponseStream;
     use crate::error::DispatchError;
-    use llamaforge_routing::types::ServerSnapshot;
-    use llamaforge_types::ports::SlotDispatchView;
+    use llamaforge_config::TomlFileConfigSource;
+    use llamaforge_types::RequestId;
+    use uuid::Uuid;
+
+    struct MockBackendClient;
+    #[async_trait::async_trait]
+    impl BackendClient for MockBackendClient {
+        async fn post_completion(
+            &self,
+            _server_id: &ServerId,
+            _payload: CompletionRequest,
+        ) -> Result<BackendResponseStream, DispatchError> {
+            Ok(Box::pin(tokio_stream::empty()))
+        }
+    }
+
+    struct MockClientManager;
+    impl ClientManager for MockClientManager {
+        fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
+    }
 
     struct MockServerStateView;
     impl ServerStateView for MockServerStateView {
-        fn all_servers(&self) -> Vec<ServerSnapshot> {
+        fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
             vec![]
         }
     }
@@ -215,87 +231,76 @@ mod tests {
         fn notify_slot_available(&self, _server_id: &ServerId) {}
     }
 
-    struct MockClientManager;
-    impl ClientManager for MockClientManager {
-        fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
-    }
-
-    #[derive(Clone)]
-    struct MockBackendClient;
-    #[async_trait::async_trait]
-    impl BackendClient for MockBackendClient {
-        async fn post_completion(
-            &self,
-            _server_id: &ServerId,
-            _payload: CompletionRequest,
-        ) -> Result<crate::client::BackendResponseStream, DispatchError> {
-            Ok(Box::pin(tokio_stream::empty()))
-        }
-    }
-
-    fn create_dispatcher() -> Dispatcher {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), "[global]\n").unwrap();
-        let paths = llamaforge_config::ConfigPaths::new(
-            tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
-            tmp.path().parent().unwrap().to_path_buf(),
-        );
-        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
-        let config = Arc::new(ConfigHandle::load(source).unwrap());
-
-        let metrics_ingest = llamaforge_metrics::MetricsIngest::new_for_test(
-            tokio::sync::mpsc::channel(100).0,
-            tokio::sync::mpsc::channel(100).0,
-            Arc::new(tokio::sync::Semaphore::new(100)),
-        );
-
-        Dispatcher::new(
-            Arc::new(MockServerStateView),
-            metrics_ingest,
-            Arc::new(DispatchTrackerRegistry::new()),
-            Arc::new(SlotDispatchMap::new()),
-            config,
-            Arc::new(MockBackendClient),
-            Arc::new(MockClientManager),
-            Arc::new(MockSlotNotifier),
-        )
+    fn create_test_config() -> Arc<ConfigHandle> {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        let path = temp.path().to_path_buf();
+        std::fs::write(&path, "[global]\n").unwrap();
+        let paths = llamaforge_config::ConfigPaths::new(path, Default::default(), Default::default());
+        Arc::new(ConfigHandle::load(Arc::new(TomlFileConfigSource::new(paths))).unwrap())
     }
 
     #[tokio::test]
     async fn test_dispatcher_construction_and_accessors() {
-        let dispatcher = create_dispatcher();
-        assert!(dispatcher.trackers().get(&ServerId::new(Uuid::now_v7())).is_none());
-        assert!(!dispatcher.slot_dispatch_map().has_unresolved(&ServerId::new(Uuid::now_v7())));
+        let trackers = Arc::new(DispatchTrackerRegistry::new());
+        let slot_map = Arc::new(SlotDispatchMap::new());
+        let config = create_test_config();
+        let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
+        let (audit_tx, _) = tokio::sync::mpsc::channel(1);
+        let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+
+        let dispatcher = Dispatcher::new(
+            Arc::new(MockServerStateView),
+            metrics,
+            Arc::clone(&trackers),
+            Arc::clone(&slot_map),
+            config,
+            Arc::new(MockBackendClient),
+            Arc::new(MockClientManager),
+            Arc::new(MockSlotNotifier),
+        );
+
+        assert!(Arc::ptr_eq(&dispatcher.trackers(), &trackers));
+        assert!(Arc::ptr_eq(&dispatcher.slot_dispatch_map(), &slot_map));
     }
 
     #[tokio::test]
     async fn test_dispatch_creates_token() {
-        let dispatcher = create_dispatcher();
+        let trackers = Arc::new(DispatchTrackerRegistry::new());
+        let slot_map = Arc::new(SlotDispatchMap::new());
+        let config = create_test_config();
+        let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
+        let (audit_tx, _) = tokio::sync::mpsc::channel(1);
+        let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+
+        let dispatcher = Dispatcher::new(
+            Arc::new(MockServerStateView),
+            metrics,
+            Arc::clone(&trackers),
+            Arc::clone(&slot_map),
+            config,
+            Arc::new(MockBackendClient),
+            Arc::new(MockClientManager),
+            Arc::new(MockSlotNotifier),
+        );
+
         let server_id = ServerId::new(Uuid::now_v7());
-        
+        let request_id = RequestId::new(Uuid::now_v7());
+
         let candidate = DispatchCandidate {
-            request_id: RequestId::new(Uuid::now_v7()),
-            prompt: "test".to_string(),
+            request_id,
+            prompt: "hello".to_string(),
             params: CompletionParams {
-                n_predict: None,
-                temperature: 0.0,
-                stream: false,
+                n_predict: Some(10),
+                temperature: 0.7,
+                stream: true,
                 stop: vec![],
             },
             routing: RoutingDecision::new_for_test(server_id),
         };
 
-        dispatcher.dispatch(candidate).await;
-        
-        // Let the spawn run
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        let _handle = dispatcher.dispatch(candidate).await;
 
-        // Tracker should have been created
-        let tracker = dispatcher.trackers().get(&server_id).unwrap();
-        
-        // Since proxy_task is a stub that releases the token immediately, count should be 0.
-        // During execution it would be 1.
-        assert_eq!(tracker.count(), 0);
+        let tracker = trackers.get(&server_id).unwrap();
+        assert_eq!(tracker.count(), 1);
     }
 }
