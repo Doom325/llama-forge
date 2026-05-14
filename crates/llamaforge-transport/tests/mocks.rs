@@ -1,0 +1,85 @@
+use std::pin::Pin;
+use futures_core::Stream;
+
+use llamaforge_types::{
+    traits::{
+        AdmissionError, IncomingRequest, MetricsExporter, QueueError, QueueSnapshot,
+        QueueSubmitter, QueueTicket, RouteValidator, ServerControl, ServerError, ServerSummary,
+    },
+    ChatCompletionChunk, RequestId, ServerId, StreamError,
+};
+
+pub struct MockEngine {
+    pub chunks: Vec<Result<ChatCompletionChunk, StreamError>>,
+    pub sleep_ms: u64,
+}
+
+#[async_trait::async_trait]
+impl llamaforge_transport::InferenceEngine for MockEngine {
+    async fn chat_completion(
+        &self,
+        _req: llamaforge_types::ChatCompletionRequest,
+    ) -> Result<
+        Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
+        llamaforge_types::traits::DispatchError,
+    > {
+        let chunks = self.chunks.clone();
+        let sleep_time = self.sleep_ms;
+
+        let stream = futures_util::stream::unfold(
+            (chunks.into_iter(), sleep_time),
+            |(mut iter, delay)| async move {
+                if delay > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                }
+                iter.next().map(|item| (item, (iter, delay)))
+            },
+        );
+
+        Ok(Box::pin(stream))
+    }
+}
+
+pub struct MockRouteValidator;
+impl RouteValidator for MockRouteValidator {
+    fn validate_routable(
+        &self,
+        _req: &IncomingRequest,
+    ) -> Result<(), AdmissionError> {
+        Ok(())
+    }
+}
+
+pub struct MockMetricsExporter;
+impl MetricsExporter for MockMetricsExporter {
+    fn gather_text(&self) -> String {
+        "".into()
+    }
+}
+
+pub struct MockServerControl;
+#[async_trait::async_trait]
+impl ServerControl for MockServerControl {
+    async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
+        Ok(vec![])
+    }
+    async fn start_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+        Ok(())
+    }
+    async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+        Ok(())
+    }
+}
+
+pub struct MockQueueSubmitter;
+impl QueueSubmitter for MockQueueSubmitter {
+    fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
+        Ok(QueueTicket {})
+    }
+    fn cancel(&self, _id: &RequestId) -> Result<(), QueueError> {
+        Ok(())
+    }
+    fn status(&self) -> Result<QueueSnapshot, QueueError> {
+        Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 1.0 })
+    }
+}
