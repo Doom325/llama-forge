@@ -245,6 +245,7 @@ fn arb_app_config() -> impl Strategy<Value = AppConfig> {
             web_ui,
             servers,
             priority_rules,
+            cors: Default::default(),
             routing: Default::default(),
         })
 }

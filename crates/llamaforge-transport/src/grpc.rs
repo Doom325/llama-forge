@@ -354,7 +354,10 @@ mod tests {
         assert_eq!(Status::from(ApiError::InvalidBody("err".into())).code(), Code::InvalidArgument);
         assert_eq!(Status::from(ApiError::AuthFailure).code(), Code::Unauthenticated);
         assert_eq!(Status::from(ApiError::ModelNotFound).code(), Code::NotFound);
-        assert_eq!(Status::from(ApiError::QueueFull).code(), Code::ResourceExhausted);
+        assert_eq!(
+            Status::from(ApiError::QueueFull { retry_after_secs: 30 }).code(),
+            Code::ResourceExhausted
+        );
         assert_eq!(Status::from(ApiError::BackendError).code(), Code::Internal);
         assert_eq!(Status::from(ApiError::Timeout).code(), Code::DeadlineExceeded);
         assert_eq!(Status::from(ApiError::Internal("err".into())).code(), Code::Internal);
@@ -478,7 +481,10 @@ mod tests {
             &self,
         ) -> Result<llamaforge_types::traits::QueueSnapshot, llamaforge_types::traits::QueueError>
         {
-            Ok(llamaforge_types::traits::QueueSnapshot {})
+            Ok(llamaforge_types::traits::QueueSnapshot {
+                depth: 0,
+                estimated_throughput_req_sec: 1.0,
+            })
         }
     }
 

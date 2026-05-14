@@ -25,6 +25,8 @@ pub enum ConfigChange {
     PriorityRulesChanged,
     /// Routing configuration changed.
     RoutingConfigChanged,
+    /// CORS configuration changed.
+    CorsConfigChanged,
     /// A new server was added.
     ServerAdded { id: ServerId },
     /// A server was removed.
@@ -142,6 +144,10 @@ pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff {
 
     if old.routing != new.routing {
         changes.push(ConfigChange::RoutingConfigChanged);
+    }
+
+    if old.cors != new.cors {
+        changes.push(ConfigChange::CorsConfigChanged);
     }
 
     // Servers added or changed
