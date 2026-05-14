@@ -160,10 +160,7 @@ impl StoreMaintenance for InstrumentedMetricsStore {
         res
     }
 
-    async fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> Result<u64, StoreError> {
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
         let span = info_span!("metrics.prune_events", cutoff = %cutoff);
         let start = Instant::now();
         let res = self.inner.prune_events_older_than(cutoff).instrument(span).await;
@@ -175,9 +172,7 @@ impl StoreMaintenance for InstrumentedMetricsStore {
         res
     }
 
-    async fn estimated_size_bytes(
-        &self,
-    ) -> Result<u64, StoreError> {
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         let span = info_span!("metrics.estimated_size_bytes");
         self.inner.estimated_size_bytes().instrument(span).await
     }

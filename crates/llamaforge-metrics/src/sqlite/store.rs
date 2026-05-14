@@ -509,10 +509,7 @@ impl StoreMaintenance for SqliteMetricsStore {
         })?
     }
 
-    async fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> Result<u64, StoreError> {
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let cmd = WriterCommand::Prune { cutoff, reply: reply_tx, span: Span::current() };
 
@@ -526,10 +523,8 @@ impl StoreMaintenance for SqliteMetricsStore {
             message: "Writer thread dropped the request".into(),
         })?
     }
-    
-    async fn estimated_size_bytes(
-        &self,
-    ) -> Result<u64, StoreError> {
+
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         self.interact_with_timeout(move |conn| {
             let page_count: i64 = conn
                 .query_row("PRAGMA page_count", [], |r| r.get(0))
@@ -539,7 +534,8 @@ impl StoreMaintenance for SqliteMetricsStore {
                 .map_err(|e| StoreError::Internal { source: Box::new(e) })?;
 
             Ok((page_count * page_size) as u64)
-        }).await
+        })
+        .await
     }
 
     async fn wal_checkpoint(&self, mode: CheckpointMode) -> Result<CheckpointResult, StoreError> {

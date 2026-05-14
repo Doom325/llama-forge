@@ -114,20 +114,16 @@ pub(crate) async fn query_request_metrics<CW, RMS, SM>(
 where
     RMS: RequestMetricsStore + Send + Sync + 'static,
 {
-    let filter = llamaforge_metrics::MetricsFilter::default(); // TODO: support filters from query
-    let rms = state.request_metrics_store.clone();
-    let res = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(async {
-            rms.query_request_metrics(&filter, params.limit, params.offset).await
-        })
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let metrics = res.map_err(|e| ApiError::Internal(e.to_string()))?;
+    // Local invariant: filter query parameters will be supported in v1.1
+    let filter = llamaforge_metrics::MetricsFilter::default();
+    let metrics = state
+        .request_metrics_store
+        .query_request_metrics(&filter, params.limit, params.offset)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(metrics).into_response())
 }
 
-// TODO(chore): Make RequestMetricsStore + StoreMaintenance Send-projectable to remove spawn_blocking
 pub(crate) async fn query_aggregated<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
 ) -> Result<Response, ApiError>
@@ -137,14 +133,11 @@ where
     let filter = llamaforge_metrics::MetricsFilter::default();
     // Local invariant: group_by query parameters will be supported in v1.1
     let group_by = vec![];
-    let rms = state.request_metrics_store.clone();
-    let res = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current()
-            .block_on(async { rms.aggregate_request_metrics(&filter, &group_by).await })
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    let metrics = res.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let metrics = state
+        .request_metrics_store
+        .aggregate_request_metrics(&filter, &group_by)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(metrics).into_response())
 }
 

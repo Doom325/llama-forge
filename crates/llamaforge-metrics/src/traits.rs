@@ -66,15 +66,10 @@ pub trait StoreMaintenance: Send + Sync + private::Sealed {
     /// Prune old events and request metrics.
     ///
     /// Returns the number of rows deleted.
-    async fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> Result<u64, StoreError>;
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError>;
 
     /// Return the estimated size of the database in bytes.
-    async fn estimated_size_bytes(
-        &self,
-    ) -> Result<u64, StoreError>;
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError>;
 
     /// Perform a WAL checkpoint.
     async fn wal_checkpoint(

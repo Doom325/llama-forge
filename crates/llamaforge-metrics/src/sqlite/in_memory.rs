@@ -114,9 +114,7 @@ impl StoreMaintenance for InMemoryStore {
         Ok(deleted)
     }
 
-    async fn estimated_size_bytes(
-        &self,
-    ) -> Result<u64, StoreError> {
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         let total_items = self.events.lock().len()
             + self.metrics.lock().len()
             + self.processes.lock().len()
