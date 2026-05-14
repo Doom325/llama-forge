@@ -133,15 +133,15 @@ Implement the protocol translation layer: OpenAI and Anthropic request DTOs, par
 
 ### PR2 Acceptance Criteria
 
-- [ ] `parse_openai_request` handles `null` as `None` on all Option fields
-- [ ] logit_bias keys parse as `i32` (negative values preserved)
-- [ ] `function_call` rejected with 400 and migration hint
-- [ ] `AnthropicState::transition()` returns `Result` — no panics, no `unreachable!()`
-- [ ] `format_anthropic_event()` propagates transition errors (not swallowed)
-- [ ] Preamble events emitted synchronously before any token (G-11 invariant)
-- [ ] No `serde::Deserialize` on `ChatCompletionRequest` or `ChatCompletionChunk`
-- [ ] All 9 unit test suites pass
-- [ ] No `unwrap()` in production code
+- [x] `parse_openai_request` handles `null` as `None` on all Option fields
+- [x] logit_bias keys parse as `i32` (negative values preserved)
+- [x] `function_call` rejected with 400 and migration hint
+- [x] `AnthropicState::transition()` returns `Result` — no panics, no `unreachable!()`
+- [x] `format_anthropic_event()` propagates transition errors (not swallowed)
+- [x] Preamble events emitted synchronously before any token (G-11 invariant)
+- [x] No `serde::Deserialize` on `ChatCompletionRequest` or `ChatCompletionChunk`
+- [x] All 9 unit test suites pass
+- [x] No `unwrap()` in production code
 
 ### PR2 Creation Steps
 

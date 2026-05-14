@@ -3,8 +3,8 @@ use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub mod traits;
 pub mod ports;
+pub mod traits;
 
 /// Error returned when an ID is invalid.
 #[derive(Debug, thiserror::Error)]
@@ -322,13 +322,44 @@ pub struct ClientRefreshEvent {
 
 // --- Added for Transport Layer ---
 
+/// Domain type representing a message role.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+/// Domain type representing a single chat message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+}
+
 /// Domain type representing an incoming chat completion request.
 #[derive(Debug, Clone)]
-pub struct ChatCompletionRequest {}
+pub struct ChatCompletionRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub stream: bool,
+    pub logit_bias: Option<std::collections::HashMap<i32, f64>>,
+    pub tools: Option<serde_json::Value>,
+    pub tool_choice: Option<serde_json::Value>,
+}
 
 /// Domain type representing a chunk of a chat completion response.
-#[derive(Debug, Clone)]
-pub struct ChatCompletionChunk {}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatCompletionChunk {
+    /// A queue update without generating tokens.
+    QueueUpdate { position: u32 },
+    /// A generated token.
+    Token(String),
+    /// The final chunk with a finish reason.
+    Stop(String),
+}
 
 /// Error type for stream failures.
 #[derive(Debug, thiserror::Error)]
