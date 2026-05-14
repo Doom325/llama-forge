@@ -90,7 +90,7 @@ fn arb_global_config() -> impl Strategy<Value = GlobalConfig> {
 
 fn arb_grpc_config() -> impl Strategy<Value = GrpcConfig> {
     (proptest::option::of(arb_path_buf()), proptest::option::of(arb_path_buf()))
-        .prop_map(|(tls_cert, tls_key)| GrpcConfig { tls_cert, tls_key })
+        .prop_map(|(tls_cert, tls_key)| GrpcConfig { tls_cert, tls_key, ..Default::default() })
 }
 
 fn arb_prometheus_config() -> impl Strategy<Value = PrometheusConfig> {
