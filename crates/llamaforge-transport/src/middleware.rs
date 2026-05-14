@@ -1,8 +1,4 @@
-use axum::{
-    extract::Request,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, middleware::Next, response::Response};
 use llamaforge_config::ConfigReader;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -57,16 +53,14 @@ pub(crate) async fn auth_middleware(
     next: Next,
 ) -> Result<Response, crate::error::ApiError> {
     let config = state.snapshot();
-    
+
     if let Some(expected_key) = &config.global.api_key {
         if expected_key.is_empty() {
             return Ok(next.run(req).await);
         }
 
-        let auth_header = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|val| val.to_str().ok());
+        let auth_header =
+            req.headers().get(axum::http::header::AUTHORIZATION).and_then(|val| val.to_str().ok());
 
         let is_valid = match auth_header {
             Some(header) if header.starts_with("Bearer ") => {
@@ -85,17 +79,14 @@ pub(crate) async fn auth_middleware(
     Ok(next.run(req).await)
 }
 
-pub(crate) async fn request_id_middleware(
-    mut req: Request,
-    next: Next,
-) -> Response {
+pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Response {
     let request_id = Uuid::now_v7();
     let request_id_str = request_id.to_string();
 
     req.extensions_mut().insert(llamaforge_types::RequestId::new(request_id));
 
     let mut response = next.run(req).await;
-    
+
     if let Ok(header_val) = axum::http::HeaderValue::from_str(&request_id_str) {
         response.headers_mut().insert("x-request-id", header_val.clone());
         response.headers_mut().insert("x-llamaforge-request-id", header_val);
@@ -104,10 +95,7 @@ pub(crate) async fn request_id_middleware(
     response
 }
 
-pub(crate) async fn metrics_middleware(
-    req: Request,
-    next: Next,
-) -> Response {
+pub(crate) async fn metrics_middleware(req: Request, next: Next) -> Response {
     let method = req.method().to_string();
     let path = if let Some(matched_path) = req.extensions().get::<axum::extract::MatchedPath>() {
         matched_path.as_str().to_string()
@@ -117,9 +105,9 @@ pub(crate) async fn metrics_middleware(
 
     metrics::gauge!("llamaforge_active_connections").increment(1.0);
     let start = std::time::Instant::now();
-    
+
     let response = next.run(req).await;
-    
+
     let duration = start.elapsed().as_secs_f64();
     let status = response.status().as_u16().to_string();
 
@@ -133,23 +121,19 @@ pub(crate) async fn metrics_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use llamaforge_config::{
-        AppConfig, GlobalConfig, ConfigHandle,
-        source::memory::InMemoryConfigSource,
+        source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
     };
     use std::sync::Arc;
     use tower::ServiceExt;
 
     fn setup_mock_config_reader(api_key: Option<String>) -> Arc<ConfigHandle> {
-        let global = GlobalConfig {
-            api_key,
-            ..Default::default()
-        };
-        let config = AppConfig {
-            global,
-            ..Default::default()
-        };
+        let global = GlobalConfig { api_key, ..Default::default() };
+        let config = AppConfig { global, ..Default::default() };
         let source = Arc::new(InMemoryConfigSource::new(config));
         Arc::new(ConfigHandle::load(source).unwrap())
     }
@@ -188,29 +172,39 @@ mod tests {
     async fn test_large_body_concurrency_limit() {
         let limit = LargeBodyConcurrencyLimit::new(1, 1); // 1MB threshold
         let next = axum::middleware::from_fn_with_state(limit.clone(), large_body_limit_middleware);
-        
+
         let handler = |_req: Request<Body>| async move {
             // keep the permit alive long enough
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             "ok"
         };
-        
+
         let app = axum::Router::new().route("/", axum::routing::post(handler)).layer(next);
-        
-        let req1 = Request::builder().method("POST").uri("/").header("content-length", "2000000").body(Body::empty()).unwrap();
-        let req2 = Request::builder().method("POST").uri("/").header("content-length", "2000000").body(Body::empty()).unwrap();
-        
+
+        let req1 = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-length", "2000000")
+            .body(Body::empty())
+            .unwrap();
+        let req2 = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-length", "2000000")
+            .body(Body::empty())
+            .unwrap();
+
         // Spawn first request which will acquire the permit and hold it
         let app_clone1 = app.clone();
         let task1 = tokio::spawn(async move { app_clone1.oneshot(req1).await.unwrap() });
-        
+
         // Let it start
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        
+
         // Second request should be rejected because max_concurrent is 1
         let res2 = app.oneshot(req2).await.unwrap();
         assert_eq!(res2.status(), StatusCode::TOO_MANY_REQUESTS); // QueueFull mapped to 429
-        
+
         task1.await.unwrap();
     }
 }

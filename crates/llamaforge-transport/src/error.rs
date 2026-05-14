@@ -36,12 +36,24 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match &self {
             ApiError::InvalidBody(msg) => (StatusCode::BAD_REQUEST, "invalid_body", msg.clone()),
-            ApiError::AuthFailure => (StatusCode::UNAUTHORIZED, "auth_failure", "Authentication failed".to_string()),
-            ApiError::ModelNotFound => (StatusCode::NOT_FOUND, "model_not_found", "Model not found".to_string()),
-            ApiError::QueueFull => (StatusCode::TOO_MANY_REQUESTS, "queue_full", "Queue is full".to_string()),
-            ApiError::BackendError => (StatusCode::BAD_GATEWAY, "backend_error", "Backend error".to_string()),
-            ApiError::Timeout => (StatusCode::GATEWAY_TIMEOUT, "timeout", "Request timed out".to_string()),
-            ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.clone()),
+            ApiError::AuthFailure => {
+                (StatusCode::UNAUTHORIZED, "auth_failure", "Authentication failed".to_string())
+            }
+            ApiError::ModelNotFound => {
+                (StatusCode::NOT_FOUND, "model_not_found", "Model not found".to_string())
+            }
+            ApiError::QueueFull => {
+                (StatusCode::TOO_MANY_REQUESTS, "queue_full", "Queue is full".to_string())
+            }
+            ApiError::BackendError => {
+                (StatusCode::BAD_GATEWAY, "backend_error", "Backend error".to_string())
+            }
+            ApiError::Timeout => {
+                (StatusCode::GATEWAY_TIMEOUT, "timeout", "Request timed out".to_string())
+            }
+            ApiError::Internal(msg) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.clone())
+            }
         };
 
         let body = Json(json!({
