@@ -22,6 +22,16 @@ Stack: async-first on **Tokio**, gRPC via **tonic**, HTTP via **axum**, telemetr
 
 ---
 
+## Development model
+
+As of 2026-05-14, this is a **private, solo project** maintained by Sumanth Gottipati alongside AI coding/review agents (Claude, Gemini) — no other human contributors. Treat repo-wide config and convention changes (`.cargo/config.toml`, `.gitignore`, dev-only build flags, lint policy) as Sumanth's personal preferences, not team policy decisions that need consensus framing.
+
+This does **not** relax review standards for runtime behavior, safety, design conformance, or anything the rubric (R1–R32) covers — those still get the full review. The relaxation is purely about hesitation on local/dev-environment changes.
+
+If this repository is ever made public or gains other contributors, this section should be removed and the assumption inverted.
+
+---
+
 ## Workspace layout
 
 ```
