@@ -1208,6 +1208,7 @@ name = "llamaforge-adapters"
 version = "0.1.0-draft"
 dependencies = [
  "async-trait",
+ "chrono",
  "futures-core",
  "llamaforge-config",
  "llamaforge-dispatch",
@@ -1217,9 +1218,11 @@ dependencies = [
  "llamaforge-server-manager",
  "llamaforge-transport",
  "llamaforge-types",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
