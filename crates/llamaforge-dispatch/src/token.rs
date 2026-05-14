@@ -2,16 +2,16 @@
 //!
 //! See design doc Section 2.2
 
-use std::sync::Arc;
-use llamaforge_types::{RequestId, ServerId};
-use llamaforge_types::ports::SlotNotifier;
 use crate::tracker::DispatchTracker;
+use llamaforge_types::ports::SlotNotifier;
+use llamaforge_types::{RequestId, ServerId};
+use std::sync::Arc;
 
 /// RAII guard representing an actively dispatched request to a server.
 ///
 /// Increments the server's tracking count on creation, and decrements it
 /// on explicit release or drop.
-/// 
+///
 /// See design doc Section 2.2.
 #[must_use = "DispatchToken will release the slot immediately if dropped"]
 pub struct DispatchToken {
@@ -31,13 +31,7 @@ impl DispatchToken {
         slot_notifier: Arc<dyn SlotNotifier>,
     ) -> Self {
         tracker.insert(request_id);
-        Self {
-            tracker,
-            request_id,
-            server_id,
-            slot_notifier,
-            released: false,
-        }
+        Self { tracker, request_id, server_id, slot_notifier, released: false }
     }
 
     /// Explicitly release the slot.
@@ -116,7 +110,7 @@ mod tests {
         drop(token);
         assert_eq!(tracker.count(), 0); // Still 0
     }
-    
+
     #[test]
     fn test_server_id_accessor() {
         let tracker = Arc::new(DispatchTracker::new());
