@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_queue::admission::AdmissionController;
 use llamaforge_queue::pipeline::{run_scheduler, RequestPipeline};
@@ -6,11 +5,7 @@ use llamaforge_queue::queue::DispatchQueue;
 use llamaforge_queue::starvation::start_background_tasks;
 use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
 use llamaforge_routing::{CapacityChecker, RoutingDecision, ServerSelector};
-use llamaforge_types::traits::SlotDispatcher;
-use llamaforge_types::{
-    traits::DispatchError, traits::DispatchToken, traits::ResponseStream, ModelAlias, ModelTarget,
-    RequestId, RequestorClass, RequestorId, ServerId,
-};
+use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,22 +26,6 @@ impl ServerSelector for MockServerSelector {
         _: &dyn llamaforge_routing::RequestView,
     ) -> Result<RoutingDecision, llamaforge_routing::RoutingError> {
         Ok(RoutingDecision::new_for_test(ServerId::new(uuid::Uuid::now_v7())))
-    }
-}
-
-struct MockDispatcher;
-#[async_trait]
-impl SlotDispatcher for MockDispatcher {
-    async fn dispatch(
-        &self,
-        _: &ServerId,
-        _: Arc<dyn std::any::Any + Send + Sync>,
-    ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        struct DummyToken;
-        impl DispatchToken for DummyToken {}
-        Ok((Box::pin(stream), Box::new(DummyToken)))
     }
 }
 
@@ -115,7 +94,6 @@ async fn test_vc3_1_request_lifecycle_tracking() {
         admission.clone(),
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));
@@ -127,13 +105,13 @@ async fn test_vc3_1_request_lifecycle_tracking() {
     let res = tokio::time::timeout(Duration::from_secs(2), rx).await.unwrap().unwrap();
     assert!(matches!(res, DispatchResult::Dispatched(..)));
 
-    // Requestor usage should be 0 queued, 1 in flight (because we never dropped the CompletionGuard)
+    // Requestor usage should be 0 queued, 1 in flight (because we haven't dropped it)
     let usage = pipeline.requestor_usage(&requestor);
     assert_eq!(usage.0, 0);
     assert_eq!(usage.1, 1);
 
-    if let DispatchResult::Dispatched(_, token) = res {
-        drop(token); // Triggers CompletionGuard
+    if let DispatchResult::Dispatched(..) = res {
+        pipeline.record_completion(&requestor);
     }
 
     // Usage should now be 0, 0
@@ -171,7 +149,6 @@ async fn test_vc3_2_admission_to_dispatch_handoff() {
         admission.clone(),
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));
@@ -359,7 +336,6 @@ async fn test_vc3_9_graceful_shutdown_drain() {
         admission.clone(),
         Arc::new(NoCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));
