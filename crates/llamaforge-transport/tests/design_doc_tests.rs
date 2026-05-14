@@ -1,14 +1,19 @@
 #[path = "mocks.rs"]
 mod mocks;
 
-use llamaforge_transport::{start_servers, TransportDeps};
-use llamaforge_config::{source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig};
+use llamaforge_config::{
+    source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
+};
 use llamaforge_metrics::InMemoryStore;
-use std::sync::Arc;
+use llamaforge_transport::{start_servers, TransportDeps};
 use reqwest::{Client, StatusCode};
+use std::sync::Arc;
 
 use llamaforge_types::{
-    traits::{AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueTicket, RouteValidator, QueueSubmitter},
+    traits::{
+        AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
+        RouteValidator,
+    },
     ChatCompletionChunk,
 };
 
@@ -23,10 +28,10 @@ async fn setup_test_server(
     config.global.http_port = http_port;
     config.global.grpc_port = http_port + 1000;
     config_modifier(&mut config);
-    
+
     let source = Arc::new(InMemoryConfigSource::new(config));
     let handle = Arc::new(ConfigHandle::load(source).unwrap());
-    
+
     let deps = TransportDeps {
         config_reader: handle.clone(),
         route_validator,
@@ -44,7 +49,11 @@ async fn setup_test_server(
     handles
 }
 
-fn default_deps() -> (Arc<dyn RouteValidator>, Arc<dyn QueueSubmitter>, Arc<dyn llamaforge_transport::InferenceEngine>) {
+fn default_deps() -> (
+    Arc<dyn RouteValidator>,
+    Arc<dyn QueueSubmitter>,
+    Arc<dyn llamaforge_transport::InferenceEngine>,
+) {
     (
         Arc::new(mocks::MockRouteValidator),
         Arc::new(mocks::MockQueueSubmitter),
@@ -56,9 +65,10 @@ fn default_deps() -> (Arc<dyn RouteValidator>, Arc<dyn QueueSubmitter>, Arc<dyn 
 async fn test_openai_null_max_tokens_accepted() {
     let (rv, qs, ie) = default_deps();
     let _handles = setup_test_server(50100, |_| {}, rv, qs, ie).await;
-    
+
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50100/v1/chat/completions")
+    let res = client
+        .post("http://127.0.0.1:50100/v1/chat/completions")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -79,9 +89,10 @@ async fn test_openai_null_max_tokens_accepted() {
 async fn test_openai_logit_bias_negative_keys() {
     let (rv, qs, ie) = default_deps();
     let _handles = setup_test_server(50101, |_| {}, rv, qs, ie).await;
-    
+
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50101/v1/chat/completions")
+    let res = client
+        .post("http://127.0.0.1:50101/v1/chat/completions")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -112,9 +123,10 @@ async fn test_anthropic_state_machine_ordering() {
     let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
     let (rv, qs, _) = default_deps();
     let _handles = setup_test_server(50102, |_| {}, rv, qs, ie).await;
-    
+
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50102/v1/messages")
+    let res = client
+        .post("http://127.0.0.1:50102/v1/messages")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -132,16 +144,18 @@ async fn test_anthropic_state_machine_ordering() {
     assert_eq!(res.status(), StatusCode::OK);
 
     let body_str = res.text().await.unwrap();
-    
+
     let message_start_idx = body_str.find("message_start").expect("Missing message_start");
-    let content_block_start_idx = body_str.find("content_block_start").expect("Missing content_block_start");
+    let content_block_start_idx =
+        body_str.find("content_block_start").expect("Missing content_block_start");
     let content_block_delta_idx1 = body_str.find("Tok1").expect("Missing Tok1");
     let content_block_delta_idx2 = body_str.find("Tok2").expect("Missing Tok2");
     let content_block_delta_idx3 = body_str.find("Tok3").expect("Missing Tok3");
-    let content_block_stop_idx = body_str.find("content_block_stop").expect("Missing content_block_stop");
+    let content_block_stop_idx =
+        body_str.find("content_block_stop").expect("Missing content_block_stop");
     let message_delta_idx = body_str.find("message_delta").expect("Missing message_delta");
     let message_stop_idx = body_str.find("message_stop").expect("Missing message_stop");
-    
+
     assert!(message_start_idx < content_block_start_idx);
     assert!(content_block_start_idx < content_block_delta_idx1);
     assert!(content_block_delta_idx1 < content_block_delta_idx2);
@@ -159,7 +173,8 @@ async fn test_anthropic_no_token_before_preamble() {
     let _handles = setup_test_server(50103, |_| {}, rv, qs, ie).await;
 
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50103/v1/messages")
+    let res = client
+        .post("http://127.0.0.1:50103/v1/messages")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -185,8 +200,12 @@ impl RouteValidator for MockRouteValidatorRejects {
 
 struct MockQueueSubmitterFull;
 impl QueueSubmitter for MockQueueSubmitterFull {
-    fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> { Err(AdmissionError::QueueFull) }
-    fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> { Ok(()) }
+    fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
+        Err(AdmissionError::QueueFull)
+    }
+    fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+        Ok(())
+    }
     fn status(&self) -> Result<QueueSnapshot, QueueError> {
         Ok(QueueSnapshot { depth: 100, estimated_throughput_req_sec: 10.0 })
     }
@@ -197,10 +216,12 @@ async fn test_queue_full_returns_429_with_retry_after() {
     let rv = Arc::new(MockRouteValidatorRejects);
     let qs = Arc::new(MockQueueSubmitterFull);
     let (_, _, ie) = default_deps();
-    let _handles = setup_test_server(50104, |c| c.global.queue_default_timeout_secs = 1, rv, qs, ie).await;
+    let _handles =
+        setup_test_server(50104, |c| c.global.queue_default_timeout_secs = 1, rv, qs, ie).await;
 
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50104/v1/chat/completions")
+    let res = client
+        .post("http://127.0.0.1:50104/v1/chat/completions")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -211,7 +232,7 @@ async fn test_queue_full_returns_429_with_retry_after() {
         .unwrap();
 
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
-    
+
     let retry_after = res.headers().get("retry-after").unwrap().to_str().unwrap();
     assert_eq!(retry_after, "10");
 }
@@ -219,10 +240,12 @@ async fn test_queue_full_returns_429_with_retry_after() {
 #[tokio::test]
 async fn test_auth_required_when_configured() {
     let (rv, qs, ie) = default_deps();
-    let _handles = setup_test_server(50105, |c| c.global.api_key = Some("secret123".into()), rv, qs, ie).await;
+    let _handles =
+        setup_test_server(50105, |c| c.global.api_key = Some("secret123".into()), rv, qs, ie).await;
 
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50105/v1/chat/completions")
+    let res = client
+        .post("http://127.0.0.1:50105/v1/chat/completions")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -241,10 +264,7 @@ async fn test_prometheus_endpoint_always_200() {
     let _handles = setup_test_server(50106, |_| {}, rv, qs, ie).await;
 
     let client = Client::new();
-    let res = client.get("http://127.0.0.1:50106/metrics")
-        .send()
-        .await
-        .unwrap();
+    let res = client.get("http://127.0.0.1:50106/metrics").send().await.unwrap();
 
     if res.status() != StatusCode::OK {
         panic!("Status: {}, Body: {}", res.status(), res.text().await.unwrap());
@@ -257,12 +277,14 @@ async fn test_streaming_no_timeout_layer() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
     let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 2000 });
     let (rv, qs, _) = default_deps();
-    
+
     // config timeout is 1s, but sleep is 2s. The streaming request should complete
-    let _handles = setup_test_server(50107, |c| c.global.queue_default_timeout_secs = 1, rv, qs, ie).await;
+    let _handles =
+        setup_test_server(50107, |c| c.global.queue_default_timeout_secs = 1, rv, qs, ie).await;
 
     let client = Client::new();
-    let res = client.post("http://127.0.0.1:50107/v1/chat/completions")
+    let res = client
+        .post("http://127.0.0.1:50107/v1/chat/completions")
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
