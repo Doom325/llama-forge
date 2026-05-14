@@ -378,13 +378,39 @@ fn default_state_dir() -> PathBuf {
 
 /// gRPC listener configuration.
 /// See design doc Section 2.6.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GrpcConfig {
+    #[serde(default = "default_grpc_max_message_size_mb")]
+    pub max_message_size_mb: u32,
+    #[serde(default = "default_grpc_keepalive_interval_secs")]
+    pub keepalive_interval_secs: u32,
+    #[serde(default = "default_grpc_keepalive_timeout_secs")]
+    pub keepalive_timeout_secs: u32,
+    #[serde(default = "default_grpc_max_concurrent_streams")]
+    pub max_concurrent_streams: u32,
     #[serde(default)]
     pub tls_cert: Option<PathBuf>,
     #[serde(default)]
     pub tls_key: Option<PathBuf>,
 }
+
+impl Default for GrpcConfig {
+    fn default() -> Self {
+        Self {
+            max_message_size_mb: default_grpc_max_message_size_mb(),
+            keepalive_interval_secs: default_grpc_keepalive_interval_secs(),
+            keepalive_timeout_secs: default_grpc_keepalive_timeout_secs(),
+            max_concurrent_streams: default_grpc_max_concurrent_streams(),
+            tls_cert: None,
+            tls_key: None,
+        }
+    }
+}
+
+fn default_grpc_max_message_size_mb() -> u32 { 16 }
+fn default_grpc_keepalive_interval_secs() -> u32 { 30 }
+fn default_grpc_keepalive_timeout_secs() -> u32 { 10 }
+fn default_grpc_max_concurrent_streams() -> u32 { 1000 }
 
 /// Prometheus metrics configuration.
 /// See design doc Section 2.6.
@@ -691,6 +717,7 @@ mod tests {
             grpc: GrpcConfig {
                 tls_cert: Some(PathBuf::from("cert.pem")),
                 tls_key: Some(PathBuf::from("key.pem")),
+                ..Default::default()
             },
             prometheus: PrometheusConfig { port: 9999, path: "/metrics_test".to_string() },
             web_ui: WebUiConfig { enabled: false },

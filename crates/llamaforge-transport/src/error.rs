@@ -75,6 +75,20 @@ impl IntoResponse for ApiError {
     }
 }
 
+impl From<ApiError> for tonic::Status {
+    fn from(error: ApiError) -> Self {
+        match error {
+            ApiError::InvalidBody(msg) => tonic::Status::invalid_argument(msg),
+            ApiError::AuthFailure => tonic::Status::unauthenticated("Authentication failed"),
+            ApiError::ModelNotFound => tonic::Status::not_found("Model not found"),
+            ApiError::QueueFull => tonic::Status::resource_exhausted("Queue is full"),
+            ApiError::BackendError => tonic::Status::internal("Backend error"),
+            ApiError::Timeout => tonic::Status::deadline_exceeded("Request timed out"),
+            ApiError::Internal(msg) => tonic::Status::internal(msg),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnthropicStreamPhase {
     Init,

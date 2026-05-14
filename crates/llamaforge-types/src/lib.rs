@@ -351,7 +351,7 @@ pub struct ChatCompletionRequest {
 }
 
 /// Domain type representing a chunk of a chat completion response.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum ChatCompletionChunk {
     /// A queue update without generating tokens.
     QueueUpdate { position: u32 },

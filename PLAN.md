@@ -263,12 +263,12 @@ Build the tonic gRPC server: `InferenceService` with server-streaming RPC, `Mana
 
 ### PR4 Acceptance Criteria
 
-- [ ] `CatchPanicLayer` is outermost gRPC middleware layer
-- [ ] `grpc.max_message_size_mb`, `grpc.keepalive_interval_secs`, `grpc.keepalive_timeout_secs`, `grpc.max_concurrent_streams` configured per design doc §6 using exact config key names
-- [ ] All `ApiError` variants mapped to both HTTP and gRPC status codes
-- [ ] Health checking uses standard `grpc.health.v1.Health` protocol
-- [ ] GOAWAY sent on graceful shutdown
-- [ ] All 4 test suites pass
+- [x] `CatchPanicLayer` is outermost gRPC middleware layer
+- [x] `grpc.max_message_size_mb`, `grpc.keepalive_interval_secs`, `grpc.keepalive_timeout_secs`, `grpc.max_concurrent_streams` configured per design doc §6 using exact config key names
+- [x] All `ApiError` variants mapped to both HTTP and gRPC status codes
+- [x] Health checking uses standard `grpc.health.v1.Health` protocol
+- [x] GOAWAY sent on graceful shutdown
+- [x] All 4 test suites pass
 
 ### PR4 Creation Steps
 

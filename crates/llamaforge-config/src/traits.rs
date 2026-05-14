@@ -24,7 +24,7 @@ pub trait ConfigReader: Send + Sync + private::Sealed {
 }
 
 /// Write access for reloading or mutating configuration.
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait ConfigWriter: Send + Sync + private::Sealed {
     /// Reload configuration from the backing store.
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError>;
