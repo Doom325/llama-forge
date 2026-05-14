@@ -57,7 +57,7 @@ fn default_deps() -> (
     (
         Arc::new(mocks::MockRouteValidator),
         Arc::new(mocks::MockQueueSubmitter),
-        Arc::new(mocks::MockEngine { chunks: vec![], sleep_ms: 0 }),
+        Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 }),
     )
 }
 
@@ -120,7 +120,7 @@ async fn test_anthropic_state_machine_ordering() {
         Ok(ChatCompletionChunk::Token("Tok3".into())),
         Ok(ChatCompletionChunk::Stop("stop".into())),
     ];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _) = default_deps();
     let _handles = setup_test_server(50102, |_| {}, rv, qs, ie).await;
 
@@ -168,7 +168,7 @@ async fn test_anthropic_state_machine_ordering() {
 #[tokio::test]
 async fn test_anthropic_no_token_before_preamble() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _) = default_deps();
     let _handles = setup_test_server(50103, |_| {}, rv, qs, ie).await;
 
@@ -275,7 +275,7 @@ async fn test_prometheus_endpoint_always_200() {
 #[tokio::test]
 async fn test_streaming_no_timeout_layer() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 2000 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 2000 });
     let (rv, qs, _) = default_deps();
 
     // config timeout is 1s, but sleep is 2s. The streaming request should complete

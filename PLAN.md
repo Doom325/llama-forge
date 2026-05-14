@@ -1,644 +1,515 @@
-# Transport Layer — Implementation Plan
+# Integration & Composition Root — Implementation Plan
 
-**Component:** Transport Layer (`07_TRANSPORT_LAYER.md`)  
-**Estimated LOC:** ~2,400 (~1,500 production + ~900 tests)  
-**Estimated Duration:** 9–10 working days (single engineer) / 7 days (two engineers, PR3/PR4/PR5 parallelizable)  
-**Design Document:** `component-designs/07_TRANSPORT_LAYER.md` (R2 PASS WITH WARNINGS — all 36 findings addressed across two review passes)  
-**Branch Prefix:** `transport/`  
-**Target:** `main` (via squash-merge PRs)  
-**Upstream Dependencies:** Config Manager (`llamaforge-config`), shared types (`llamaforge-types` with port traits), Metrics & Storage (`llamaforge-metrics`)
+**Phase:** 8 (Final integration; closes v1)
+**Estimated LOC:** ~3,200 (~2,000 production + ~1,200 tests)
+**Estimated Duration:** 8–10 working days (single engineer)
+**Design Reference:** `docs/design.md` §4 (Architecture), §5 (Component Deep Dives — composition flow), §6 (Config schema), §8 (Testing strategy)
+**Branch Prefix:** `integration/`
+**Target:** `main` (via squash-merge PRs)
+**Upstream Dependencies:** All 7 component crates merged (✅ as of 2026-05-14):
+- `llamaforge-config`, `llamaforge-metrics`, `llamaforge-server-manager`, `llamaforge-queue`, `llamaforge-routing`, `llamaforge-dispatch`, `llamaforge-transport`
+- Plus `llamaforge-types`, `llamaforge-proto`, `llamaforge` (binary, currently stub).
 
-> **Branching workflow:** Each PR is squash-merged to `main` before the next PR branches. All `git checkout -b` commands branch from `main`, which is correct because the predecessor PR has already been merged. The "Depends on" field on each PR indicates which predecessor(s) must be merged to `main` before that PR's branch is created. Do NOT branch from a predecessor's feature branch — always branch from `main` after the predecessor is merged.
+**Primary CoderAgent:** `AssistantCoderAgent_llamaforge-transport_final` (per role handoff 2026-05-14; see `~/.claude/projects/-Users-sumanthgottipati-git-llama-forge/memory/project_relay_agents.md`).
+**Primary Reviewer:** `ReviewerAgent_llamaforge-transport_final`.
+**Relay key prefix:** `llamaforge#integration-*`.
+
+---
+
+## Why this phase exists
+
+The seven component crates are individually merged and pass their own tests, but `cargo run -p llamaforge` produces a stub message. Three structural gaps prevent the system from actually running end-to-end:
+
+1. **Domain types are still empty stubs.** `IncomingRequest {}`, `QueueTicket {}`, `ServerSummary {}` are unit structs with no fields. The port traits (`QueueSubmitter::submit(IncomingRequest) -> Result<QueueTicket, ...>`, `ServerControl::list_servers() -> Vec<ServerSummary>`, etc.) pass empty data — even after wiring, nothing meaningful flows.
+2. **Only one of five port traits has a production impl.** `RouteValidator` is implemented on `Router` in `llamaforge-routing`. `QueueSubmitter`, `ServerControl`, `MetricsExporter`, and `InferenceEngine` have *zero* non-test implementations. Each upstream crate exports its own surface (e.g., `RequestPipeline`, `ServerManager`) but never adapts to the port the transport layer consumes.
+3. **`InferenceEngine` is the keystone and doesn't exist.** Transport's `start_servers` calls `inference_engine.chat_completion(req).await` returning a stream of chunks. That trait is the contract that glues queue → routing → dispatch into one protocol-agnostic API for transport to call. It has no production implementation anywhere — including the binary crate.
+
+Beyond those three, several smaller items are deferred behind `// TODO`, `v1.1`, or hardcoded constants — config knobs, TLS for gRPC, query-string filter parsing for the management API, true token-usage reporting, and the `ConfigOverlayStore` trait. These are mopping-up work, not load-bearing.
+
+The phase output is a `cargo run -p llamaforge -- --config config/llamaforge.toml` that actually:
+- Loads config, builds 7 component instances, wires them via port traits
+- Spawns HTTP (`:8000`) and gRPC (`:50051`) servers
+- Accepts a request via OpenAI-compatible API, routes/queues/dispatches it through `mock-llama` (or a real `llama-server`), and streams tokens back
+- Shuts down gracefully on SIGTERM
+
+That's VC-4 + VC-5 ("final sign-off") combined.
 
 ---
 
 ## Ground Rules for CoderAgents
 
-1. **Read the design doc first.** Every PR description must reference the specific design doc sections it implements.
-2. **No `unwrap()` or `expect()` in production code paths.** Use `?` propagation, `unwrap_or_else`, or explicit `match`. The one exception: `Uuid::now_v7()` is infallible (design doc §3.4 invariant 6).
-3. **No blocking under `.await`.** Request parsing for bodies > 1MB uses `tokio::task::spawn_blocking`. Missing `Content-Length` defaults to spawn_blocking (assume large). See design doc §2.4 spawn_blocking contract.
-4. **Every public type gets a doc comment.** Reference the design doc section number. Include `Open trait` / `Sealed trait` designation on all traits.
-5. **Newtype wrappers for domain IDs.** Use `ServerId`, `RequestId` from `llamaforge-types` — never raw `String` for domain identifiers. Route parameters parse into newtypes: `Path(id): Path<ServerId>`, not `Path<String>`.
-6. **Tests run with `cargo test --workspace`.** Every PR must pass before merge.
-7. **`cargo clippy -- -D warnings` must pass.** Zero warnings policy.
-8. **Commit messages:** `transport: <imperative summary>` (e.g., `transport: add OpenAI request parsing with null semantics`).
-9. **Port traits, not concrete types.** `start_servers()` accepts `TransportDeps` — a struct of 8 `Arc<dyn Trait>` fields. No concrete upstream crate types (`ServerManager`, `RequestQueue`, `PrometheusMetrics`, `ConfigHandle`) may appear in the transport crate.
-10. **DTO/Domain separation.** `OpenAiChatRequest` and `AnthropicMessagesRequest` are `pub(crate)` serde DTOs. `ChatCompletionRequest` and `ChatCompletionChunk` are domain types — they MUST NOT derive `serde::Deserialize`. All deserialization targets DTO types with explicit conversion functions.
-11. **Visibility discipline.** Internal types (`SseEvent`, `AnthropicState`, `AnthropicStreamPhase`, `AnthropicProtocolError`, `LargeBodyConcurrencyLimit`, all DTOs, all handlers) are `pub(crate)`. Only types listed as `pub` in design doc §2.5 are exported.
-12. **CatchPanicLayer on both servers.** HTTP and gRPC middleware stacks both have `CatchPanicLayer` as the outermost layer. No middleware panic crashes the process.
+1. **Read `docs/design.md` §4 + §5 first.** Every PR description references specific design doc sections it implements.
+2. **No `unwrap()` or `expect()` in production code paths.** The one exception remains `Uuid::now_v7()`. Tests excluded.
+3. **No blocking under `.await`.** Inherited from transport phase. `spawn_blocking` for CPU-heavy work; `try_recv` / `try_send` for non-blocking channel ops.
+4. **Every public type and trait gets a doc comment** citing the design doc section. `Open trait` / `Sealed trait` designation on all new traits.
+5. **Newtype wrappers for domain IDs.** Use `RequestId`, `ServerId`, `RequestorId`, `SessionId`, `ModelAlias` from `llamaforge-types` — never raw `String`.
+6. **Port traits, not concrete types, at adapter boundaries.** The `llamaforge` binary may import concrete types from any crate (it's the composition root). Library crates must not.
+7. **Workspace deps only.** New dependencies belong in `[workspace.dependencies]`. Member crates use `workspace = true`.
+8. **`cargo deny check` must pass** before each merge. The CI Audit Dependencies job won't catch advisories that land mid-PR fast enough.
+9. **Visibility discipline.** Composition-root types in `crates/llamaforge/src/` are `pub(crate)` unless re-exported. Domain types in `llamaforge-types` are `pub`.
+10. **`unwrap_or_default()` on `Result` is not an escape hatch.** Match explicitly or propagate. See PR4 (transport) Finding 3 — silent error swallowing is a finding.
+11. **No workflow refs in production code or comments.** Don't write `// Default from VC-2.6` or `// TODO(PR12)`. Use local-invariant wording: `// Defaults match design doc §6.2 until [gateway] config section lands.`
+12. **5-gate local verification + CI check before every relay closure:**
+    ```bash
+    cargo build --workspace && \
+    cargo clippy --workspace --all-targets -- -D warnings && \
+    cargo test --workspace && \
+    cargo fmt --check && \
+    cargo deny check
+    echo "all-local=$?"
+    # then wait for GitHub Actions:
+    gh pr checks <PR>
+    ```
+    Every CI check must be SUCCESS. Cite the Actions run URL in the closure message.
+13. **File:line cites for each closed finding** in re-review responses. If you can't cite a line, the finding isn't resolved.
 
 ---
 
 ## Dependency Graph (PR merge order)
 
 ```
-PR1 ─── PR2 ──┬── PR3 ──┬── PR6 ─── PR7 ─── PR8 ─── PR9
-              ├── PR4 ──┤
-              └── PR5 ──┘
+                  ┌── PR3 ──┐
+PR1 ── PR2 ──────┼── PR4 ──┼── PR8 ── PR9 ── PR10 ── PR11
+                  ├── PR5 ──┤              ↗
+                  └── PR6 ──┘
+                  PR7 (independent) ───────┘
 ```
 
-PR3, PR4, and PR5 can be developed concurrently after PR2 merges. PR6 depends on PR3, PR4, and PR5 all being merged. PR7 → PR8 → PR9 are strictly sequential after PR6.
+- **PR1 → PR2** sequential: domain types must land before trait impls compile.
+- **PR3–PR6** parallel after PR2: each adapter (queue, server-manager, metrics-exporter, inference-engine wiring) implements a different port trait against the same `llamaforge-types` surface.
+- **PR7** (config schema additions) is independent — touches only `llamaforge-config`, can land any time after PR2.
+- **PR8** is the composition root — needs all 5 adapters merged.
+- **PR9 → PR10 → PR11** are strictly sequential end-to-end work.
 
 ---
 
-## PR1: Crate Scaffold, Proto Definitions & Port Traits
+## PR1 — Domain types: real fields for the seven stubs
 
-**Branch:** `transport/01-scaffold`  
-**Merge Target:** `main`  
-**Size:** Small (~250 lines)  
-**Estimated Time:** 3–4 hours
+**Branch:** `integration/01-domain-types`
+**Depends on:** `main` only
+**Size:** Medium (~350 lines)
+**Estimated Time:** 4–6 hours
 
 ### Purpose
 
-Create the `llamaforge-transport` library crate, define protobuf files for gRPC, set up `build.rs` for tonic codegen, add all new workspace dependencies, and register the new port traits (`ConfigReader`, `ConfigWriter`, `ServerControl`, `QueueSubmitter`, `MetricsExporter`) in `llamaforge-types`.
+Replace the seven empty/under-populated domain stubs in `crates/llamaforge-types/` with field-complete types that satisfy the port-trait contracts. Update all crates that destructure or construct these types (transport, dispatch, queue, routing, server-manager) to compile.
+
+### Audit of current state (file:line)
+
+- `crates/llamaforge-types/src/traits.rs:71` — `pub struct ServerSummary {}` (empty)
+- `crates/llamaforge-types/src/traits.rs:80` — `pub struct QueueTicket {}` (empty)
+- `crates/llamaforge-types/src/traits.rs:101` — `pub struct IncomingRequest {}` (empty)
+- `crates/llamaforge-types/src/traits.rs:74` — `pub enum ServerError { Failed }` (single uninformative variant)
+- `crates/llamaforge-types/src/traits.rs:89` — `pub enum AdmissionError { QueueFull }` (missing `Cancelled`, `InvalidRequest`)
+- `crates/llamaforge-types/src/traits.rs:95` — `pub enum QueueError { Failed }` (uninformative)
+- `crates/llamaforge-types/src/traits.rs:104` — `pub enum MetricsError { Failed }` (uninformative)
+- `crates/llamaforge-types/src/lib.rs:367` — `pub struct StreamError {}` (empty; mirrors dispatch's `DispatchError` but doesn't carry its variants)
 
 ### Tasks
 
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 1.1 | Create `llamaforge-transport` lib crate | `cargo init --lib crates/llamaforge-transport`. This crate owns all Transport Layer code. | `crates/llamaforge-transport/` |
-| 1.2 | Add workspace member | Add `crates/llamaforge-transport` to workspace `Cargo.toml` `[workspace]` members list. | `Cargo.toml` |
-| 1.3 | Add workspace-level dependencies | `axum = { version = "0.8", features = ["macros"] }`, `tower = "0.5"`, `tower-http = { version = "0.6", features = ["limit", "cors", "trace", "catch-panic"] }`, `tonic = { version = "0.13", features = ["tls", "gzip"] }`, `tonic-build = "0.13"`, `prost = "0.13"`, `hyper = { version = "1.0", features = ["server", "http1", "http2"] }`, `serde_json = "1"`, `tokio-stream = "0.1"`, `reqwest = { version = "0.12", features = ["json"] }`. Note: `uuid`, `pin-project-lite`, `futures-core` already added by earlier components. | `Cargo.toml` |
-| 1.4 | Wire crate dependencies | `llamaforge-transport/Cargo.toml` inherits workspace deps per design doc §1.1. Dev-deps: `tokio` (with `test-util`, `macros`), `tower` (with `util`), `reqwest` (with `json`) — include comment: `# reqwest: used for full-stack integration tests (real HTTP client → real server). Unit/handler tests use axum::test helpers instead.`. Build-deps: `tonic-build`. Include dependency rationale comments in `Cargo.toml` per design doc §1.1 dependency rationale block: explain why `llamaforge-config` and `llamaforge-metrics` are direct dependencies despite all cross-crate communication being via port traits. | `crates/llamaforge-transport/Cargo.toml` |
-| 1.5 | Create proto files | `proto/llamaforge/inference.proto`: define `InferenceService` with `rpc StreamInference(InferenceRequest) returns (stream InferenceResponse)`. `proto/llamaforge/management.proto`: define `ManagementService` with RPCs for server control, queue status, config reload. Include `grpc.health.v1.Health` via tonic's built-in. | `proto/llamaforge/` |
-| 1.6 | Implement `build.rs` | `tonic_build::configure().build_server(true).build_client(false).compile_protos(...)` per design doc §1.1. | `crates/llamaforge-transport/build.rs` |
-| 1.7 | Create module structure | `lib.rs` declares modules: `pub(crate) mod http;`, `pub(crate) mod grpc;`, `pub(crate) mod openai;`, `pub(crate) mod anthropic;`, `pub(crate) mod management;`, `pub(crate) mod middleware;`, `mod proto;`, `pub(crate) mod error;`. All modules are `pub(crate)` because they contain only internal items — public types are re-exported from `lib.rs`. Stub each module file. Re-export `start_servers`, `TransportDeps`, `TransportHandles`, `TransportError`, `InferenceEngine`, `ApiError`, and all port traits from `lib.rs`. | `crates/llamaforge-transport/src/` |
-| 1.8 | Add port traits to `llamaforge-types` | `ConfigReader` (sync, open), `ConfigWriter` (async, open), `ServerControl` (async, open), `QueueSubmitter` (sync, open — no `#[async_trait]`), `MetricsExporter` (sync, open). All with doc comments specifying "Open trait" and crate placement. Associated types (`ServerSummary`, `ServerError`, `QueueTicket`, `QueueSnapshot`, `AdmissionError`, `QueueError`, `IncomingRequest`) added as placeholder structs if not already defined. | `crates/llamaforge-types/src/traits.rs` |
-| 1.9 | Implement `TransportDeps` struct | Named fields for all 8 `Arc<dyn Trait>` dependencies per design doc §2.1. | `crates/llamaforge-transport/src/lib.rs` |
-| 1.10 | Implement `TransportHandles` struct | Private fields (`http_handle`, `grpc_handle`, `shutdown_tx`). Public `shutdown()` and `wait()` methods. `wait()` returns `Result<(), TransportError>` — propagates `JoinError`, does not discard it. | `crates/llamaforge-transport/src/lib.rs` |
-| 1.11 | Implement error types | `TransportError` (bootstrap errors, `ServerTaskFailed` variant wrapping `JoinError`), `ApiError` (request-level errors with HTTP/gRPC dual mapping), `AnthropicProtocolError` (`InvalidTransition` variant with `from`/`to` fields of type `AnthropicStreamPhase`). All via `thiserror`. | `crates/llamaforge-transport/src/error.rs` |
-| 1.12 | Define `AnthropicStreamPhase` enum | `pub(crate)` enum with variants: `Init`, `PreambleSent`, `ContentBlock`, `BlockStopped`, `MessageDone`, `Complete`. Derive `Debug, Clone, Copy, PartialEq, Eq`. This enum is defined here (not in PR2) because `AnthropicProtocolError::InvalidTransition` references it. PR2 task 2.7 uses this existing enum rather than redefining it. | `crates/llamaforge-transport/src/error.rs` |
-| 1.13 | Verify build | `cargo build --workspace`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`. Proto codegen produces valid Rust. | — |
+| # | Task | File(s) |
+|---|------|---------|
+| 1.1 | `IncomingRequest`: add fields per design doc §5.4.2 — `request_id: RequestId`, `requestor_id: RequestorId`, `requestor_class: RequestorClass`, `model_target: ModelTarget`, `capabilities: RequestCapabilities`, `messages: Vec<Message>`, `params: GenerationParams`, `stream: bool`, `session_id: Option<SessionId>`, `submitted_at: DateTime<Utc>`. Doc comment cites design doc §5.4.2. | `llamaforge-types/src/traits.rs` |
+| 1.2 | Define `GenerationParams` struct in `llamaforge-types/src/lib.rs` with `max_tokens: Option<u32>`, `temperature: Option<f32>`, `top_p: Option<f32>`, `top_k: Option<u32>`, `logit_bias: Option<HashMap<i32, f64>>`, `stop: Vec<String>`, `seed: Option<u64>`. Derive `Debug, Clone, Default, Serialize, Deserialize`. | `llamaforge-types/src/lib.rs` |
+| 1.3 | `QueueTicket`: add `request_id: RequestId`, `admitted_at: DateTime<Utc>`, `cancel_token: tokio_util::sync::CancellationToken`, `events: tokio::sync::mpsc::Receiver<DispatchEvent>`. `DispatchEvent` enum: `Queued { position: u32 }`, `Dispatched { server_id: ServerId, slot_id: SlotId }`, `FirstToken { ttft_ms: u64 }`, `Completed { tokens: u32 }`, `Failed { error: String }`. Doc comment notes ticket holds backpressure for cancellation. | `llamaforge-types/src/traits.rs` |
+| 1.4 | `ServerSummary`: `id: ServerId`, `alias: ModelAlias`, `state: ServerLifecycle`, `port: u16`, `slots_total: u32`, `slots_busy: u32`, `started_at: Option<DateTime<Utc>>`, `last_restart_at: Option<DateTime<Utc>>`. Serialize for management JSON. | `llamaforge-types/src/traits.rs` |
+| 1.5 | `StreamError`: convert to enum with `BackendDisconnect`, `Timeout`, `Cancelled`, `ChunkParse { reason: String }`, `Upstream(Box<dyn std::error::Error + Send + Sync>)`. Mirrors `llamaforge-dispatch::StreamError` (which is its actual source). | `llamaforge-types/src/lib.rs` |
+| 1.6 | `ServerError` / `QueueError` / `MetricsError`: replace `Failed` with informative variants. `ServerError`: `NotFound { id: ServerId }`, `AlreadyRunning { id: ServerId }`, `SpawnFailed { reason: String }`, `Unreachable { id: ServerId }`. `QueueError`: `NotFound { id: RequestId }`, `AlreadyCancelled`, `Internal { detail: String }`. `MetricsError`: `StoreUnavailable`, `Internal { detail: String }`. | `llamaforge-types/src/traits.rs` |
+| 1.7 | `AdmissionError`: add `Cancelled`, `InvalidRequest { reason: String }`, `RateLimited { retry_after_secs: u32 }` alongside existing `QueueFull`. | `llamaforge-types/src/traits.rs` |
+| 1.8 | Update transport's `tonic::Status::from(ApiError)` mapping and `IntoResponse for ApiError` to surface the new error variants where applicable (e.g., `AdmissionError::RateLimited` should carry the `retry_after_secs` to the existing `ApiError::QueueFull { retry_after_secs }`). | `llamaforge-transport/src/error.rs` |
+| 1.9 | Mechanical fixes in dependent crates: every site that constructed `IncomingRequest {}`, `QueueTicket {}`, etc. must compile. Search with `grep -rn 'IncomingRequest {}\|QueueTicket {}\|ServerSummary {}' crates/`. | various |
+| 1.10 | Doc comments on every new field referencing design doc §5.4.2 (IncomingRequest), §5.4.3 (QueueTicket), §5.3.1 (ServerSummary). | — |
+| 1.11 | Unit tests: round-trip serde on `ServerSummary`, `QueueSnapshot`, `GenerationParams` (all are public API for management JSON). | `llamaforge-types/src/lib.rs` |
 
 ### PR1 Acceptance Criteria
 
-- [x] `cargo build --workspace` succeeds — proto codegen completes without errors
-- [x] All port traits compile with `Arc<dyn Trait>` (object-safe)
-- [x] `TransportDeps` struct compiles with all 8 fields
-- [x] `TransportHandles::wait()` returns `Result<(), TransportError>`
-- [x] `AnthropicProtocolError::InvalidTransition` has `from` and `to` fields of type `AnthropicStreamPhase`
-- [x] `cargo clippy --workspace -- -D warnings` passes clean
-- [x] No concrete upstream types (`ServerManager`, `RequestQueue`, `PrometheusMetrics`, `ConfigHandle`) appear in the crate
-
-### PR1 Creation Steps
-
-```bash
-git checkout -b transport/01-scaffold main
-# ... implement tasks 1.1–1.13 ...
-git add -A && git commit -m "transport: bootstrap llamaforge-transport crate with proto, port traits, and error types"
-git push -u origin transport/01-scaffold
-# Open PR: "Transport Layer PR1: Crate Scaffold, Proto & Port Traits"
-# Description: "Creates llamaforge-transport crate with tonic proto codegen,
-# 5 new port traits (ConfigReader, ConfigWriter, ServerControl, QueueSubmitter,
-# MetricsExporter), TransportDeps dependency bundle, TransportHandles with
-# graceful shutdown, and error types. Design doc Sections 1.1, 2.1, 2.5."
-```
+- [ ] `cargo build --workspace` succeeds with the new fields.
+- [ ] `grep -rn 'pub struct \(IncomingRequest\|QueueTicket\|ServerSummary\) {}' crates/` returns zero hits.
+- [ ] No uninformative `Failed,` variant remains in `llamaforge-types/src/traits.rs`.
+- [ ] 5 local gates green + 3/3 CI checks green.
+- [ ] Doc comments cite design doc sections for every new type.
 
 ---
 
-## PR2: OpenAI & Anthropic Protocol Translation
-
-**Branch:** `transport/02-protocol`  
-**Depends on:** PR1 merged to `main`  
-**Size:** Medium (~400 lines)  
-**Estimated Time:** 6–8 hours
-
-### Purpose
-
-Implement the protocol translation layer: OpenAI and Anthropic request DTOs, parsing functions with null semantics, chunk/event formatting, the Anthropic SSE state machine with runtime-checked transitions, and the SseEvent wrapper. This is pure logic with no async — ideal for thorough unit testing.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 2.1 | Implement `OpenAiChatRequest` DTO | `pub(crate)` struct with `#[derive(Deserialize)]`. Fields: `model`, `messages`, `max_tokens` (with `deserialize_null_as_none`), `temperature`, `stream`, `logit_bias` (HashMap<String, f64>), `tools`, `tool_choice`. Custom deserializer for `Option<T>` fields to handle explicit `null`. | `src/openai.rs` |
-| 2.2 | Implement `deserialize_null_as_none` | Custom serde deserializer that parses `null` as `None` rather than erroring. Applied to all `Option<T>` fields in OpenAI DTOs. Design doc §3.4 invariant 3. | `src/openai.rs` |
-| 2.3 | Implement `parse_openai_request()` | `pub(crate) fn(OpenAiChatRequest) -> Result<ChatCompletionRequest, ApiError>`. Handles: logit_bias keys parsed as `i32` (not `u32` — negative BOS/EOS valid, design doc §3.4 invariant 4), `tool_calls` only (reject `function_call` with 400 + migration hint), stream boolean. Doc comment includes `spawn_blocking` contract with Content-Length threshold and chunked-body fallback. | `src/openai.rs` |
-| 2.4 | Implement `format_openai_chunk()` | `pub(crate) fn(&ChatCompletionChunk) -> String`. Handles: empty-delta queue updates with `llamaforge` extension field, `[DONE]` sentinel, `finish_reason` mapping. Doc comment notes v2 `BytesMut` buffer consideration. | `src/openai.rs` |
-| 2.5 | Implement `AnthropicMessagesRequest` DTO | `pub(crate)` struct with `#[derive(Deserialize)]`. Fields: `model`, `messages`, `system`, `max_tokens`, `stream`, `tools`, `tool_choice`. System prompt is a separate field (not in messages array). | `src/anthropic.rs` |
-| 2.6 | Implement `parse_anthropic_request()` | `pub(crate) fn(AnthropicMessagesRequest) -> Result<ChatCompletionRequest, ApiError>`. Handles: system prompt extraction into first message, content block structure translation, `tool_use` format conversion. Includes `spawn_blocking` contract. | `src/anthropic.rs` |
-| 2.7 | Use `AnthropicStreamPhase` enum (defined in PR1) | The enum is already defined in `error.rs` (PR1 task 1.12). Import it into `anthropic.rs` via `use crate::error::AnthropicStreamPhase;`. Do NOT redefine it. | `src/anthropic.rs` |
-| 2.8 | Implement `AnthropicState` struct | `pub(crate)`. Fields: `phase: AnthropicStreamPhase`, `block_index: u32`. Constructor `new()` starts at `Init`. `transition(&mut self, to) -> Result<(), AnthropicProtocolError>` with explicit match on all valid `(from, to)` pairs. Invalid transitions return `Err` — NEVER panic, no `unreachable!()`. Design doc §3.2. | `src/anthropic.rs` |
-| 2.9 | Implement `SseEvent` struct | `pub(crate)`. Fields: `event_type: &'static str`, `data: String`. `impl From<SseEvent> for axum::response::sse::Event`. Doc comment notes v2 BytesMut consideration. | `src/anthropic.rs` |
-| 2.10 | Implement `format_anthropic_event()` | `pub(crate) fn(&ChatCompletionChunk, &mut AnthropicState) -> Result<Vec<SseEvent>, AnthropicProtocolError>`. Calls `state.transition()` — propagates `Err`, does not swallow it. Emits preamble events (message_start, content_block_start) synchronously before token loop. Design doc §3.2 (G-11 critical invariant). | `src/anthropic.rs` |
-| 2.11 | Unit tests: OpenAI null max_tokens | `"max_tokens": null` → parsed as `None`, not 400 error. | tests in `src/openai.rs` |
-| 2.12 | Unit tests: OpenAI logit_bias i32 | `{"-1": 5.0}` (BOS token) → parsed correctly, negative key preserved. | tests |
-| 2.13 | Unit tests: OpenAI function_call rejection | Request with `function_call` field → 400 with migration hint message. | tests |
-| 2.14 | Unit tests: OpenAI chunk formatting | Verify empty-delta queue update format, `[DONE]` sentinel, `finish_reason` on final chunk. | tests |
-| 2.15 | Unit tests: Anthropic system prompt extraction | System string → first message in domain type. Messages array untouched. | tests |
-| 2.16 | Unit tests: Anthropic state machine valid paths | Walk through full Init→PreambleSent→ContentBlock→BlockStopped→MessageDone→Complete. Assert all transitions succeed. | tests |
-| 2.17 | Unit tests: Anthropic state machine invalid transition | Attempt Init→ContentBlock (skipping PreambleSent). Assert `Err(InvalidTransition)`. | tests |
-| 2.18 | Unit tests: Anthropic event ordering | Stream 3 tokens → verify event sequence: `message_start`, `content_block_start`, 3× `content_block_delta`, `content_block_stop`, `message_delta`, `message_stop`. | tests |
-| 2.19 | Unit tests: Anthropic no token before preamble | Attempt to emit `content_block_delta` from Init state → assert `Err`. | tests |
-
-### PR2 Acceptance Criteria
-
-- [x] `parse_openai_request` handles `null` as `None` on all Option fields
-- [x] logit_bias keys parse as `i32` (negative values preserved)
-- [x] `function_call` rejected with 400 and migration hint
-- [x] `AnthropicState::transition()` returns `Result` — no panics, no `unreachable!()`
-- [x] `format_anthropic_event()` propagates transition errors (not swallowed)
-- [x] Preamble events emitted synchronously before any token (G-11 invariant)
-- [x] No `serde::Deserialize` on `ChatCompletionRequest` or `ChatCompletionChunk`
-- [x] All 9 unit test suites pass
-- [x] No `unwrap()` in production code
-
-### PR2 Creation Steps
-
-```bash
-git checkout -b transport/02-protocol main
-# ... implement tasks 2.1–2.19 ...
-git add -A && git commit -m "transport: add OpenAI and Anthropic protocol translation with state machine"
-git push -u origin transport/02-protocol
-# Open PR: "Transport Layer PR2: Protocol Translation"
-# Description: "Implements OpenAI and Anthropic request parsing + response formatting
-# (design doc Sections 2.4, 3.2, 3.3, 3.4). OpenAI null semantics, logit_bias i32,
-# function_call rejection. Anthropic SSE state machine with runtime-checked transitions.
-# SseEvent wrapper. 9 unit test suites."
-```
-
----
-
-## VC-1: Protocol Translation Verification Checkpoint
-
-**Gate:** PR2 merged. All protocol translation logic correct.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-1.1 | DTO/domain boundary | Attempt `#[derive(Deserialize)]` on `ChatCompletionRequest` → verify it fails (type doesn't derive it) | Does not compile |
-| VC-1.2 | Null semantics | JSON `{"max_tokens": null}` round-trips through `parse_openai_request` → `None` | Assertion passes |
-| VC-1.3 | State machine safety | `AnthropicState::transition(Init, ContentBlock)` returns `Err` | Assertion passes |
-| VC-1.4 | Visibility enforcement | Run `cargo doc --no-deps -p llamaforge-transport` and confirm `OpenAiChatRequest` does NOT appear in the public API documentation. Alternatively, add `trybuild` as a dev-dependency and create a compile-fail test. | Not in public docs |
-
----
-
-## PR3: HTTP Server & Middleware Stack
-
-**Branch:** `transport/03-http`  
-**Depends on:** PR2 merged to `main`  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 6–8 hours
-
-### Purpose
-
-Build the axum HTTP server: route registration, the Tower middleware stack (CatchPanicLayer, body limit, large body concurrency limiter, auth, request ID injection, metrics), and the inference endpoint handlers that wire protocol translation to `InferenceEngine`.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 3.1 | Implement `LargeBodyConcurrencyLimit` middleware | Tower `Layer` + `Service` implementation. `Semaphore`-based, configured by `max_concurrent_large_requests` and `large_body_threshold_mb`. Returns 429 when semaphore exhausted. Design doc §Memory Bounds. | `src/middleware.rs` |
-| 3.2 | Implement auth middleware | Tower layer. Takes `Arc<dyn ConfigReader>` as constructor parameter (extracted from `TransportDeps` in PR6). If `api_key` configured: check `Authorization: Bearer <key>` header. If empty: pass-through. Returns 401 on mismatch. Hot-reloadable (calls `config.transport_config()` on each request to get current `api_key`). Record `llamaforge_auth_failures_total` metric. PR3 tests pass a mock `ConfigReader` directly. Design doc §3.4 invariant 7. | `src/middleware.rs` |
-| 3.3 | Implement request ID middleware | Tower layer. Generate `RequestId::from(Uuid::now_v7())` — infallible construction, no `unwrap()`. Set both `x-request-id` and `x-llamaforge-request-id` response headers. Store in request extensions for downstream handlers. Design doc §3.4 invariant 6, §9 decision 5. | `src/middleware.rs` |
-| 3.4 | Implement metrics middleware | Tower layer. Record `llamaforge_http_requests_total` (counter, labels: method/path/status), `llamaforge_http_request_duration_seconds` (histogram, labels: method/path), `llamaforge_active_connections` (gauge). `path` label bounded to ~15 known routes (use route pattern, NOT client-supplied path). Design doc §7.1. | `src/middleware.rs` |
-| 3.5 | Implement `openai_chat_completion_handler` | Axum handler. Extract `Json<OpenAiChatRequest>`. For bodies > 1MB: use `spawn_blocking` for `parse_openai_request`. Early rejection via `route_validator.validate_routable()`. Call `engine.chat_completion()`. Non-streaming: wrap in `tokio::time::timeout(non_streaming_timeout_secs)` (design doc §3.4 invariant 9). Streaming: SSE response with `format_openai_chunk`, no outer timeout. | `src/http.rs` |
-| 3.6 | Implement `openai_completion_handler` | Axum handler. Wraps text prompt as single user message → delegates to `chat_completion()`. Design doc §2.3. | `src/http.rs` |
-| 3.7 | Implement `anthropic_messages_handler` | Axum handler. Similar to 3.5 but uses `parse_anthropic_request` and `format_anthropic_event`. Preamble events emitted synchronously before token loop. State machine errors converted to `ApiError::Internal`. | `src/http.rs` |
-| 3.8 | Implement health and metrics endpoints | `GET /health` → 200 with `{"status": "ok"}`. `GET /metrics` → `metrics_exporter.gather_text()`, always returns 200 (empty on degraded). Design doc §4.2. | `src/http.rs` |
-| 3.9 | Build axum Router with middleware stack | Layer ordering (outermost → innermost): `CatchPanicLayer` → body limit → `LargeBodyConcurrencyLimit` → auth → request ID → metrics. NO `TimeoutLayer`. Register all routes from design doc §2.3. | `src/http.rs` |
-| 3.10 | Implement HTTP server startup | Bind to `config.bind_address:config.http_port`. Use axum's graceful shutdown with watch channel from `TransportHandles`. Log `transport.started` at INFO. | `src/http.rs` |
-| 3.11 | Implement `ApiError` → HTTP response mapping | JSON error bodies: `{"error": "<code>", "message": "<detail>"}`. Status mapping per design doc §4.3. `Queue full` includes `Retry-After` header. | `src/error.rs` |
-| 3.12 | Unit tests: auth middleware pass-through | Empty `api_key` config → request without auth header succeeds. | tests |
-| 3.13 | Unit tests: auth middleware rejection | `api_key` set → request without header returns 401. | tests |
-| 3.14 | Unit tests: request ID injection | Request → verify both `x-request-id` and `x-llamaforge-request-id` headers in response. | tests |
-| 3.15 | Unit tests: body limit rejection | 300MB body → 413 with structured error. | tests |
-| 3.16 | Unit tests: large body concurrency limit | Semaphore full → 429. | tests |
-| 3.17 | Axum integration test: full streaming path | Mock `InferenceEngine` returning 3 chunks. POST `/v1/chat/completions` with `stream: true` → verify SSE events in order, `[DONE]` terminal. | tests |
-| 3.18 | Axum integration test: non-streaming timeout | Mock engine that sleeps 400s. `non_streaming_timeout_secs = 1`. Assert 504 Gateway Timeout. | tests |
-
-### PR3 Acceptance Criteria
-
-- [x] Middleware stack ordering: CatchPanic (outermost) → body limit → large body limiter → auth → request ID → metrics
-- [x] NO `TimeoutLayer` in middleware stack
-- [x] Non-streaming timeout applied at handler level via `tokio::time::timeout`
-- [x] Streaming responses have no outer timeout
-- [x] `path` metric label uses route pattern, not client path
-- [x] Auth middleware hot-reloads (reads config on each request)
-- [x] Request ID generated via infallible `Uuid::now_v7()`
-- [x] All 7 test suites pass
-
-### PR3 Creation Steps
-
-```bash
-git checkout -b transport/03-http main
-# ... implement tasks 3.1–3.18 ...
-git add -A && git commit -m "transport: implement HTTP server with middleware stack and inference handlers"
-git push -u origin transport/03-http
-# Open PR: "Transport Layer PR3: HTTP Server & Middleware"
-# Description: "Implements axum HTTP server (design doc Sections 3.1, 3.4, 7.1).
-# 6-layer middleware stack with CatchPanicLayer, LargeBodyConcurrencyLimit,
-# auth, request ID, and metrics. OpenAI and Anthropic inference handlers with
-# spawn_blocking for large bodies. Non-streaming timeout at handler level.
-# 7 test suites including streaming integration test."
-```
-
----
-
-## PR4: gRPC Server & Service Implementations
-
-**Branch:** `transport/04-grpc`  
-**Depends on:** PR2 merged to `main` (can be developed concurrently with PR3)  
-**Size:** Medium (~300 lines)  
-**Estimated Time:** 5–7 hours
-
-### Purpose
-
-Build the tonic gRPC server: `InferenceService` with server-streaming RPC, `ManagementService` with control RPCs, health checking, interceptors (auth, CatchPanicLayer), and gRPC-specific middleware configuration (keepalive, max message size, concurrent streams).
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 4.1 | Implement `InferenceService` | Tonic service implementing `StreamInference` RPC. Translates proto request → `ChatCompletionRequest` → calls `engine.chat_completion()` → streams proto response chunks. | `src/grpc.rs` |
-| 4.2 | Implement `ManagementService` | Tonic service implementing RPCs: `ListServers`, `StartServer`, `StopServer`, `QueueStatus`, `CancelRequest`, `ReloadConfig`. Delegates to port traits (`ServerControl`, `QueueSubmitter`, `ConfigWriter`). | `src/grpc.rs` |
-| 4.3 | Implement auth interceptor | Tonic interceptor. Checks `authorization` metadata key. Same logic as HTTP auth but adapted for gRPC metadata. Returns `UNAUTHENTICATED` on failure. | `src/grpc.rs` |
-| 4.4 | Implement `ApiError` → gRPC status mapping | Map `ApiError` variants to gRPC status codes per design doc §4.3: `InvalidBody` → `INVALID_ARGUMENT`, `AuthFailure` → `UNAUTHENTICATED`, `ModelNotFound` → `NOT_FOUND`, `QueueFull` → `RESOURCE_EXHAUSTED`, `BackendError` → `INTERNAL`, `Timeout` → `DEADLINE_EXCEEDED`. | `src/error.rs` |
-| 4.5 | Build tonic Server with middleware | `Server::builder().layer(CatchPanicLayer::new())` (outermost). Configure using exact config key names from design doc §6: `grpc.max_message_size_mb` (default 16), `grpc.keepalive_interval_secs` (default 30), `grpc.keepalive_timeout_secs` (default 10), `grpc.max_concurrent_streams` (default 1000). Optional TLS. Add all services + health service. Design doc §3.1 gRPC section. | `src/grpc.rs` |
-| 4.6 | Implement gRPC server startup | Bind to `config.bind_address:config.grpc_port`. Graceful shutdown via watch channel. GOAWAY frame on shutdown. | `src/grpc.rs` |
-| 4.7 | Add gRPC metrics | `llamaforge_grpc_requests_total` (counter, labels: method/status), `llamaforge_grpc_request_duration_seconds` (histogram, labels: method), `llamaforge_active_connections{transport=grpc}` (gauge). Design doc §7.1. | `src/grpc.rs` |
-| 4.8 | Unit tests: gRPC auth interceptor | Request without metadata key → `UNAUTHENTICATED`. | tests |
-| 4.9 | Unit tests: gRPC error status mapping | Verify all `ApiError` variants map to correct gRPC status codes. | tests |
-| 4.10 | Integration test: gRPC streaming | Compile proto client. Stream 3 chunks from mock engine → verify proto response messages. | tests |
-| 4.11 | Integration test: gRPC health check | Call `grpc.health.v1.Health/Check` → verify `SERVING`. | tests |
-
-### PR4 Acceptance Criteria
-
-- [x] `CatchPanicLayer` is outermost gRPC middleware layer
-- [x] `grpc.max_message_size_mb`, `grpc.keepalive_interval_secs`, `grpc.keepalive_timeout_secs`, `grpc.max_concurrent_streams` configured per design doc §6 using exact config key names
-- [x] All `ApiError` variants mapped to both HTTP and gRPC status codes
-- [x] Health checking uses standard `grpc.health.v1.Health` protocol
-- [x] GOAWAY sent on graceful shutdown
-- [x] All 4 test suites pass
-
-### PR4 Creation Steps
-
-```bash
-git checkout -b transport/04-grpc main
-# ... implement tasks 4.1–4.11 ...
-git add -A && git commit -m "transport: implement gRPC server with inference and management services"
-git push -u origin transport/04-grpc
-# Open PR: "Transport Layer PR4: gRPC Server & Services"
-# Description: "Implements tonic gRPC server (design doc Sections 3.1, 4.3).
-# InferenceService (streaming), ManagementService (control RPCs), health check,
-# auth interceptor, CatchPanicLayer, keepalive/message-size/concurrent-streams config.
-# gRPC error status mapping. 4 test suites."
-```
-
----
-
-## PR5: Management REST API
-
-**Branch:** `transport/05-management`  
-**Depends on:** PR2 merged to `main` (can be developed concurrently with PR3 and PR4)  
-**Size:** Small (~200 lines)  
-**Estimated Time:** 3–4 hours
-
-### Purpose
-
-Implement the management REST API handlers: server control, queue inspection, config reload, metrics queries, and WAL checkpoint. These are simple CRUD-style handlers delegating to port traits.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 5.1 | Implement `list_servers` handler | `GET /api/servers` → `server_control.list_servers()` → JSON array of `ServerSummary`. | `src/management.rs` |
-| 5.2 | Implement `start_server` handler | `POST /api/servers/{id}/start` → `Path(id): Path<ServerId>` → `server_control.start_server(&id)`. Returns 200 or error. | `src/management.rs` |
-| 5.3 | Implement `stop_server` handler | `POST /api/servers/{id}/stop` → `Path(id): Path<ServerId>` → `server_control.stop_server(&id)`. | `src/management.rs` |
-| 5.4 | Implement `queue_status` handler | `GET /api/queue` → `queue.status()` → JSON `QueueSnapshot`. | `src/management.rs` |
-| 5.5 | Implement `cancel_request` handler | `DELETE /api/queue/{id}` → `Path(id): Path<RequestId>` → `queue.cancel(&id)`. | `src/management.rs` |
-| 5.6 | Implement `reload_config` handler | `POST /api/config/reload` → `config_writer.reload()`. Returns 200 on success. | `src/management.rs` |
-| 5.7 | Implement `query_request_metrics` and `query_aggregated` handlers | `GET /api/metrics/requests` and `GET /api/metrics/aggregated` → `metrics_store.query_*()`. | `src/management.rs` |
-| 5.8 | Implement `wal_checkpoint` handler | `POST /api/maintenance/wal-checkpoint` → `metrics_store.wal_checkpoint()`. If `wal_checkpoint()` does not yet exist on the `MetricsStore` trait, add it to `llamaforge-types` as part of PR1 task 1.8: `fn wal_checkpoint(&self) -> Result<(), MetricsError>;`. | `src/management.rs` |
-| 5.9 | Build standalone management sub-router | Build a `pub(crate) fn management_routes(deps: ...) -> Router` function returning a sub-router with all `/api/*` routes. This sub-router is merged into the main HTTP Router in PR6 task 6.1. Do NOT attempt to register routes on the main axum Router here — PR3's HTTP server infrastructure may not be merged yet. | `src/management.rs` |
-| 5.10 | Unit tests: route parameter parsing | `/api/servers/{id}/start` with valid `ServerId` → 200. Invalid ID format → 400. | tests |
-| 5.11 | Unit tests: config reload | Mock `ConfigWriter`. Call reload → verify `reload()` called. | tests |
-
-### PR5 Acceptance Criteria
-
-- [ ] All route parameters parse into domain newtypes (`ServerId`, `RequestId`)
-- [ ] All handlers delegate to port traits — no concrete upstream types
-- [ ] Config reload uses `ConfigWriter` (not `ConfigReader` — interface segregation)
-- [ ] All 2 test suites pass
-
-### PR5 Creation Steps
-
-```bash
-git checkout -b transport/05-management main
-# ... implement tasks 5.1–5.11 ...
-git add -A && git commit -m "transport: implement management REST API handlers"
-git push -u origin transport/05-management
-# Open PR: "Transport Layer PR5: Management REST API"
-# Description: "Implements /api/* management handlers (design doc Sections 2.3, 4.1).
-# Server control, queue inspection, config reload via ConfigWriter, metrics queries.
-# All route parameters parse into newtypes. 2 test suites."
-```
-
----
-
-## VC-2: Server Components Verification Checkpoint
-
-**Gate:** PR3 + PR4 + PR5 merged. Both servers and management API work independently.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-2.1 | HTTP streaming end-to-end | POST `/v1/chat/completions` with mock engine → full SSE stream received | All events present |
-| VC-2.2 | Anthropic SSE ordering | POST `/v1/messages` → verify strict event ordering (message_start before any delta) | Event order correct |
-| VC-2.3 | gRPC streaming end-to-end | `StreamInference` RPC with mock engine → all proto response chunks received | All chunks present |
-| VC-2.4 | Auth enforcement | Both HTTP and gRPC reject requests without valid key when configured | 401/UNAUTHENTICATED |
-| VC-2.5 | Middleware panic recovery | Inject panic in auth middleware → verify 500 returned, process survives | No process crash |
-| VC-2.6 | Large body concurrency | 20 concurrent 15MB requests with `max_concurrent_large_requests=5` → exactly 5 proceed, 15 get 429 | Counts match |
-| VC-2.7 | Management API | GET/POST/DELETE through all management endpoints → correct responses | All endpoints respond |
-
----
-
-## PR6: Server Bootstrap & Wiring
-
-**Branch:** `transport/06-bootstrap`  
-**Depends on:** PR3, PR4, PR5 all merged to `main`  
-**Size:** Small (~200 lines)  
-**Estimated Time:** 3–5 hours
-
-### Purpose
-
-Implement `start_servers()` — the composition root function that wires HTTP and gRPC servers together with the shared `TransportDeps`, starts both on their configured ports, and returns `TransportHandles`. This also wires in the management routes to the HTTP server.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 6.1 | Implement `start_servers()` | Accept `TransportDeps`. Read `TransportConfig` from `deps.config.transport_config()`. Build axum Router (inference + management + health + metrics routes, full middleware stack). Build tonic Server (inference + management + health services, interceptors). Spawn both as `tokio::spawn` tasks. Return `TransportHandles` with join handles and shutdown watch channel. | `src/lib.rs` |
-| 6.2 | Wire shared state into handlers | Pass `Arc<dyn Trait>` references into axum handlers via `axum::Extension` or `State`. Both HTTP and gRPC handlers share the same `TransportDeps` references. | `src/lib.rs` |
-| 6.3 | Implement graceful shutdown coordination | `TransportHandles::shutdown()` sends `()` on watch channel. Both servers receive it and stop accepting new connections. HTTP: axum graceful shutdown. gRPC: GOAWAY frame. In-flight requests drain until server-level timeout. Design doc §Cross-Cutting: Graceful Shutdown. | `src/lib.rs` |
-| 6.4 | Add structured log events | `transport.started` at INFO: ports, bind address, TLS status. `transport.request` at DEBUG: method, path, request_id, content-length. `transport.auth_failed` at WARN: IP, masked key prefix. `transport.body_too_large` at WARN: received bytes, limit. Design doc §7.2. | `src/http.rs`, `src/grpc.rs` |
-| 6.5 | Integration test: dual-server startup | Call `start_servers()` with mock deps. Verify both HTTP and gRPC ports accept connections. Shutdown → verify both exit cleanly. | tests |
-| 6.6 | Integration test: graceful shutdown | Start servers. Send in-flight request. Call `shutdown()`. Verify in-flight completes. New requests rejected. `wait()` returns `Ok(())`. | tests |
-| 6.7 | Integration test: prometheus endpoint | `GET /metrics` → 200 with Prometheus text format. Even when `metrics_exporter.gather_text()` returns empty string. Design doc §4.2. | tests |
-
-### PR6 Acceptance Criteria
-
-- [x] `start_servers()` accepts only `TransportDeps` — no other parameters
-- [x] Both HTTP and gRPC servers start on configured ports
-- [x] Graceful shutdown drains in-flight requests
-- [x] `TransportHandles::wait()` returns `Ok(())` on clean shutdown, `Err` on task panic
-- [x] All structured log events use exact field names from design doc §7.2
-- [x] All 3 test suites pass
-
-### PR6 Creation Steps
-
-```bash
-git checkout -b transport/06-bootstrap main
-# ... implement tasks 6.1–6.7 ...
-git add -A && git commit -m "transport: implement start_servers bootstrap and graceful shutdown"
-git push -u origin transport/06-bootstrap
-# Open PR: "Transport Layer PR6: Server Bootstrap & Wiring"
-# Description: "Implements start_servers() composition root (design doc Sections 2.1, 3.1).
-# Wires HTTP + gRPC servers with shared TransportDeps. Graceful shutdown with drain.
-# Structured log events. 3 integration tests including dual-server and shutdown."
-```
-
----
-
-## PR7: Error Response Formatting & Edge Cases
-
-**Branch:** `transport/07-errors`  
-**Depends on:** PR6 merged to `main`  
-**Size:** Small (~200 lines)  
-**Estimated Time:** 3–4 hours
-
-### Purpose
-
-Polish error response formatting for all failure modes, implement CORS configuration, and handle edge cases: mid-stream errors, client disconnects, body limit responses, queue full with Retry-After.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 7.1 | Implement structured JSON error bodies | All HTTP error responses: `{"error": "<code>", "message": "<detail>", "request_id": "<uuid>"}`. Include `request_id` when available. Design doc §4.3. | `src/error.rs` |
-| 7.2 | Implement `Retry-After` header for 429 | Queue full → HTTP 429 with `Retry-After: <seconds>` header. Compute from queue depth / throughput estimate. Design doc §4.2. | `src/error.rs`, `src/http.rs` |
-| 7.3 | Implement mid-stream error events | Backend error during streaming → emit SSE error event (OpenAI: error object in data field; Anthropic: `error` event type). Do NOT close connection without signaling. | `src/http.rs` |
-| 7.4 | Implement client disconnect detection | Response body write error → log at DEBUG, cancel upstream via `cancel_token`. Design doc §FM-1. | `src/http.rs` |
-| 7.5 | Implement CORS middleware | Tower CORS layer from `tower-http`. v1 CORS config: `cors.allowed_origins` (default `["*"]`). Methods default to `["GET", "POST", "DELETE", "OPTIONS"]`. Headers default to `["Content-Type", "Authorization"]`. Max-age 3600s. No config knobs for methods/headers/max-age in v1 — hardcoded defaults. Only `cors.allowed_origins` is configurable and hot-reloadable. Design doc §9 decision 4. Note: design doc §6 does not yet include `[cors]` entries — this is a known gap; the config knob is defined here as the authoritative spec for v1. | `src/middleware.rs` |
-| 7.6 | Implement body limit error response | 413 with `{"error": "request_body_too_large", "max_bytes": N, "received_bytes": M}`. Design doc §FM-2. | `src/middleware.rs` |
-| 7.7 | Unit tests: JSON error format | Verify all error responses have `error`, `message`, `request_id` fields. | tests |
-| 7.8 | Unit tests: Retry-After computation | Queue at 80% capacity → verify `Retry-After` header present and reasonable. | tests |
-| 7.9 | Unit tests: mid-stream error event | Mock engine returns error after 2 chunks → verify error event emitted before stream closes. | tests |
-| 7.10 | Unit tests: CORS headers | Request with `Origin` header → verify `Access-Control-Allow-Origin` in response. | tests |
-
-### PR7 Acceptance Criteria
-
-- [ ] All HTTP error responses include structured JSON with `error`, `message`, `request_id`
-- [ ] Queue full returns 429 with `Retry-After` header
-- [ ] Mid-stream errors produce SSE error events (not silent disconnect)
-- [ ] Client disconnect triggers cancel_token
-- [ ] CORS configured per `[cors]` config section
-- [ ] All 4 test suites pass
-
-### PR7 Creation Steps
-
-```bash
-git checkout -b transport/07-errors main
-# ... implement tasks 7.1–7.10 ...
-git add -A && git commit -m "transport: add error formatting, CORS, mid-stream errors, and Retry-After"
-git push -u origin transport/07-errors
-# Open PR: "Transport Layer PR7: Error Formatting & Edge Cases"
-# Description: "Polishes error responses (design doc Sections 4.2, 4.3, 5.0).
-# Structured JSON error bodies, Retry-After for 429, mid-stream error events,
-# client disconnect handling, CORS middleware. 4 test suites."
-```
-
----
-
-## VC-3: Full Transport Layer Verification Checkpoint
-
-**Gate:** PR1–PR7 merged. The complete transport layer works end-to-end.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-3.1 | OpenAI streaming lifecycle | POST `/v1/chat/completions` stream=true → queue update events → token events → [DONE] | All events present in order |
-| VC-3.2 | Anthropic streaming lifecycle | POST `/v1/messages` stream=true → strict event ordering verified | message_start before any delta |
-| VC-3.3 | gRPC streaming lifecycle | `StreamInference` RPC → all response chunks received | Complete stream |
-| VC-3.4 | Non-streaming with timeout | POST `/v1/chat/completions` stream=false, engine sleeps 400s, timeout=1s → 504 | GatewayTimeout |
-| VC-3.5 | Queue full → 429 | Mock queue returns `AdmissionError::QueueFull` → 429 + Retry-After header | Header present |
-| VC-3.6 | Auth on both transports | HTTP without key → 401. gRPC without metadata → UNAUTHENTICATED | Both reject |
-| VC-3.7 | Client disconnect cleanup | Start streaming. Close client TCP. Verify cancel_token fires. | Cancellation detected |
-| VC-3.8 | Mid-stream backend error | Engine yields 2 chunks then error → SSE error event emitted before stream closes | Error event present |
-| VC-3.9 | Prometheus always 200 | `GET /metrics` when metrics_exporter returns empty → 200 with empty text | Status 200 |
-| VC-3.10 | Management API round-trip | List servers → start server → stop server → config reload → queue status | All return success |
-| VC-3.11 | Large body concurrency limit | 20 × 15MB concurrent, semaphore=5 → 5 proceed, 15 get 429 | Counts match |
-| VC-3.12 | Graceful shutdown drain | Start streaming request. Call shutdown. Verify stream completes. New request rejected. | Stream completes |
-| VC-3.13 | Panic recovery HTTP | Inject panic in handler → 500 returned, next request succeeds | Process survives |
-| VC-3.14 | Panic recovery gRPC | Inject panic in service method → INTERNAL returned, next RPC succeeds | Process survives |
-| VC-3.15 | Memory bounds | 16 concurrent 200MB requests + 10000 connections → total < 3.5GB | Memory assertion |
-
-**Integration test file:** `tests/vc3_transport.rs`
-
----
-
-## PR8: Design Doc Test Cases & Integration Tests
-
-**Branch:** `transport/08-tests`  
-**Depends on:** PR7 merged to `main`  
-**Size:** Medium (~350 lines of tests)  
-**Estimated Time:** 5–7 hours
-
-### Purpose
-
-Implement all specific test cases from design doc Section 8.3, the 15 VC-3 integration tests, and edge case tests for all failure modes. This PR is pure test code — no production logic changes.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 8.1 | Implement design doc test: `test_openai_null_max_tokens_accepted` | Design doc §8.3. | `tests/design_doc_tests.rs` |
-| 8.2 | Implement design doc test: `test_openai_logit_bias_negative_keys` | Design doc §8.3. | `tests/design_doc_tests.rs` |
-| 8.3 | Implement design doc test: `test_anthropic_state_machine_ordering` | Design doc §8.3. 3 tokens → verify full event sequence. | `tests/design_doc_tests.rs` |
-| 8.4 | Implement design doc test: `test_anthropic_no_token_before_preamble` | Design doc §8.3. Fast dispatch (TTFT < 1ms). | `tests/design_doc_tests.rs` |
-| 8.5 | Implement design doc test: `test_queue_full_returns_429_with_retry_after` | Design doc §8.3. | `tests/design_doc_tests.rs` |
-| 8.6 | Implement design doc test: `test_auth_required_when_configured` | Design doc §8.3. | `tests/design_doc_tests.rs` |
-| 8.7 | Implement design doc test: `test_prometheus_endpoint_always_200` | Design doc §8.3. Degraded metrics store. | `tests/design_doc_tests.rs` |
-| 8.8 | Implement design doc test: `test_streaming_no_timeout_layer` | Design doc §8.3. Stream for 120 seconds — no timeout. | `tests/design_doc_tests.rs` |
-| 8.9 | Implement all 15 VC-3 integration tests | Per VC-3 table above. Each as a separate `#[tokio::test]` function. | `tests/vc3_transport.rs` |
-| 8.10 | Implement mock trait infrastructure | `MockInferenceEngine`, `MockServerControl`, `MockQueueSubmitter`, `MockConfigReader`, `MockConfigWriter`, `MockMetricsExporter`, `MockRouteValidator`, `MockMetricsStore`. Shared across test files. | `tests/mocks.rs` |
-| 8.11 | Tag slow tests with `#[ignore]` | Long-running tests (streaming 120s, memory bounds, concurrent stress) tagged for separate CI run. | — |
-| 8.12 | Final CI check | `cargo test --workspace`, `cargo test --workspace -- --ignored`, `cargo clippy --workspace -- -D warnings`, `cargo fmt --check`. | — |
-
-### PR8 Acceptance Criteria
-
-- [ ] All 8 design doc test cases pass
-- [ ] All 15 VC-3 integration tests pass
-- [ ] Mock infrastructure covers all 8 port traits
-- [ ] `cargo test --workspace` passes (excluding `#[ignore]` tests)
-- [ ] `cargo test --workspace -- --ignored` passes (including slow tests)
-- [ ] `cargo clippy --workspace -- -D warnings` passes
-- [ ] No production code changes in this PR — test code only. Panic injection tests (VC-3.13/3.14) use a mock `InferenceEngine` implementation that panics on `chat_completion()`. The panic propagates through the real middleware stack and is caught by `CatchPanicLayer`. No `#[cfg(test)]` annotations or production-side test hooks needed.
-
-### PR8 Creation Steps
-
-```bash
-git checkout -b transport/08-tests main
-# ... implement tasks 8.1–8.12 ...
-git add -A && git commit -m "transport: add design doc test cases, VC-3 integration tests, and mock infrastructure"
-git push -u origin transport/08-tests
-# Open PR: "Transport Layer PR8: Integration Tests & Design Doc Test Cases"
-# Description: "Pure test PR. Adds 8 design doc §8.3 test cases, 15 VC-3
-# integration tests, and mock infrastructure for all 8 port traits. Total:
-# 23 new test functions. No production code changes."
-```
-
----
-
-## PR9: Observability Polish & Documentation
-
-**Branch:** `transport/09-observability`  
-**Depends on:** PR8 merged to `main`  
-**Size:** Small (~150 lines)  
+## PR2 — Adapter scaffolding crate
+
+**Branch:** `integration/02-adapters`
+**Depends on:** PR1 merged
+**Size:** Small (~200 lines)
 **Estimated Time:** 2–3 hours
 
 ### Purpose
 
-Final polish: ensure all 6 Prometheus metrics are registered and recorded, all structured log events use correct field names, `cargo doc` builds cleanly, and the public API surface matches the design doc §2.5 visibility table.
+Create a new library crate `crates/llamaforge-adapters/` that will house the port-trait implementations bridging concrete component types (`RequestPipeline`, `ServerManager`, etc.) to the port traits in `llamaforge-types`. This keeps the binary crate small and makes the adapter logic unit-testable.
+
+Why a separate crate (not the binary): the orchestrator needs the same adapter trait impls when running under workspace integration tests (PR10) and the binary crate isn't a good place for that — integration tests would have to depend on a binary's `[lib]`, which Rust supports awkwardly.
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 2.1 | `cargo init --lib crates/llamaforge-adapters`. Workspace member. | `Cargo.toml`, `crates/llamaforge-adapters/` |
+| 2.2 | Dependencies: `llamaforge-types`, `llamaforge-config`, `llamaforge-queue`, `llamaforge-server-manager`, `llamaforge-routing`, `llamaforge-dispatch`, `llamaforge-metrics`, `tokio`, `tokio-util`, `async-trait`, `tracing`. All via `.workspace = true`. | `crates/llamaforge-adapters/Cargo.toml` |
+| 2.3 | Module structure: `src/lib.rs` declares `pub mod queue;`, `pub mod server_control;`, `pub mod metrics_exporter;`, `pub mod inference_engine;`. Each module is a stub with one `pub struct <Name>Adapter` and a `pub fn new(...)` constructor — no logic yet (PRs 3–6 fill them). | `crates/llamaforge-adapters/src/` |
+| 2.4 | Crate doc comment in `lib.rs`: "Adapters bridging concrete component types to the port traits consumed by `llamaforge-transport`. See design doc §4.2 Hexagonal layering." | `crates/llamaforge-adapters/src/lib.rs` |
+
+### PR2 Acceptance Criteria
+
+- [ ] `cargo build -p llamaforge-adapters` succeeds (with stub impls).
+- [ ] No production code outside `llamaforge-adapters` depends on it yet.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## VC-A — Type & Adapter Foundation Verification
+
+**Gate:** PR1 + PR2 merged.
+
+| # | Check | Pass criterion |
+|---|-------|-----------------|
+| VC-A.1 | Domain types complete | `IncomingRequest`, `QueueTicket`, `ServerSummary` all have ≥3 fields each |
+| VC-A.2 | Adapter crate scaffolded | `crates/llamaforge-adapters/src/{queue,server_control,metrics_exporter,inference_engine}.rs` all exist |
+| VC-A.3 | Workspace compiles | `cargo build --workspace` clean |
+| VC-A.4 | CI clean | All 3 Actions checks SUCCESS on latest `main` |
+
+---
+
+## PR3 — `QueueSubmitterAdapter`: bridge to `RequestPipeline`
+
+**Branch:** `integration/03-queue-adapter`
+**Depends on:** PR2 merged
+**Size:** Medium (~300 lines)
+**Estimated Time:** 4–6 hours
+
+### Purpose
+
+Implement `QueueSubmitter` for a `QueueSubmitterAdapter` that wraps `llamaforge_queue::RequestPipeline`. Owns the translation from the port trait's `IncomingRequest` to the queue's internal request envelope, and translates the queue's submit-result + cancel + status calls back through the port trait.
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 3.1 | `pub struct QueueSubmitterAdapter { pipeline: Arc<RequestPipeline>, dispatch_event_tx: ... }`. Constructor takes the pipeline. | `crates/llamaforge-adapters/src/queue.rs` |
+| 3.2 | `impl QueueSubmitter for QueueSubmitterAdapter` — `submit()` translates `IncomingRequest` to queue's envelope and calls `pipeline.submit(envelope)`. Returns `QueueTicket` populated with `request_id`, `admitted_at = Utc::now()`, `cancel_token`, and an `mpsc::Receiver<DispatchEvent>` whose sender is held by the pipeline-watcher task. | `crates/llamaforge-adapters/src/queue.rs` |
+| 3.3 | `cancel()` calls into the pipeline's cancel API and emits `DispatchEvent::Failed { error: "cancelled" }` on the event channel before returning. | `crates/llamaforge-adapters/src/queue.rs` |
+| 3.4 | `status()` snapshots the queue depth and computes `estimated_throughput_req_sec` from the metrics layer (passed in via constructor or held via Arc). Returns a `QueueSnapshot`. | `crates/llamaforge-adapters/src/queue.rs` |
+| 3.5 | Error mapping: queue's internal admission errors map to `AdmissionError::QueueFull` / `RateLimited` / `InvalidRequest`. Document each branch. | `crates/llamaforge-adapters/src/queue.rs` |
+| 3.6 | Unit tests with a stub `RequestPipeline` (already supported in queue crate's `test-utils` feature, or write a minimal mock here). Cover: successful submit, queue-full rejection, cancel, status returning real depth. | tests in `queue.rs` |
+| 3.7 | If `RequestPipeline` doesn't currently expose `cancel(request_id)` or a stream-of-events API, add a focused PR to `llamaforge-queue` first. **Decision required:** if the change to `llamaforge-queue` is non-trivial (>50 LOC), break it into its own preliminary PR (`integration/03a-queue-cancel-api`) and merge first. | `llamaforge-queue/src/pipeline.rs` (if needed) |
+
+### PR3 Acceptance Criteria
+
+- [ ] `impl QueueSubmitter for QueueSubmitterAdapter` compiles.
+- [ ] Unit tests cover the four `QueueSubmitter` methods + all `AdmissionError` mappings.
+- [ ] No new `unwrap()`/`expect()` in production paths.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## PR4 — `ServerControlAdapter`: bridge to `ServerManager`
+
+**Branch:** `integration/04-server-control-adapter`
+**Depends on:** PR2 merged (parallel with PR3)
+**Size:** Small (~200 lines)
+**Estimated Time:** 3–4 hours
+
+### Purpose
+
+Implement `ServerControl` on a `ServerControlAdapter` wrapping `llamaforge_server_manager::ServerManager`. The three port methods (`list_servers`, `start_server`, `stop_server`) thinly translate to manager calls and project the manager's internal `ManagedServer` view to the public `ServerSummary` shape.
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 4.1 | `pub struct ServerControlAdapter { manager: Arc<ServerManager> }` with constructor. | `crates/llamaforge-adapters/src/server_control.rs` |
+| 4.2 | `list_servers()`: read the manager's snapshot, project each entry into `ServerSummary` (id, alias, state, port, slots_total, slots_busy, started_at, last_restart_at). | `crates/llamaforge-adapters/src/server_control.rs` |
+| 4.3 | `start_server(&ServerId)`: call manager's `request_start(id)`. Map `ServerManager::Error::NotFound` → `ServerError::NotFound`, `AlreadyRunning` → `ServerError::AlreadyRunning`, spawn failures → `SpawnFailed`. | `crates/llamaforge-adapters/src/server_control.rs` |
+| 4.4 | `stop_server(&ServerId)`: call manager's `request_stop(id)`. Same error mapping pattern. | `crates/llamaforge-adapters/src/server_control.rs` |
+| 4.5 | Unit tests with a stub manager (or real `ServerManager` driven against `mock-llama` if test-utils feature allows it). | tests in `server_control.rs` |
+
+### PR4 Acceptance Criteria
+
+- [ ] `impl ServerControl for ServerControlAdapter` compiles.
+- [ ] All `ServerError` variants from PR1 mapped from at least one upstream error case.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## PR5 — `MetricsExporterAdapter`: bridge to the Prometheus registry
+
+**Branch:** `integration/05-metrics-exporter-adapter`
+**Depends on:** PR2 merged (parallel with PR3/PR4)
+**Size:** Small (~150 lines)
+**Estimated Time:** 2–3 hours
+
+### Purpose
+
+Implement `MetricsExporter` on a `MetricsExporterAdapter` that wraps the `metrics_exporter_prometheus::PrometheusBuilder` recorder (already a workspace dep). Returns the text exposition format on demand. Distinct from `MetricsStore` (which is SQLite-backed historical metrics).
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 5.1 | Build a `PrometheusHandle` at startup, hold it in `MetricsExporterAdapter`. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
+| 5.2 | `gather_text()`: returns `self.handle.render()`. Per design doc §4.2 the `/metrics` endpoint must always return 200, even on degraded state. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
+| 5.3 | Constructor: `MetricsExporterAdapter::install_global()` returns `(adapter, install_result)` and calls `PrometheusBuilder::new().install_recorder()` once at boot. Document that this is a process-global install. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
+| 5.4 | Verify that the existing `metrics::counter!`/`gauge!`/`histogram!` calls scattered through the transport crate (and elsewhere) actually flow through this recorder. Add a single unit test that emits a counter and asserts `render()` contains the metric name. | tests in `metrics_exporter.rs` |
+
+### PR5 Acceptance Criteria
+
+- [ ] `cargo run -p llamaforge-adapters --example metrics_smoke` (or unit test) shows `llamaforge_*` metric names in the rendered output.
+- [ ] No `unwrap()` in production paths.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## PR6 — `InferenceEngineAdapter`: the keystone
+
+**Branch:** `integration/06-inference-engine-adapter`
+**Depends on:** PR3 merged (needs `QueueSubmitterAdapter`); PR2 (adapter crate)
+**Size:** Large (~600 lines including streaming + error mapping + tests)
+**Estimated Time:** 8–12 hours
+
+### Purpose
+
+Implement `InferenceEngine` on a new `InferenceEngineAdapter`. This is the most substantive PR in this phase — it owns the request lifecycle:
+
+```
+ChatCompletionRequest
+    → translate to IncomingRequest
+    → submit via QueueSubmitter (returns QueueTicket with event stream)
+    → on Dispatched event: ask SmartRouter (RouteValidator? — see Note below) for slot
+    → call Dispatcher::proxy (Component 06) to get a bytes stream from llama-server
+    → parse llama.cpp SSE bytes into ChatCompletionChunk
+    → yield chunks (with QueueUpdate intersperced from DispatchEvent::Queued)
+    → on completion/error/cancel: clean up, record metrics
+```
+
+This wires four components together. The implementation crosses the `Dispatcher → SmartRouter → Queue → Metrics` boundaries within a single async function.
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 6.1 | `pub struct InferenceEngineAdapter { queue: Arc<dyn QueueSubmitter>, router: Arc<llamaforge_routing::Router>, dispatcher: Arc<llamaforge_dispatch::Dispatcher>, metrics: Arc<llamaforge_metrics::MetricsIngest> }`. Constructor injection (Arc-of-trait for queue, Arc-of-concrete for router/dispatcher/metrics until those grow port traits). | `crates/llamaforge-adapters/src/inference_engine.rs` |
+| 6.2 | `chat_completion(req: ChatCompletionRequest)` translates to `IncomingRequest`: generates `RequestId::from(Uuid::now_v7())`, maps `req.model` to `ModelTarget::Exact(ModelAlias::new(req.model))`, populates `GenerationParams` from `req.{max_tokens,temperature,...}`, sets `submitted_at = Utc::now()`. Caller-provided `RequestorId` and `RequestorClass` come from a `RequestContext` extension (defer to "anonymous" for v1 if no header). | `crates/llamaforge-adapters/src/inference_engine.rs` |
+| 6.3 | Call `queue.submit(incoming_req)?`. Hold the returned `QueueTicket`. The `events` `mpsc::Receiver` is the source of state-change signals. | — |
+| 6.4 | Build the output `Stream<Item = Result<ChatCompletionChunk, StreamError>>`. The stream's `poll_next` drives a state machine: `WaitingForDispatch → AwaitingFirstToken → Streaming → Completed`. While `WaitingForDispatch`, yield `ChatCompletionChunk::QueueUpdate { position }` events from the `DispatchEvent::Queued` ticks. On `DispatchEvent::Dispatched { server_id, slot_id }`, transition to dispatching. | — |
+| 6.5 | Dispatching: call `dispatcher.proxy(server_id, slot_id, incoming_req_payload)`, get back a `ResponseStream` (bytes). Wrap with a parser that emits `ChatCompletionChunk::Token(s)` for each `data: {"content":"..."}` SSE line from llama.cpp, and `ChatCompletionChunk::Stop(finish_reason)` on the final chunk. Use a lightweight SSE parser (`tokio_util::codec` LinesCodec is sufficient). | — |
+| 6.6 | Cancellation: the ticket's `cancel_token` is observed by a `select!` arm; on cancellation, drop the dispatcher stream (its `Drop` releases the slot per dispatch's RAII guard), emit `DispatchEvent::Failed { error: "cancelled" }`, and end the stream. | — |
+| 6.7 | Error mapping: dispatch's `DispatchError` → transport's `StreamError` (`BackendDisconnect`, `Timeout`, `ChunkParse`, `Upstream`). | — |
+| 6.8 | Metrics recording: at each lifecycle point, emit `metrics::counter!` / `metrics::histogram!`. Specifically TTFT histogram on first `ChatCompletionChunk::Token`, total tokens counter on `Stop`, queue-wait histogram on transition out of `WaitingForDispatch`. | — |
+| 6.9 | Unit tests: mock queue + mock dispatcher (return controlled byte stream) + real router (with one mock server entry). Cover: happy-path streaming, queue cancellation, dispatch error mid-stream, client disconnect (drop the consumer side). | tests in `inference_engine.rs` |
+
+### Note on SmartRouter integration
+
+`Router::select(&IncomingRequest) -> Result<RoutingDecision, RoutingError>` returns the picked server. Decide in PR6 whether the adapter calls `router.select` directly *or* whether queue admission already runs routing (and the `DispatchEvent::Dispatched` carries the answer). Read `crates/llamaforge-queue/src/pipeline.rs` to confirm; document the choice in a code comment with a design doc cite.
+
+### PR6 Acceptance Criteria
+
+- [ ] `impl InferenceEngine for InferenceEngineAdapter` compiles and passes the 4 unit tests above.
+- [ ] Streaming path parses llama.cpp SSE into `ChatCompletionChunk` variants correctly.
+- [ ] No `unwrap()` outside `Uuid::now_v7()`.
+- [ ] No blocking calls under `.await` (audit explicitly: no `std::sync::Mutex::lock().await` or similar).
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## PR7 — Config schema closing
+
+**Branch:** `integration/07-config-schema`
+**Depends on:** PR2 merged (independent of PR3–PR6, can land any time)
+**Size:** Medium (~250 lines)
+**Estimated Time:** 4–6 hours
+
+### Purpose
+
+Add the config knobs that were hardcoded with `// v1.1` comments during the transport phase. Wire them through `ConfigReader::snapshot()` so the transport and orchestrator read live values instead of compile-time constants.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 9.1 | Audit all Prometheus metrics | Cross-check design doc §7.1 table against actual metric recording sites. Verify all 6 metrics registered, labels correct, cardinality bounded. | `src/middleware.rs`, `src/grpc.rs` |
-| 9.2 | Audit all structured log events | Cross-check design doc §7.2 table. Verify exact field names, levels (INFO/DEBUG/WARN), frequency. | all source files |
-| 9.3 | Audit public API surface | `cargo doc --no-deps -p llamaforge-transport`. Verify re-exports match §2.5 visibility table. Internal types (`SseEvent`, `AnthropicState`, all DTOs, all handlers) NOT in public docs. | `src/lib.rs` |
-| 9.4 | Add module-level doc comments | Each source file gets a top-level `//!` doc comment explaining its role and design doc reference. | all source files |
-| 9.5 | Verify no `unwrap()` | `grep -rn "unwrap()" crates/llamaforge-transport/src/ --include="*.rs"` — zero bare `unwrap()`. Only allowed: `Uuid::now_v7()` (infallible). | — |
-| 9.6 | Verify no concrete upstream types | `grep -rn "ServerManager\|RequestQueue\|PrometheusMetrics\|ConfigHandle" crates/llamaforge-transport/src/ --include="*.rs"` — zero matches. | — |
+| 7.1 | Add `[gateway]` config section | New `GatewayConfig` struct in `llamaforge-config::types`. Fields: `max_request_body_bytes: u64` (default 50MB), `large_body_threshold_mb: u64` (default 1), `max_concurrent_large_requests: usize` (default 5), `wal_checkpoint_mode: CheckpointMode` (default Passive). | `llamaforge-config/src/types.rs` |
+| 7.2 | Add `[routing]` → `affinity_weight: f32` (default 0.5) — wire through `Router` to replace the hardcoded `0.0` at `llamaforge-routing/src/router.rs:239`. | `llamaforge-config/src/types.rs`, `llamaforge-routing/src/router.rs` |
+| 7.3 | Add `[grpc.tls]` table: `enabled: bool` (default false), `cert_path: Option<PathBuf>`, `key_path: Option<PathBuf>`. Wire into `start_grpc_server` to call `tonic::transport::ServerTlsConfig::new().identity(...)` when enabled. | `llamaforge-config/src/types.rs`, `llamaforge-transport/src/grpc.rs` |
+| 7.4 | Update `llamaforge-transport/src/lib.rs:91-95` to read `LargeBodyConcurrencyLimit::new(deps.config_reader.snapshot().gateway.max_concurrent_large_requests, deps.config_reader.snapshot().gateway.large_body_threshold_mb)`. Remove the workflow-ref-style comments. | `llamaforge-transport/src/lib.rs` |
+| 7.5 | Update `llamaforge-transport/src/http.rs:459` `RequestBodyLimitLayer::new(50 * 1024 * 1024)` → `RequestBodyLimitLayer::new(config.gateway.max_request_body_bytes as usize)`. | `llamaforge-transport/src/http.rs` |
+| 7.6 | Update `llamaforge-transport/src/management.rs` query handlers — parse `Query<MetricsFilter>` from the URL and pass through to `RequestMetricsStore::query_*`. Replace `MetricsFilter::default()` placeholders. Same for `Query<Vec<GroupByField>>` on `query_aggregated`. | `llamaforge-transport/src/management.rs` |
+| 7.7 | Update `wal_checkpoint` handler to accept `Query<{ mode: CheckpointMode }>` (optional, default Passive). | `llamaforge-transport/src/management.rs` |
+| 7.8 | Update `ConfigDiff` and `compute_diff()` to emit `GatewayConfigChanged`, `RoutingAffinityChanged`, `GrpcTlsChanged` so subscribers can react to hot-reload. | `llamaforge-config/src/diff.rs` |
+| 7.9 | Unit tests: round-trip serde on the new config sections, including hot-reload diff emission. | `llamaforge-config/src/types.rs`, `llamaforge-config/tests/proptest_config.rs` |
+
+### PR7 Acceptance Criteria
+
+- [ ] `grep -rn 'v1.1\|Default from VC\|Default from PR' crates/` returns zero hits in `src/` files.
+- [ ] `crates/llamaforge-transport/src/lib.rs:91` reads from config.
+- [ ] All hardcoded `50 * 1024 * 1024`, `5`, `1` (for the body-limit constants) replaced with config reads.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## VC-B — Adapter Layer Verification
+
+**Gate:** PR3 + PR4 + PR5 + PR6 + PR7 merged.
+
+| # | Check | Method | Pass criterion |
+|---|-------|--------|-----------------|
+| VC-B.1 | All 5 port traits have production impls | `grep -rn 'impl QueueSubmitter for\|impl ServerControl for\|impl MetricsExporter for\|impl InferenceEngine for\|impl RouteValidator for' crates/ --include='*.rs'` | each grep returns ≥1 hit OUTSIDE `tests/` or `#[cfg(test)]` |
+| VC-B.2 | Config knobs config-driven | `grep -c 'v1.1\|Default from' crates/*/src/*.rs` | 0 |
+| VC-B.3 | All five adapters unit-tested | `cargo test -p llamaforge-adapters` | each adapter has ≥3 tests |
+| VC-B.4 | CI clean | All Actions checks SUCCESS | green |
+
+---
+
+## PR8 — Composition root in `crates/llamaforge/src/main.rs`
+
+**Branch:** `integration/08-composition-root`
+**Depends on:** PR3 + PR4 + PR5 + PR6 + PR7 all merged
+**Size:** Medium (~400 lines)
+**Estimated Time:** 6–8 hours
+
+### Purpose
+
+Replace the stub `main.rs` with the production composition root. Parse args, load config, construct each component, build adapters, build `TransportDeps`, call `start_servers`, install signal handlers, wait for shutdown.
+
+### Tasks
+
+| # | Task | Detail | File(s) |
+|---|------|--------|---------|
+| 8.1 | CLI: `--config <path>` (default `config/llamaforge.toml`), `--verbose`, subcommands `serve` (default), `init`, `validate`. Use `clap` (workspace dep). | `crates/llamaforge/src/main.rs`, `crates/llamaforge/src/cli.rs` |
+| 8.2 | Tracing init: read `RUST_LOG`, default `info`. Configure a `tracing_subscriber::registry().with(fmt_layer).with(opentelemetry_layer_if_configured)`. | `crates/llamaforge/src/tracing_init.rs` |
+| 8.3 | Build the Tokio runtime explicitly: `Runtime::new()?` with the `multi_thread` flavor. | `main.rs` |
+| 8.4 | **Component construction order** (dependency-strict): (a) `ConfigHandle`, (b) `SqliteMetricsStore` + `MetricsIngest`, (c) `MetricsExporterAdapter::install_global()` — must happen before any `metrics::counter!` call site is exercised, (d) `ServerManager` (subscribes to config diffs), (e) `Router` (subscribes to `ServerManager`'s server-changed channel), (f) `Dispatcher` + `ReqwestClientStore` (subscribes to `Router`), (g) `RequestPipeline` (subscribes to `Dispatcher` for completion events), (h) the four adapter wrappers, (i) `InferenceEngineAdapter` constructed from `queue_adapter + router + dispatcher + metrics`. | `crates/llamaforge/src/build.rs` |
+| 8.5 | Construct `TransportDeps` with the adapters as `Arc<dyn Trait>` and concrete types where the trait is generic (config_writer, request_metrics_store, store_maintenance). | `crates/llamaforge/src/build.rs` |
+| 8.6 | Call `llamaforge_transport::start_servers(deps).await?` and hold the returned `TransportHandles`. | `main.rs` |
+| 8.7 | Signal handling: `tokio::signal::ctrl_c()` and (on Unix) `signal(SignalKind::terminate())`. On either, call `handles.shutdown()` and then `handles.wait().await`. Log `lifecycle.shutdown.started` at INFO. | `main.rs` |
+| 8.8 | The `init` subcommand: write `config/llamaforge.toml.example` with all the new gateway/routing/grpc.tls knobs and prose explaining each. | `crates/llamaforge/src/init.rs` |
+| 8.9 | The `validate` subcommand: parse the config file, run `ConfigHandle::load()`, and exit non-zero on any error (with a printed diagnostic). | `crates/llamaforge/src/validate.rs` |
+| 8.10 | Doc comment on `main()` listing the dependency order and citing design doc §4.4 (Composition root). | `main.rs` |
+
+### PR8 Acceptance Criteria
+
+- [ ] `cargo run -p llamaforge -- --config config/llamaforge.toml.example` starts both servers and stays running.
+- [ ] `curl http://127.0.0.1:8000/health` returns 200 within 1s of startup.
+- [ ] `grpcurl -plaintext 127.0.0.1:50051 grpc.health.v1.Health/Check` returns `SERVING`.
+- [ ] `kill -TERM <pid>` triggers graceful shutdown that completes within `graceful_shutdown_secs` from config.
+- [ ] No `unwrap()` outside `Uuid::now_v7()`.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## PR9 — Workspace-level integration test harness against `mock-llama`
+
+**Branch:** `integration/09-e2e-mocklama`
+**Depends on:** PR8 merged
+**Size:** Medium (~500 lines, mostly tests)
+**Estimated Time:** 6–8 hours
+
+### Purpose
+
+Build the first cross-component end-to-end test. Launches a `mock-llama` subprocess on an ephemeral port, builds the full composition root in-process (or runs `cargo run --bin llamaforge -- serve` as a subprocess), POSTs a chat-completion through the HTTP and gRPC surfaces, and verifies the response chunks arrive in the correct order.
+
+### Tasks
+
+| # | Task | File(s) |
+|---|------|---------|
+| 9.1 | Move `mock-llama` from `crates/llamaforge-server-manager/src/bin/mock-llama.rs` to its own crate `crates/mock-llama/` so it can be built independently of server-manager's test-utils feature. (Or: expose it via a `mock-llama` feature on the server-manager crate that's enabled by the new e2e crate.) | `crates/mock-llama/` (or `llamaforge-server-manager/Cargo.toml`) |
+| 9.2 | New workspace member `crates/llamaforge-e2e/` with `[lib]` (no [[bin]]). Integration tests live in `crates/llamaforge-e2e/tests/`. | `crates/llamaforge-e2e/` |
+| 9.3 | Test harness `LlamaForgeHarness::start()`: writes a temp config TOML pointing at the spawned `mock-llama` port, then either builds the orchestrator in-process or spawns it as a subprocess. Returns the HTTP and gRPC URLs. | `crates/llamaforge-e2e/src/harness.rs` |
+| 9.4 | `test_e2e_openai_chat_streaming`: POST `/v1/chat/completions` with `stream: true`. Verify the SSE stream contains `chatcmpl-<uuid>` ids consistent across chunks, `data: [DONE]` terminator, and the tokens emitted by mock-llama. | `crates/llamaforge-e2e/tests/openai.rs` |
+| 9.5 | `test_e2e_anthropic_messages_streaming`: POST `/v1/messages` with `stream: true`. Verify Anthropic event ordering (`message_start` before any `content_block_delta`). | `crates/llamaforge-e2e/tests/anthropic.rs` |
+| 9.6 | `test_e2e_grpc_streaming`: gRPC client streams from `/llamaforge.inference.InferenceService/StreamInference`. | `crates/llamaforge-e2e/tests/grpc.rs` |
+| 9.7 | `test_e2e_graceful_shutdown`: start, fire an in-flight request, send SIGTERM, verify the in-flight finishes and a new request is rejected. | `crates/llamaforge-e2e/tests/lifecycle.rs` |
+| 9.8 | `test_e2e_metrics_endpoint`: hit `/metrics` after several requests, parse the Prometheus text, assert the expected counter names and label cardinality. | `crates/llamaforge-e2e/tests/metrics.rs` |
+| 9.9 | CI workflow: add a new job `e2e-mocklama` in `.github/workflows/ci.yml` that runs `cargo test -p llamaforge-e2e --features mock-llama`. Depends on the existing `test` job. | `.github/workflows/ci.yml` |
 
 ### PR9 Acceptance Criteria
 
-- [ ] `cargo doc --no-deps -p llamaforge-transport` builds without warnings
-- [ ] All 6 metrics from design doc §7.1 are recorded
-- [ ] All 4 log events from design doc §7.2 use correct field names and levels
-- [ ] Public API matches §2.5 — no internal types leaked
-- [ ] Zero bare `unwrap()` in production code
-- [ ] Zero references to concrete upstream types
-
-### PR9 Creation Steps
-
-```bash
-git checkout -b transport/09-observability main
-# ... implement tasks 9.1–9.6 ...
-git add -A && git commit -m "transport: audit metrics, logging, docs, and public API surface"
-git push -u origin transport/09-observability
-# Open PR: "Transport Layer PR9: Observability Polish & Documentation"
-# Description: "Final audit PR. Verifies all 6 Prometheus metrics, 4 log events,
-# public API surface against design doc. Adds module doc comments.
-# Zero unwrap(), zero concrete upstream type references."
-```
+- [ ] All 5 e2e tests pass locally.
+- [ ] The new `e2e-mocklama` CI job is SUCCESS on the PR's own Actions run.
+- [ ] `mock-llama` is buildable from `cargo build --bin mock-llama` without needing the `test-utils` feature gymnastics.
+- [ ] 5 local gates green + 4/4 CI checks SUCCESS (Check & Lint, Test, e2e-mocklama, Audit Dependencies).
 
 ---
 
-## VC-4: Final Sign-Off Checkpoint
+## PR10 — Final v1 cleanup pass
 
-**Gate:** All 9 PRs merged. Transport Layer is complete.
+**Branch:** `integration/10-v1-cleanup`
+**Depends on:** PR9 merged
+**Size:** Small (~150 lines)
+**Estimated Time:** 3–4 hours
 
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-4.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
-| VC-4.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
-| VC-4.3 | Code coverage | `cargo llvm-cov --workspace`. Target > 85% line coverage for `llamaforge-transport`. | Coverage report generated |
-| VC-4.4 | Public API audit | Review `lib.rs` re-exports. Verify only §2.5 `pub` types are exported. All DTOs, state machine types, middleware, and handlers are `pub(crate)`. | Manual review |
-| VC-4.5 | Design doc compliance | Cross-check every Section in `07_TRANSPORT_LAYER.md` against the implementation. All 9 invariants (§3.4) verified. | Manual review with checklist |
-| VC-4.6 | Documentation | Every public type, trait, method, and enum variant has a doc comment. `cargo doc --no-deps -p llamaforge-transport` builds without warnings. | `cargo doc` succeeds |
-| VC-4.7 | Dependency audit | `cargo deny check` passes. No duplicate dependency versions. Transport crate depends on `llamaforge-types`, `llamaforge-config`, `llamaforge-metrics` only — NOT on queue, dispatch, server-mgr, or routing crates. | `cargo deny` green |
-| VC-4.8 | Binary size check | `cargo build --release -p llamaforge`. Binary includes transport crate. Reasonable size. | Build succeeds |
-| VC-4.9 | No `unwrap()` audit | `grep -rn "unwrap()" crates/llamaforge-transport/src/ --include="*.rs"` — zero bare `unwrap()` | Zero matches |
-| VC-4.10 | No concrete upstream types | `grep -rn "ServerManager\|RequestQueue\|PrometheusMetrics\|ConfigHandle" crates/llamaforge-transport/src/ --include="*.rs"` | Zero matches |
-| VC-4.11 | Proto codegen clean | `cargo build -p llamaforge-transport` from clean state — proto codegen succeeds | Build succeeds |
-| VC-4.12 | Dual-server smoke test | Start both servers. HTTP and gRPC accept connections. Shutdown cleanly. | Both respond |
+### Purpose
 
----
+Address the remaining v1 papercuts surfaced by e2e testing and design doc reconciliation. Single PR for whatever falls out of PR9.
 
-## Summary: PR → File Mapping
+### Tasks (template — refine after PR9)
 
-| PR | Key Files Created/Modified | LOC (est.) |
-|----|---------------------------|------------|
-| PR1 | `crates/llamaforge-transport/src/lib.rs`, `src/error.rs`, `build.rs`, `proto/`, `llamaforge-types/src/traits.rs`, `Cargo.toml` | ~250 |
-| PR2 | `src/openai.rs`, `src/anthropic.rs` | ~400 |
-| PR3 | `src/http.rs`, `src/middleware.rs` | ~350 |
-| PR4 | `src/grpc.rs`, `src/error.rs` (additions) | ~300 |
-| PR5 | `src/management.rs` | ~200 |
-| PR6 | `src/lib.rs` (additions), `src/http.rs` (additions), `src/grpc.rs` (additions) | ~200 |
-| PR7 | `src/error.rs` (additions), `src/http.rs` (additions), `src/middleware.rs` (additions) | ~200 |
-| PR8 | `tests/design_doc_tests.rs`, `tests/vc3_transport.rs`, `tests/mocks.rs` | ~350 |
-| PR9 | All source files (doc comments, audit fixes) | ~150 |
-| **Total** | | **~2,400** |
+| # | Task |
+|---|------|
+| 10.1 | `ConfigOverlayStore` trait: either remove (if deferred to v1.1 per design doc §2.8) with a single `// removed during PR10` note, or land a minimal SQLite impl. Decision drives whether this is +50 or +500 lines. |
+| 10.2 | Anthropic `usage.output_tokens` — wire actual token-count threading from `InferenceEngineAdapter` through `ChatCompletionChunk::Stop` (extend the `Stop` variant with a `usage: Usage` field if needed). |
+| 10.3 | `tracing::error!` audit: every `tracing::error!` call in `crates/*/src/` uses structured fields, not interpolated strings. Replace any `tracing::error!("Foo: {}", e)` with `tracing::error!(error = %e, "lifecycle.foo_failed")`. |
+| 10.4 | Test port handling: replace any remaining hardcoded ports in tests (`50058`, `50060`, etc.) with `0`-bind and `TcpListener::local_addr()` readback. |
+| 10.5 | `cargo doc --no-deps --workspace` builds without warnings. Public-API audit: every `pub` type, trait, method has a `///` doc comment with a design doc cite. |
+| 10.6 | README update at workspace root: 10-line "what is llamaforge", build instructions, link to design doc, link to running e2e tests. |
 
-> Note: Total ~2,400 LOC = ~1,500 production + ~900 tests. Production exceeds the design doc's ~2,000 estimate when accounting for proto codegen infrastructure (~100 lines). The summary table per-PR estimates above add to ~2,400, consistent with the header.
+### PR10 Acceptance Criteria
+
+- [ ] `cargo doc --no-deps --workspace` clean.
+- [ ] All v1 papercuts in the design-doc reconciliation checklist (see VC-C below) closed.
+- [ ] 5 local gates green + all CI checks SUCCESS.
 
 ---
 
-## Timeline (Single Engineer)
+## PR11 — `docs/design.md` ↔ implementation reconciliation pass
 
-| Day | Work | PRs |
-|-----|------|-----|
-| Day 1 | Crate scaffold + proto + port traits + error types | PR1 |
-| Day 2 | OpenAI protocol translation + tests | PR2 (part 1) |
-| Day 3 | Anthropic protocol translation + state machine + tests | PR2 (part 2) |
-| Day 4 | HTTP server + middleware stack | PR3 |
-| Day 5 | gRPC server + service implementations | PR4 |
-| Day 6 | Management REST API + server bootstrap wiring | PR5, PR6 |
-| Day 7 | Error formatting, CORS, edge cases | PR7 |
-| Day 8 | Design doc tests + VC-3 integration tests | PR8 |
-| Day 9 | Observability polish + documentation audit | PR9 |
-| Day 10 | VC-4 verification, code review fixes | — |
+**Branch:** `integration/11-design-reconcile`
+**Depends on:** PR10 merged
+**Size:** Small (~50 LOC + docs)
+**Estimated Time:** 3–4 hours (mostly reading)
 
-## Timeline (Two Engineers)
+### Purpose
 
-| Day | Engineer A | Engineer B |
-|-----|-----------|-----------|
-| Day 1 | PR1 (scaffold + proto + traits) | Reviews PR1, writes mock trait impls for testing |
-| Day 2 | PR2 (protocol translation) | Reviews PR2, sets up axum/tonic test infrastructure |
-| Day 3 | PR3 (HTTP server + middleware) | PR4 (gRPC server + services) — parallel after PR2 |
-| Day 4 | PR5 (management API) | Reviews PR3, PR4, PR5 |
-| Day 5 | PR6 (bootstrap + wiring) — after PR3/PR4/PR5 merged | PR7 (error formatting + edge cases) |
-| Day 6 | PR8 (integration tests) | PR9 (observability audit) |
-| Day 7 | VC-4 verification | Code review fixes |
+For every numbered section in `docs/design.md`, find the file(s) that implement it and add a comment pointing back to the design section. This is the final "no silent drift" guarantee — if a future contributor changes a `tokens_per_second` calculation without updating §7.2, the comment will surface in code review.
+
+### Tasks
+
+| # | Task |
+|---|------|
+| 11.1 | For each design doc §, find the implementing site(s). Add a one-line `//! Implements design.md §<n>.<m>` doc comment at the top of each implementing module. |
+| 11.2 | Build a `docs/design-implementation-map.md` table: design section → crate/file. Maintain as part of every future PR. |
+| 11.3 | Decision log: any design item still not implemented after this phase goes in `docs/v1.1-deferred.md` with the section, the reason, and the workaround. |
+
+### PR11 Acceptance Criteria
+
+- [ ] `docs/design-implementation-map.md` covers every numbered section in design.md.
+- [ ] `docs/v1.1-deferred.md` covers every `// TODO`, `// v1.1`, or `// Pending` comment remaining in `crates/*/src/`.
+- [ ] 5 local gates green + 3/3 CI green.
+
+---
+
+## VC-C — v1 Sign-Off Checkpoint
+
+**Gate:** All PRs 1–11 merged. This is the actual "LlamaForge v1.0" checkpoint.
+
+| # | Check | Method | Pass criterion |
+|---|-------|--------|-----------------|
+| VC-C.1 | All tests pass | `cargo test --workspace` and `cargo test -p llamaforge-e2e` | zero failures |
+| VC-C.2 | Zero clippy warnings | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| VC-C.3 | No `unwrap()` audit | grep `\.unwrap()` in `crates/*/src/` excluding tests | 0 (with `Uuid::now_v7()` exception if it remains; ideally zero) |
+| VC-C.4 | All five port traits production-impl | manual check VC-B.1 redux | each ≥1 impl outside tests |
+| VC-C.5 | E2E green | PR9 e2e suite | all 5 tests SUCCESS |
+| VC-C.6 | CI all-green | `gh pr view <last PR> --json statusCheckRollup` | every check SUCCESS |
+| VC-C.7 | Composition root runs | `cargo run -p llamaforge -- serve --config config/llamaforge.toml.example` runs for 60s under `mock-llama`, accepts a request, shuts down on SIGTERM | manual smoke |
+| VC-C.8 | Design ↔ impl map complete | `docs/design-implementation-map.md` covers every § | manual review |
+| VC-C.9 | Deferred-items map complete | `docs/v1.1-deferred.md` covers every remaining `TODO` | manual review |
+| VC-C.10 | `cargo deny check` | exit 0 | green |
+| VC-C.11 | Memory bound under load | run e2e harness with 100 concurrent requests, observe RSS stays under 2GB | manual smoke |
+| VC-C.12 | Documentation builds | `cargo doc --no-deps --workspace` | no warnings |
+
+When VC-C is green, `git tag v1.0.0` and announce.
 
 ---
 
@@ -646,27 +517,58 @@ git push -u origin transport/09-observability
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| Anthropic SSE state machine logic errors crash compliant SDKs | Medium | High | Exhaustive unit tests for all valid/invalid transitions. Integration test verifies exact event ordering (PR2 tasks 2.16–2.19). FM-3 documented with runtime-checked transitions. |
-| `spawn_blocking` pool exhaustion during concurrent large-body parsing | Low | Medium | Default pool is 512 threads. Gated by `LargeBodyConcurrencyLimit` (16 concurrent large requests). Monitor via `llamaforge_http_requests_total`. |
-| tonic `build.rs` proto codegen breaks on CI with different `protoc` versions | Medium | Low | Pin `tonic-build` version in workspace. CI installs specific `protoc` version. `build.rs` uses `tonic_build` directly (no external `protoc` dependency). |
-| axum 0.8 breaking changes from minor bumps | Low | Medium | Pin exact version in workspace. axum 0.8 is stable. Test suite catches regressions. |
-| Memory exhaustion from concurrent large multimodal requests | Medium | High | `LargeBodyConcurrencyLimit` semaphore caps at 16 × 200MB = 3.2GB. Monitor `llamaforge_active_connections` gauge. Config knob allows tuning at runtime. |
-| gRPC keepalive false positives on slow networks | Low | Low | Configurable intervals (30s/10s defaults). Operator can increase via `[grpc]` config section. |
-| OpenAI SDK null semantics edge cases not covered | Medium | Low | Custom `deserialize_null_as_none` tested on all `Option<T>` fields. `function_call` rejection tested explicitly. |
-| Middleware ordering mistake breaks CatchPanicLayer coverage | Low | High | Test explicitly: inject panic in auth middleware → verify 500 returned (not process crash). Middleware ordering documented in design doc §3.1. |
-| `tower-http` CatchPanicLayer does not catch all panic types | Low | Medium | `CatchPanicLayer` catches `std::panic::catch_unwind`-compatible panics. Foreign (C FFI) panics still abort. Acceptable: no FFI in middleware stack. |
-| Hot-reload of `api_key` introduces TOCTOU race | Low | Low | Auth layer reads config atomically on each request. Brief window during swap is acceptable — worst case: one request uses stale key. |
+| `InferenceEngineAdapter` SSE parser doesn't match real llama.cpp output | Medium | High | PR6 unit tests use canned SSE bytes from a real llama.cpp run (commit a fixture). PR9 e2e validates against `mock-llama` AND optionally against a real `llama-server` (gated by CI runner availability). |
+| Domain type changes in PR1 ripple wider than expected | Medium | Medium | Search-first approach in 1.9. The transport phase's `ApiError` and `tonic::Status` mapping are the riskiest sites. Add 1.8 to surface and fix early. |
+| `mock-llama` doesn't faithfully simulate `llama-server` streaming | Low | High | PR9 tests cover the contract surface (SSE event names, chunk timing). If divergence is found, fix `mock-llama` in the same PR. |
+| Tokio runtime conflict between transport's `start_servers` and `main.rs` | Low | Medium | PR8 explicitly constructs the runtime once at top level and uses `Handle::current()` everywhere downstream. No nested `Runtime::new()`. |
+| `metrics_exporter_prometheus::install_recorder()` is process-global | Certain | Low | PR5.3 documents it; PR9 e2e tests that need isolation use the `metrics::with_local_recorder` API. |
+| Config hot-reload doesn't propagate to running components | Medium | Medium | PR7.8 emits diff events; each component should already subscribe (config phase). Verify via PR9 lifecycle test. |
+| `gh pr merge --auto` ordering footgun resurfaces | Medium | High | Apply the `project_automerge_race` memory: for any PR that touches `.github/workflows/` or `Cargo.toml` at workspace root, merge without `--auto`. Sequential merges only for foundational changes. |
 
 ---
 
-## Integration Points (for next component)
+## Timeline (Single Engineer)
 
-After Transport Layer is complete, the following integration seams are ready:
+| Day | Work | PR |
+|-----|------|----|
+| Day 1 | Domain types | PR1 |
+| Day 2 | Adapter crate scaffold + queue adapter | PR2, PR3 (start) |
+| Day 3 | Queue adapter complete + server-control + metrics-exporter adapters | PR3, PR4, PR5 |
+| Day 4–5 | `InferenceEngineAdapter` (SSE parsing is the long pole) | PR6 |
+| Day 6 | Config schema + closing | PR7 |
+| Day 7 | Composition root | PR8 |
+| Day 8 | E2E harness + `mock-llama` integration | PR9 |
+| Day 9 | v1 cleanup + design-reconciliation | PR10, PR11 |
+| Day 10 | VC-C sign-off + tag v1.0.0 | — |
 
-1. **Composition root (`main.rs`)** will construct `TransportDeps` by injecting implementations of all 8 port traits, then call `start_servers(deps)`. The returned `TransportHandles` is held for shutdown coordination.
-2. **Request Queue** implements `QueueSubmitter` trait on its `RequestPipeline`. Transport calls `submit()`, `cancel()`, `status()`.
-3. **Smart Routing** implements `RouteValidator` trait on its `Router`. Transport calls `validate_routable()` at the edge for early rejection.
-4. **Server Manager** implements `ServerControl` trait. Transport calls `list_servers()`, `start_server()`, `stop_server()` from management API handlers.
-5. **Metrics & Storage** implements `MetricsStore` and `MetricsExporter` traits. Transport calls `query_*()` for management API and `gather_text()` for `/metrics`.
-6. **Config Manager** implements `ConfigReader` on `ConfigHandle` (or wrapper) and `ConfigWriter` for reload. Transport reads `TransportConfig` snapshots on each request.
-7. **External clients** (OpenAI SDK, Anthropic SDK, gRPC clients, Prometheus) connect to the HTTP/gRPC ports. The transport layer guarantees SDK-compatible protocol formatting.
+---
+
+## Summary: PR → File Mapping
+
+| PR | Key Files Created/Modified | LOC (est.) |
+|----|---------------------------|------------|
+| PR1 | `llamaforge-types/src/{lib.rs,traits.rs}`, `llamaforge-transport/src/error.rs` | ~350 |
+| PR2 | `crates/llamaforge-adapters/` (new crate) | ~200 |
+| PR3 | `llamaforge-adapters/src/queue.rs`, possibly `llamaforge-queue/src/pipeline.rs` | ~300 |
+| PR4 | `llamaforge-adapters/src/server_control.rs` | ~200 |
+| PR5 | `llamaforge-adapters/src/metrics_exporter.rs` | ~150 |
+| PR6 | `llamaforge-adapters/src/inference_engine.rs` | ~600 |
+| PR7 | `llamaforge-config/src/types.rs`, `llamaforge-routing/src/router.rs`, `llamaforge-transport/src/{lib.rs,http.rs,management.rs}` | ~250 |
+| PR8 | `llamaforge/src/{main.rs,cli.rs,build.rs,tracing_init.rs,init.rs,validate.rs}` | ~400 |
+| PR9 | `crates/mock-llama/` move, `crates/llamaforge-e2e/`, `.github/workflows/ci.yml` | ~500 |
+| PR10 | `crates/*/src/` cleanup, `README.md` | ~150 |
+| PR11 | `docs/design-implementation-map.md`, `docs/v1.1-deferred.md`, per-module doc comments | ~50 + docs |
+| **Total** | | **~3,150** |
+
+---
+
+## Process Notes (carried forward from transport phase memory)
+
+- **5-gate local verification + 3/3 CI confirmation before every relay closure.** No exceptions. The pattern that caused 15 closure/diff mismatches during the transport phase was paraphrased command output rather than literal-quoted exit codes; quote exit codes verbatim.
+- **`gh pr merge --squash --delete-branch` WITHOUT `--auto`** for any PR touching `.github/workflows/` or workspace `Cargo.toml`. See `project_automerge_race` memory.
+- **Closing another agent's PR (`gh pr close N --comment ...`)** may be blocked by the auto-mode permission classifier when triggered by a relay instruction. Surface to user before attempting. See `project_close_other_agent_pr` memory.
+- **File:line cites in closure messages** for each closed finding. If you can't cite a line, the finding isn't resolved.
+
+---
+
+*Plan revision 1 — 2026-05-14. Replaces the prior `PLAN.md` (Transport Layer plan, phase 7) which is complete (PRs #70–#85 on `main`).*

@@ -67,17 +67,65 @@ pub enum DequeueReason {
 
 // --- Added for Transport Layer (PR1) ---
 
+/// Summary of a server's state.
+/// See design doc §5.3.1.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ServerSummary {}
+pub struct ServerSummary {
+    /// Server unique ID. See design doc §5.3.1.
+    pub id: crate::ServerId,
+    /// Model alias loaded by this server. See design doc §5.3.1.
+    pub alias: crate::ModelAlias,
+    /// Lifecycle state of the server. See design doc §5.3.1.
+    pub state: crate::ServerLifecycle,
+    /// Port the server listens on. See design doc §5.3.1.
+    pub port: u16,
+    /// Total slots on the server. See design doc §5.3.1.
+    pub slots_total: u32,
+    /// Currently busy slots. See design doc §5.3.1.
+    pub slots_busy: u32,
+    /// When the server first started. See design doc §5.3.1.
+    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// When the server was last restarted. See design doc §5.3.1.
+    pub last_restart_at: Option<chrono::DateTime<chrono::Utc>>,
+}
 
 #[derive(Debug, Error)]
 pub enum ServerError {
-    #[error("Server error")]
-    Failed,
+    #[error("Server not found: {id}")]
+    NotFound { id: crate::ServerId },
+    #[error("Server already running: {id}")]
+    AlreadyRunning { id: crate::ServerId },
+    #[error("Server spawn failed: {reason}")]
+    SpawnFailed { reason: String },
+    #[error("Server unreachable: {id}")]
+    Unreachable { id: crate::ServerId },
 }
 
-#[derive(Debug, Clone)]
-pub struct QueueTicket {}
+/// A token representing a queued request.
+/// Holds backpressure for cancellation.
+/// See design doc §5.4.3.
+#[derive(Debug)]
+pub struct QueueTicket {
+    /// Request ID. See design doc §5.4.3.
+    pub request_id: crate::RequestId,
+    /// Time when the request was admitted to the queue. See design doc §5.4.3.
+    pub admitted_at: chrono::DateTime<chrono::Utc>,
+    /// Token to signal cancellation of the request. See design doc §5.4.3.
+    pub cancel_token: tokio_util::sync::CancellationToken,
+    /// Stream of events from the dispatch process. See design doc §5.4.3.
+    pub events: tokio::sync::mpsc::Receiver<DispatchEvent>,
+}
+
+/// Events emitted during request dispatch.
+/// See design doc §5.4.3.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchEvent {
+    Queued { position: u32 },
+    Dispatched { server_id: crate::ServerId, slot_id: crate::SlotId },
+    FirstToken { ttft_ms: u64 },
+    Completed { tokens: u32 },
+    Failed { error: String },
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct QueueSnapshot {
@@ -89,21 +137,56 @@ pub struct QueueSnapshot {
 pub enum AdmissionError {
     #[error("Queue full")]
     QueueFull,
+    #[error("Cancelled")]
+    Cancelled,
+    #[error("Invalid request: {reason}")]
+    InvalidRequest { reason: String },
+    #[error("Rate limited. Retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u32 },
 }
 
 #[derive(Debug, Error)]
 pub enum QueueError {
-    #[error("Queue error")]
-    Failed,
+    #[error("Request not found: {id}")]
+    NotFound { id: crate::RequestId },
+    #[error("Already cancelled")]
+    AlreadyCancelled,
+    #[error("Internal error: {detail}")]
+    Internal { detail: String },
 }
 
+/// An incoming request to be queued and dispatched.
+/// See design doc §5.4.2.
 #[derive(Debug, Clone)]
-pub struct IncomingRequest {}
+pub struct IncomingRequest {
+    /// Unique ID for this request. See design doc §5.4.2.
+    pub request_id: crate::RequestId,
+    /// ID of the caller/user. See design doc §5.4.2.
+    pub requestor_id: crate::RequestorId,
+    /// Requestor class for quota rules. See design doc §5.4.2.
+    pub requestor_class: crate::RequestorClass,
+    /// Model targeted by this request. See design doc §5.4.2.
+    pub model_target: crate::ModelTarget,
+    /// Special capabilities required (e.g. multimodal). See design doc §5.4.2.
+    pub capabilities: crate::RequestCapabilities,
+    /// Messages making up the chat history. See design doc §5.4.2.
+    pub messages: Vec<crate::Message>,
+    /// Generation parameters (temp, max_tokens, etc). See design doc §5.4.2.
+    pub params: crate::GenerationParams,
+    /// Whether the response should be streamed. See design doc §5.4.2.
+    pub stream: bool,
+    /// Optional session affinity ID. See design doc §5.4.2.
+    pub session_id: Option<crate::SessionId>,
+    /// When the request was submitted. See design doc §5.4.2.
+    pub submitted_at: chrono::DateTime<chrono::Utc>,
+}
 
 #[derive(Debug, Error)]
 pub enum MetricsError {
-    #[error("Metrics error")]
-    Failed,
+    #[error("Store unavailable")]
+    StoreUnavailable,
+    #[error("Internal error: {detail}")]
+    Internal { detail: String },
 }
 
 /// Open trait. ServerControl

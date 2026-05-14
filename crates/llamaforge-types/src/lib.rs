@@ -159,7 +159,7 @@ pub struct ServerId(Uuid);
 /// The lifecycle state of a managed server process.
 /// See design doc Section 2.3.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ServerLifecycle {
     Stopped,
     Starting,
@@ -306,6 +306,60 @@ mod tests {
         let res: Result<LoraAdapterId, _> = serde_json::from_str("\"   \"");
         assert!(res.is_err());
     }
+
+    use crate::traits::{QueueSnapshot, ServerSummary};
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_server_summary_serde_roundtrip() {
+        let summary = ServerSummary {
+            id: ServerId::new(uuid::Uuid::now_v7()),
+            alias: ModelAlias::new("test-alias".into()),
+            state: ServerLifecycle::Running,
+            port: 8080,
+            slots_total: 4,
+            slots_busy: 2,
+            started_at: Some(chrono::Utc::now()),
+            last_restart_at: None,
+        };
+        let serialized = serde_json::to_string(&summary).unwrap();
+        let deserialized: ServerSummary = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.id, summary.id);
+        assert_eq!(deserialized.state, summary.state);
+        assert_eq!(deserialized.port, summary.port);
+    }
+
+    #[test]
+    fn test_queue_snapshot_serde_roundtrip() {
+        let snapshot = QueueSnapshot { depth: 42, estimated_throughput_req_sec: 1.5 };
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        let deserialized: QueueSnapshot = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.depth, snapshot.depth);
+        assert_eq!(
+            deserialized.estimated_throughput_req_sec,
+            snapshot.estimated_throughput_req_sec
+        );
+    }
+
+    #[test]
+    fn test_generation_params_serde_roundtrip() {
+        let mut logit_bias = HashMap::new();
+        logit_bias.insert(42, 10.5);
+        let params = GenerationParams {
+            max_tokens: Some(100),
+            temperature: Some(0.8),
+            top_p: Some(0.9),
+            top_k: Some(40),
+            logit_bias: Some(logit_bias),
+            stop: vec!["stop".to_string()],
+            seed: Some(12345),
+        };
+        let serialized = serde_json::to_string(&params).unwrap();
+        let deserialized: GenerationParams = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.max_tokens, params.max_tokens);
+        assert_eq!(deserialized.stop, params.stop);
+        assert_eq!(deserialized.seed, params.seed);
+    }
 }
 
 /// TLS configuration for backend connection.
@@ -362,6 +416,30 @@ pub enum ChatCompletionChunk {
 }
 
 /// Error type for stream failures.
-#[derive(Debug, Clone, thiserror::Error)]
-#[error("Stream error")]
-pub struct StreamError {}
+#[derive(Debug, thiserror::Error)]
+pub enum StreamError {
+    #[error("Backend disconnected")]
+    BackendDisconnect,
+    #[error("Timeout")]
+    Timeout,
+    #[error("Cancelled")]
+    Cancelled,
+    #[error("Chunk parse error: {reason}")]
+    ChunkParse { reason: String },
+    #[error("Upstream error: {0}")]
+    Upstream(Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// Generation parameters for a request.
+/// See design doc §5.4.2.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GenerationParams {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub logit_bias: Option<std::collections::HashMap<i32, f64>>,
+    #[serde(default)]
+    pub stop: Vec<String>,
+    pub seed: Option<u64>,
+}

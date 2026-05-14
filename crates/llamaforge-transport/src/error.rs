@@ -32,6 +32,26 @@ pub enum ApiError {
     Internal(String),
 }
 
+impl From<llamaforge_types::traits::AdmissionError> for ApiError {
+    fn from(err: llamaforge_types::traits::AdmissionError) -> Self {
+        match err {
+            llamaforge_types::traits::AdmissionError::QueueFull => {
+                // Defaulting to 5 seconds if not explicitly provided
+                ApiError::QueueFull { retry_after_secs: 5 }
+            }
+            llamaforge_types::traits::AdmissionError::RateLimited { retry_after_secs } => {
+                ApiError::QueueFull { retry_after_secs }
+            }
+            llamaforge_types::traits::AdmissionError::InvalidRequest { reason } => {
+                ApiError::InvalidBody(reason)
+            }
+            llamaforge_types::traits::AdmissionError::Cancelled => {
+                ApiError::Internal("Request cancelled during admission".to_string())
+            }
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match &self {

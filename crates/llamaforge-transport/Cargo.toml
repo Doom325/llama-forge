@@ -35,6 +35,8 @@ llamaforge-config.workspace = true
 llamaforge-metrics.workspace = true
 llamaforge-types.workspace = true
 llamaforge-proto.workspace = true
+chrono.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 chrono.workspace = true

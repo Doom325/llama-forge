@@ -199,7 +199,12 @@ mod tests {
     struct MockQueueSubmitter;
     impl QueueSubmitter for MockQueueSubmitter {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
-            Ok(QueueTicket {})
+            Ok(QueueTicket {
+                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                admitted_at: chrono::Utc::now(),
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                events: tokio::sync::mpsc::channel(1).1,
+            })
         }
         fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
             Ok(())

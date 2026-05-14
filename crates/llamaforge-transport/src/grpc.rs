@@ -398,7 +398,7 @@ mod tests {
     use llamaforge_types::{ChatCompletionChunk, StreamError};
 
     struct MockEngine {
-        chunks: Vec<Result<ChatCompletionChunk, StreamError>>,
+        chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
     }
     #[tonic::async_trait]
     impl InferenceEngine for MockEngine {
@@ -415,7 +415,7 @@ mod tests {
             >,
             llamaforge_types::traits::DispatchError,
         > {
-            let chunks = self.chunks.clone();
+            let chunks = std::mem::take(&mut *self.chunks.lock().unwrap());
             Ok(Box::pin(stream::iter(chunks)))
         }
     }
@@ -469,7 +469,12 @@ mod tests {
             _req: llamaforge_types::traits::IncomingRequest,
         ) -> Result<llamaforge_types::traits::QueueTicket, llamaforge_types::traits::AdmissionError>
         {
-            Ok(llamaforge_types::traits::QueueTicket {})
+            Ok(llamaforge_types::traits::QueueTicket {
+                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                admitted_at: chrono::Utc::now(),
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                events: tokio::sync::mpsc::channel(1).1,
+            })
         }
         fn cancel(
             &self,
@@ -506,7 +511,7 @@ mod tests {
             config_reader: handle.clone(),
             config_writer: handle.clone(),
             route_validator: Arc::new(MockRouteValidator),
-            inference_engine: Arc::new(MockEngine { chunks }),
+            inference_engine: Arc::new(MockEngine { chunks: std::sync::Mutex::new(chunks) }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
@@ -571,7 +576,7 @@ mod tests {
             config_reader: handle.clone(),
             config_writer: handle.clone(),
             route_validator: Arc::new(MockRouteValidator),
-            inference_engine: Arc::new(MockEngine { chunks: vec![] }),
+            inference_engine: Arc::new(MockEngine { chunks: std::sync::Mutex::new(vec![]) }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
