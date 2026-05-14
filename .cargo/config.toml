@@ -1,2 +1,7 @@
 [build]
 rustflags = ["-D", "warnings"]
+
+# `-D warnings` is duplicated because `[target.*]` rustflags replace `[build]`
+# rustflags rather than merging. mold is Linux-only — macOS uses Apple's ld-prime.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-D", "warnings", "-C", "link-arg=-fuse-ld=mold"]
