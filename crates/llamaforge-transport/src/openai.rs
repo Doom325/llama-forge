@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use crate::error::ApiError;
 use llamaforge_types::{ChatCompletionChunk, ChatCompletionRequest, Message, Role};
 use serde::{Deserialize, Deserializer, Serialize};

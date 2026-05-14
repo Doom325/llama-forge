@@ -1375,6 +1375,7 @@ dependencies = [
  "async-trait",
  "axum",
  "futures-core",
+ "futures-util",
  "hyper",
  "llamaforge-config",
  "llamaforge-metrics",
@@ -1390,6 +1391,7 @@ dependencies = [
  "tonic",
  "tower",
  "tower-http",
+ "tracing",
  "uuid",
 ]
 

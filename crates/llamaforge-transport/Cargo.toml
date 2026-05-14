@@ -19,9 +19,11 @@ tokio-stream.workspace = true
 uuid.workspace = true
 pin-project-lite.workspace = true
 futures-core.workspace = true
+futures-util.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
+tracing.workspace = true
 
 # Dependency rationale: llamaforge-config and llamaforge-metrics are direct dependencies
 # despite cross-crate communication being via port traits because we need access to their
