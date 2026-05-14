@@ -1,0 +1,42 @@
+[package]
+name = "llamaforge-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Inherited from workspace
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tonic.workspace = true
+prost.workspace = true
+hyper.workspace = true
+serde_json.workspace = true
+tokio-stream.workspace = true
+uuid.workspace = true
+pin-project-lite.workspace = true
+futures-core.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+
+# Dependency rationale: llamaforge-config and llamaforge-metrics are direct dependencies
+# despite cross-crate communication being via port traits because we need access to their
+# respective ConfigReader and MetricsExporter implementations to wire them in the composition root
+# and use their public interface definitions.
+llamaforge-config.workspace = true
+llamaforge-metrics.workspace = true
+llamaforge-types.workspace = true
+
+[dev-dependencies]
+# reqwest: used for full-stack integration tests (real HTTP client -> real server).
+# Unit/handler tests use axum::test helpers instead.
+reqwest.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros"] }
+tower = { workspace = true, features = ["util"] }
+
+[build-dependencies]
+tonic-build.workspace = true

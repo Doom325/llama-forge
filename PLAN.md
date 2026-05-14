@@ -72,13 +72,13 @@ Create the `llamaforge-transport` library crate, define protobuf files for gRPC,
 
 ### PR1 Acceptance Criteria
 
-- [ ] `cargo build --workspace` succeeds — proto codegen completes without errors
-- [ ] All port traits compile with `Arc<dyn Trait>` (object-safe)
-- [ ] `TransportDeps` struct compiles with all 8 fields
-- [ ] `TransportHandles::wait()` returns `Result<(), TransportError>`
-- [ ] `AnthropicProtocolError::InvalidTransition` has `from` and `to` fields of type `AnthropicStreamPhase`
-- [ ] `cargo clippy --workspace -- -D warnings` passes clean
-- [ ] No concrete upstream types (`ServerManager`, `RequestQueue`, `PrometheusMetrics`, `ConfigHandle`) appear in the crate
+- [x] `cargo build --workspace` succeeds — proto codegen completes without errors
+- [x] All port traits compile with `Arc<dyn Trait>` (object-safe)
+- [x] `TransportDeps` struct compiles with all 8 fields
+- [x] `TransportHandles::wait()` returns `Result<(), TransportError>`
+- [x] `AnthropicProtocolError::InvalidTransition` has `from` and `to` fields of type `AnthropicStreamPhase`
+- [x] `cargo clippy --workspace -- -D warnings` passes clean
+- [x] No concrete upstream types (`ServerManager`, `RequestQueue`, `PrometheusMetrics`, `ConfigHandle`) appear in the crate
 
 ### PR1 Creation Steps
 

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package llamaforge.management;
+
+service ManagementService {
+  rpc ListServers (ListServersRequest) returns (ListServersResponse);
+  rpc StartServer (StartServerRequest) returns (StartServerResponse);
+  rpc StopServer (StopServerRequest) returns (StopServerResponse);
+  rpc QueueStatus (QueueStatusRequest) returns (QueueStatusResponse);
+  rpc CancelRequest (CancelRequestRequest) returns (CancelRequestResponse);
+  rpc ReloadConfig (ReloadConfigRequest) returns (ReloadConfigResponse);
+}
+
+message ListServersRequest {}
+message ListServersResponse {
+  string payload = 1; // JSON-encoded array of ServerSummary
+}
+
+message StartServerRequest {
+  string server_id = 1;
+}
+message StartServerResponse {}
+
+message StopServerRequest {
+  string server_id = 1;
+}
+message StopServerResponse {}
+
+message QueueStatusRequest {}
+message QueueStatusResponse {
+  string payload = 1; // JSON-encoded QueueSnapshot
+}
+
+message CancelRequestRequest {
+  string request_id = 1;
+}
+message CancelRequestResponse {}
+
+message ReloadConfigRequest {}
+message ReloadConfigResponse {}

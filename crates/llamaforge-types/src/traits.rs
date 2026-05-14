@@ -64,3 +64,80 @@ pub enum DequeueReason {
     TimedOut,
     ShuttingDown,
 }
+
+// --- Added for Transport Layer (PR1) ---
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ServerSummary {}
+
+#[derive(Debug, Error)]
+pub enum ServerError {
+    #[error("Server error")]
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueTicket {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QueueSnapshot {}
+
+#[derive(Debug, Error)]
+pub enum AdmissionError {
+    #[error("Queue full")]
+    QueueFull,
+}
+
+#[derive(Debug, Error)]
+pub enum QueueError {
+    #[error("Queue error")]
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+pub struct IncomingRequest {}
+
+#[derive(Debug, Error)]
+pub enum MetricsError {
+    #[error("Metrics error")]
+    Failed,
+}
+
+/// Open trait. ConfigReader
+pub trait ConfigReader: Send + Sync {}
+
+/// Open trait. ConfigWriter
+#[async_trait::async_trait]
+pub trait ConfigWriter: Send + Sync {
+    async fn reload(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+}
+
+/// Open trait. ServerControl
+#[async_trait::async_trait]
+pub trait ServerControl: Send + Sync {
+    async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError>;
+    async fn start_server(&self, id: &crate::ServerId) -> Result<(), ServerError>;
+    async fn stop_server(&self, id: &crate::ServerId) -> Result<(), ServerError>;
+}
+
+/// Open trait. RouteValidator
+pub trait RouteValidator: Send + Sync {
+    fn validate_routable(&self, req: &IncomingRequest) -> Result<(), AdmissionError>;
+}
+
+/// Open trait. QueueSubmitter
+pub trait QueueSubmitter: Send + Sync {
+    fn submit(&self, req: IncomingRequest) -> Result<QueueTicket, AdmissionError>;
+    fn cancel(&self, id: &crate::RequestId) -> Result<(), QueueError>;
+    fn status(&self) -> Result<QueueSnapshot, QueueError>;
+}
+
+/// Open trait. MetricsExporter
+pub trait MetricsExporter: Send + Sync {
+    fn gather_text(&self) -> String;
+}
+
+/// Open trait. MetricsStore
+pub trait MetricsStore: Send + Sync {
+    fn wal_checkpoint(&self) -> Result<(), MetricsError>;
+}
