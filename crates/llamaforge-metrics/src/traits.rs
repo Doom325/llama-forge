@@ -77,10 +77,10 @@ pub trait StoreMaintenance: Send + Sync + private::Sealed {
     ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
 
     /// Perform a WAL checkpoint.
-    async fn wal_checkpoint(
+    fn wal_checkpoint(
         &self,
         mode: crate::types::CheckpointMode,
-    ) -> Result<crate::types::CheckpointResult, StoreError>;
+    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send;
 }
 
 /// An override for a specific configuration value on a specific server.

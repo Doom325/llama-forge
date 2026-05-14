@@ -190,11 +190,22 @@ impl StoreMaintenance for InstrumentedMetricsStore {
         }
     }
 
-    async fn wal_checkpoint(
+    #[allow(clippy::manual_async_fn)]
+    fn wal_checkpoint(
         &self,
         mode: crate::types::CheckpointMode,
-    ) -> Result<crate::types::CheckpointResult, StoreError> {
+    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send
+    {
         let span = info_span!("metrics.wal_checkpoint");
-        self.inner.wal_checkpoint(mode).instrument(span).await
+        let future = self.inner.wal_checkpoint(mode).instrument(span);
+        let metrics = self.metrics.clone();
+
+        async move {
+            let start = std::time::Instant::now();
+            let res = future.await;
+            metrics.observe_write_duration(start.elapsed().as_secs_f64());
+            metrics.record_write_result(if res.is_ok() { "ok" } else { "error" });
+            res
+        }
     }
 }

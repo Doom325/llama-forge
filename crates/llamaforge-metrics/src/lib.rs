@@ -1,11 +1,11 @@
 pub(crate) mod error;
-pub mod filter;
+pub(crate) mod filter;
 pub(crate) mod ingest;
 pub(crate) mod instrumented;
 pub(crate) mod metrics_recording;
 pub(crate) mod sqlite;
 pub(crate) mod traits;
-pub mod types;
+pub(crate) mod types;
 
 // Public API
 pub use error::{AuditSendError, StoreError};

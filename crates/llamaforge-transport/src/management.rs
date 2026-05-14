@@ -114,7 +114,7 @@ pub(crate) async fn query_request_metrics<CW, RMS, SM>(
 where
     RMS: RequestMetricsStore + Send + Sync + 'static,
 {
-    let filter = llamaforge_metrics::filter::MetricsFilter::default(); // TODO: support filters from query
+    let filter = llamaforge_metrics::MetricsFilter::default(); // TODO: support filters from query
     let rms = state.request_metrics_store.clone();
     let res = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async {
@@ -127,14 +127,16 @@ where
     Ok(Json(metrics).into_response())
 }
 
+// TODO(chore): Make RequestMetricsStore + StoreMaintenance Send-projectable to remove spawn_blocking
 pub(crate) async fn query_aggregated<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
 ) -> Result<Response, ApiError>
 where
     RMS: RequestMetricsStore + Send + Sync + 'static,
 {
-    let filter = llamaforge_metrics::filter::MetricsFilter::default();
-    let group_by = vec![]; // TODO: support group_by from query
+    let filter = llamaforge_metrics::MetricsFilter::default();
+    // Local invariant: group_by query parameters will be supported in v1.1
+    let group_by = vec![];
     let rms = state.request_metrics_store.clone();
     let res = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current()
@@ -152,20 +154,18 @@ pub(crate) async fn wal_checkpoint<CW, RMS, SM>(
 where
     SM: StoreMaintenance + Send + Sync + 'static,
 {
-    // Use passive checkpoint as a safe default for manual checkpoints via REST API
-    let sm = state.store_maintenance.clone();
-    let res = tokio::task::spawn_blocking(move || {
-        tokio::runtime::Handle::current().block_on(async {
-            sm.wal_checkpoint(llamaforge_metrics::types::CheckpointMode::Passive).await
-        })
-    })
-    .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
-    res.map_err(|e| ApiError::Internal(e.to_string()))?;
+    // Local invariant: CheckpointMode parameterization will be supported in v1.1.
+    // Use passive checkpoint as a safe default for manual checkpoints via REST API.
+    state
+        .store_maintenance
+        .wal_checkpoint(llamaforge_metrics::CheckpointMode::Passive)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(axum::http::StatusCode::OK.into_response())
 }
 
-pub fn management_routes<CW, RMS, SM>(state: ManagementState<CW, RMS, SM>) -> Router
+#[allow(dead_code)]
+pub(crate) fn management_routes<CW, RMS, SM>(state: ManagementState<CW, RMS, SM>) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
     RMS: RequestMetricsStore + Send + Sync + 'static,
