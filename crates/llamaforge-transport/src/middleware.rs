@@ -71,6 +71,21 @@ pub(crate) async fn auth_middleware(
         };
 
         if !is_valid {
+            let ip = req
+                .extensions()
+                .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|c| c.0.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let masked_key = auth_header
+                .and_then(|h| h.strip_prefix("Bearer "))
+                .map(|k| format!("{}...", &k[..std::cmp::min(k.len(), 4)]))
+                .unwrap_or_else(|| "none".to_string());
+
+            tracing::warn!(
+                ip = %ip,
+                provided_key_prefix = %masked_key,
+                "transport.auth_failed"
+            );
             metrics::counter!("llamaforge_auth_failures_total").increment(1);
             return Err(crate::error::ApiError::AuthFailure);
         }
@@ -85,7 +100,32 @@ pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Respo
 
     req.extensions_mut().insert(llamaforge_types::RequestId::new(request_id));
 
+    let method = req.method().to_string();
+    let path = req.uri().path().to_string();
+    let content_length = req
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("0")
+        .to_string();
+
+    tracing::debug!(
+        method = %method,
+        path = %path,
+        request_id = %request_id_str,
+        content_length = %content_length,
+        "transport.request"
+    );
+
     let mut response = next.run(req).await;
+
+    if response.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+        tracing::warn!(
+            received_bytes = %content_length,
+            limit = 52428800,
+            "transport.body_too_large"
+        );
+    }
 
     if let Ok(header_val) = axum::http::HeaderValue::from_str(&request_id_str) {
         response.headers_mut().insert("x-request-id", header_val.clone());

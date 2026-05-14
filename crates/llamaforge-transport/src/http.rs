@@ -338,14 +338,19 @@ where
     let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.http_port);
     let router = build_router(state);
 
-    tracing::info!("transport.started HTTP server on {}", addr);
+    tracing::info!(
+        bind_address = %config.global.bind_address,
+        port = config.global.http_port,
+        tls = false,
+        "transport.started"
+    );
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| TransportError::Bootstrap(e.to_string()))?;
 
     let mut rx = shutdown_rx.clone();
-    axum::serve(listener, router)
+    axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async move {
             let _ = rx.changed().await;
         })

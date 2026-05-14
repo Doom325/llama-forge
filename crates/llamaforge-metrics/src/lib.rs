@@ -36,6 +36,7 @@ pub use metrics_recording::NoopMetrics;
 pub use sqlite::{
     batch_collector::batch_collector_main,
     commands::WriterCommand,
+    in_memory::InMemoryStore,
     liveness::start_liveness_monitor,
     migrations::get_migrations,
     open_and_migrate,

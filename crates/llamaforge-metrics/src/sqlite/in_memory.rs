@@ -10,7 +10,7 @@ use crate::types::{AuditEvent, ConfigSnapshot, ManagedProcess, ProcessId, Reques
 /// An in-memory implementation of the storage traits, used for testing decorators and consumers.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Default)]
-pub(crate) struct InMemoryStore {
+pub struct InMemoryStore {
     events: Mutex<Vec<AuditEvent>>,
     metrics: Mutex<Vec<RequestMetrics>>,
     processes: Mutex<Vec<ManagedProcess>>,

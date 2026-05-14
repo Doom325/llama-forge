@@ -37,11 +37,13 @@ llamaforge-types.workspace = true
 llamaforge-proto.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 # reqwest: used for full-stack integration tests (real HTTP client -> real server).
 # Unit/handler tests use axum::test helpers instead.
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = { workspace = true, features = ["util"] }
 llamaforge-config = { workspace = true, features = ["test-utils"] }
+llamaforge-metrics = { workspace = true, features = ["test-utils"] }
 
 [build-dependencies]

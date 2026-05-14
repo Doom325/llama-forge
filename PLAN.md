@@ -376,12 +376,12 @@ Implement `start_servers()` — the composition root function that wires HTTP an
 
 ### PR6 Acceptance Criteria
 
-- [ ] `start_servers()` accepts only `TransportDeps` — no other parameters
-- [ ] Both HTTP and gRPC servers start on configured ports
-- [ ] Graceful shutdown drains in-flight requests
-- [ ] `TransportHandles::wait()` returns `Ok(())` on clean shutdown, `Err` on task panic
-- [ ] All structured log events use exact field names from design doc §7.2
-- [ ] All 3 test suites pass
+- [x] `start_servers()` accepts only `TransportDeps` — no other parameters
+- [x] Both HTTP and gRPC servers start on configured ports
+- [x] Graceful shutdown drains in-flight requests
+- [x] `TransportHandles::wait()` returns `Ok(())` on clean shutdown, `Err` on task panic
+- [x] All structured log events use exact field names from design doc §7.2
+- [x] All 3 test suites pass
 
 ### PR6 Creation Steps
 

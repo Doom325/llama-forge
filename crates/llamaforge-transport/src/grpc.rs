@@ -303,7 +303,12 @@ where
 
     let auth_interceptor = AuthInterceptor { config_reader: state.config_reader.clone() };
 
-    tracing::info!("transport.started gRPC server on {}", addr);
+    tracing::info!(
+        bind_address = %config.global.bind_address,
+        port = config.global.grpc_port,
+        tls = grpc_config.tls_cert.is_some(),
+        "transport.started"
+    );
 
     let mut rx = shutdown_rx.clone();
 
