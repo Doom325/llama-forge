@@ -7,7 +7,7 @@ members = [
     "crates/llamaforge-metrics",
     "crates/llamaforge-server-manager",
     "crates/llamaforge-types",
-    "crates/llamaforge-queue", "crates/llamaforge-routing", "crates/llamaforge-dispatch",
+    "crates/llamaforge-queue", "crates/llamaforge-routing", "crates/llamaforge-dispatch", "crates/llamaforge-transport",
 ]
 
 [workspace.package]
@@ -28,6 +28,7 @@ llamaforge-metrics = { path = "crates/llamaforge-metrics", version = "0.1.0-draf
 llamaforge-types = { path = "crates/llamaforge-types", version = "0.1.0-draft" }
 llamaforge-queue = { path = "crates/llamaforge-queue", version = "0.1.0-draft" }
 llamaforge-routing = { path = "crates/llamaforge-routing", version = "0.1.0-draft" }
+llamaforge-proto = { path = "crates/llamaforge-proto", version = "0.1.0-draft" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
@@ -48,8 +49,13 @@ chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6.0"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-axum = "0.7"
-tower = "0.4"
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["limit", "cors", "trace", "catch-panic"] }
+tonic = { version = "0.13", features = ["tls-native-roots", "gzip"] }
+tonic-build = "0.13"
+prost = "0.13"
+hyper = { version = "1.0", features = ["server", "http1", "http2"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 rusqlite_migration = "1"
 deadpool-sqlite = "0.8"

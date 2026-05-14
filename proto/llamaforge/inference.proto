@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package llamaforge.inference;
+
+service InferenceService {
+  rpc StreamInference (InferenceRequest) returns (stream InferenceResponse);
+}
+
+message InferenceRequest {
+  string model = 1;
+  string payload = 2; // JSON-encoded ChatCompletionRequest for v1 simplicity
+}
+
+message InferenceResponse {
+  string payload = 1; // JSON-encoded ChatCompletionChunk
+}

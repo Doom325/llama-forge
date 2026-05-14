@@ -319,3 +319,18 @@ pub struct ClientRefreshEvent {
     pub new_port: u16,
     pub tls_config: Option<TlsConfig>,
 }
+
+// --- Added for Transport Layer ---
+
+/// Domain type representing an incoming chat completion request.
+#[derive(Debug, Clone)]
+pub struct ChatCompletionRequest {}
+
+/// Domain type representing a chunk of a chat completion response.
+#[derive(Debug, Clone)]
+pub struct ChatCompletionChunk {}
+
+/// Error type for stream failures.
+#[derive(Debug, thiserror::Error)]
+#[error("Stream error")]
+pub struct StreamError {}
