@@ -45,5 +45,6 @@ tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = { workspace = true, features = ["util"] }
 llamaforge-config = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true, features = ["test-fixtures"] }
+serial_test.workspace = true
 
 [build-dependencies]
