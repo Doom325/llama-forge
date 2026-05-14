@@ -229,9 +229,9 @@ Implement `ServerControl` on a `ServerControlAdapter` wrapping `llamaforge_serve
 
 ### PR4 Acceptance Criteria
 
-- [ ] `impl ServerControl for ServerControlAdapter` compiles.
-- [ ] All `ServerError` variants from PR1 mapped from at least one upstream error case.
-- [ ] 5 local gates green + 3/3 CI green.
+- [x] `impl ServerControl for ServerControlAdapter` compiles.
+- [x] All `ServerError` variants from PR1 mapped from at least one upstream error case.
+- [x] 5 local gates green + 3/3 CI green.
 
 ---
 
@@ -257,9 +257,9 @@ Implement `MetricsExporter` on a `MetricsExporterAdapter` that wraps the `metric
 
 ### PR5 Acceptance Criteria
 
-- [ ] `cargo run -p llamaforge-adapters --example metrics_smoke` (or unit test) shows `llamaforge_*` metric names in the rendered output.
-- [ ] No `unwrap()` in production paths.
-- [ ] 5 local gates green + 3/3 CI green.
+- [x] `cargo run -p llamaforge-adapters --example metrics_smoke` (or unit test) shows `llamaforge_*` metric names in the rendered output.
+- [x] No `unwrap()` in production paths.
+- [x] 5 local gates green + 3/3 CI green.
 
 ---
 
