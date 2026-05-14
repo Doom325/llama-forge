@@ -1,5 +1,5 @@
-use std::pin::Pin;
 use futures_core::Stream;
+use std::pin::Pin;
 
 use llamaforge_types::{
     traits::{
@@ -42,10 +42,7 @@ impl llamaforge_transport::InferenceEngine for MockEngine {
 
 pub struct MockRouteValidator;
 impl RouteValidator for MockRouteValidator {
-    fn validate_routable(
-        &self,
-        _req: &IncomingRequest,
-    ) -> Result<(), AdmissionError> {
+    fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
         Ok(())
     }
 }
