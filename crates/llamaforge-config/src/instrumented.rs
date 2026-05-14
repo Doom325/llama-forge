@@ -60,6 +60,7 @@ impl ConfigReader for InstrumentedConfigHandle {
     }
 }
 
+#[async_trait::async_trait]
 impl ConfigWriter for InstrumentedConfigHandle {
     #[instrument(
         name = "config.reload",
