@@ -208,7 +208,7 @@ mod tests {
             Ok(())
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {
-            Ok(QueueSnapshot {})
+            Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 1.0 })
         }
     }
 
