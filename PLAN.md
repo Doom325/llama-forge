@@ -208,14 +208,14 @@ Build the axum HTTP server: route registration, the Tower middleware stack (Catc
 
 ### PR3 Acceptance Criteria
 
-- [ ] Middleware stack ordering: CatchPanic (outermost) → body limit → large body limiter → auth → request ID → metrics
-- [ ] NO `TimeoutLayer` in middleware stack
-- [ ] Non-streaming timeout applied at handler level via `tokio::time::timeout`
-- [ ] Streaming responses have no outer timeout
-- [ ] `path` metric label uses route pattern, not client path
-- [ ] Auth middleware hot-reloads (reads config on each request)
-- [ ] Request ID generated via infallible `Uuid::now_v7()`
-- [ ] All 7 test suites pass
+- [x] Middleware stack ordering: CatchPanic (outermost) → body limit → large body limiter → auth → request ID → metrics
+- [x] NO `TimeoutLayer` in middleware stack
+- [x] Non-streaming timeout applied at handler level via `tokio::time::timeout`
+- [x] Streaming responses have no outer timeout
+- [x] `path` metric label uses route pattern, not client path
+- [x] Auth middleware hot-reloads (reads config on each request)
+- [x] Request ID generated via infallible `Uuid::now_v7()`
+- [x] All 7 test suites pass
 
 ### PR3 Creation Steps
 

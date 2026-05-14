@@ -362,6 +362,6 @@ pub enum ChatCompletionChunk {
 }
 
 /// Error type for stream failures.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("Stream error")]
 pub struct StreamError {}
