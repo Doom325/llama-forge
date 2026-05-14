@@ -20,7 +20,9 @@ pub struct DispatchTracker {
 
 impl DispatchTracker {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(HashSet::new()) }
+        Self {
+            inner: Mutex::new(HashSet::new()),
+        }
     }
 
     /// Returns the number of currently in-flight requests.
@@ -77,7 +79,9 @@ pub struct DispatchTrackerRegistry {
 
 impl DispatchTrackerRegistry {
     pub fn new() -> Self {
-        Self { inner: DashMap::new() }
+        Self {
+            inner: DashMap::new(),
+        }
     }
 
     /// Get the tracker for a server, if it exists.
@@ -154,7 +158,7 @@ mod tests {
 
         tracker.remove(&ids[0]);
         tracker.remove(&ids[1]);
-
+        
         let snapshot2 = tracker.snapshot_ids();
         assert_eq!(snapshot2.len(), 3);
     }
@@ -168,7 +172,7 @@ mod tests {
 
         let t1 = registry.get_or_create(&s1);
         let t2 = registry.get(&s1).expect("Should exist now");
-
+        
         // Assert Arc identity (same pointer)
         assert!(Arc::ptr_eq(&t1, &t2));
     }
@@ -177,7 +181,7 @@ mod tests {
     fn test_dispatch_count_adapter() {
         let registry = Arc::new(DispatchTrackerRegistry::new());
         let adapter = DispatchCountAdapter::new(Arc::clone(&registry));
-
+        
         let s_active = ServerId::new(Uuid::now_v7());
         let s_empty = ServerId::new(Uuid::now_v7());
         let s_unknown = ServerId::new(Uuid::now_v7());
@@ -222,7 +226,7 @@ mod tests {
             h.join().unwrap();
         }
 
-        // All IDs might be inserted before or after they're removed,
+        // All IDs might be inserted before or after they're removed, 
         // so the exact count isn't fixed, but there should be no panics.
         // And the HashSet logic should be consistent.
         let c = tracker.count();

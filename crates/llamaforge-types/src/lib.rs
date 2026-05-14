@@ -340,7 +340,14 @@ pub struct Message {
 /// Domain type representing an incoming chat completion request.
 #[derive(Debug, Clone)]
 pub struct ChatCompletionRequest {
+    pub model: String,
     pub messages: Vec<Message>,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub stream: bool,
+    pub logit_bias: Option<std::collections::HashMap<i32, f64>>,
+    pub tools: Option<serde_json::Value>,
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 /// Domain type representing a chunk of a chat completion response.

@@ -62,15 +62,13 @@ pub struct ReqwestClientStore {
 impl ReqwestClientStore {
     /// Creates a new empty `ReqwestClientStore`.
     pub fn new() -> Self {
-        Self { clients: DashMap::new() }
+        Self {
+            clients: DashMap::new(),
+        }
     }
 
     /// Register a new server with its configuration.
-    pub fn add_server(
-        &self,
-        server_id: ServerId,
-        config: &ServerConfig,
-    ) -> Result<(), reqwest::Error> {
+    pub fn add_server(&self, server_id: ServerId, config: &ServerConfig) -> Result<(), reqwest::Error> {
         let max_idle = config.parallel_slots as usize;
         let client = Self::build_client(max_idle)?;
         let info = ServerConnectionInfo {
@@ -86,7 +84,7 @@ impl ReqwestClientStore {
     /// Helper to build a `reqwest::Client` with the correct pool settings.
     fn build_client(parallel_slots: usize) -> Result<Client, reqwest::Error> {
         let max_idle = parallel_slots.max(16);
-
+        
         Client::builder()
             .pool_idle_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(max_idle)
@@ -122,12 +120,9 @@ impl BackendClient for ReqwestClientStore {
             "id_slot": payload.id_slot.map(|id| id.into_inner()),
         });
 
-        let request = info
-            .client
-            .post(&url)
-            .json(&body)
-            .build()
-            .map_err(|e| DispatchError::ConnectionFailed(Box::new(e)))?;
+        let request = info.client.post(&url).json(&body).build().map_err(|e| {
+            DispatchError::ConnectionFailed(Box::new(e))
+        })?;
 
         let response = info.client.execute(request).await.map_err(|e| {
             if e.is_timeout() {
@@ -139,11 +134,14 @@ impl BackendClient for ReqwestClientStore {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(DispatchError::BackendError { status: HttpStatus(status.as_u16()) });
+            return Err(DispatchError::BackendError {
+                status: HttpStatus(status.as_u16()),
+            });
         }
 
-        let stream =
-            response.bytes_stream().map(|res| res.map_err(|e| StreamError::Internal(Box::new(e))));
+        let stream = response.bytes_stream().map(|res| {
+            res.map_err(|e| StreamError::Internal(Box::new(e)))
+        });
         Ok(Box::pin(stream))
     }
 }
@@ -160,13 +158,9 @@ impl ClientManager for ReqwestClientStore {
                         host: old_info.host.clone(),
                         parallel_slots: old_info.parallel_slots,
                     };
-
+                    
                     entry.store(Arc::new(new_info));
-                    tracing::info!(
-                        "Refreshed client for server {}, new port: {}",
-                        server_id,
-                        event.new_port
-                    );
+                    tracing::info!("Refreshed client for server {}, new port: {}", server_id, event.new_port);
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to build reqwest client during refresh. Keeping old client.");
@@ -185,8 +179,11 @@ mod tests {
     async fn test_arcswap_refresh() {
         let store = ReqwestClientStore::new();
         let server_id = ServerId::new(Uuid::now_v7());
-
-        let config = ServerConfig { port: 8080, ..Default::default() };
+        
+        let config = ServerConfig {
+            port: 8080,
+            ..Default::default()
+        };
         store.add_server(server_id, &config).unwrap();
 
         let initial_url = {
@@ -195,7 +192,11 @@ mod tests {
         };
         assert_eq!(initial_url, "http://127.0.0.1:8080");
 
-        let event = ClientRefreshEvent { server_id, new_port: 8081, tls_config: None };
+        let event = ClientRefreshEvent {
+            server_id,
+            new_port: 8081,
+            tls_config: None,
+        };
         store.refresh(&server_id, event);
 
         let new_url = {

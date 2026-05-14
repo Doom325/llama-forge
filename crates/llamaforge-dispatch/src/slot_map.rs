@@ -2,8 +2,8 @@
 //!
 //! See design doc Section 2.4
 
-use llamaforge_types::ports::SlotDispatchView;
 use llamaforge_types::{RequestId, ServerId, SlotId};
+use llamaforge_types::ports::SlotDispatchView;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::time::Instant;
@@ -28,7 +28,9 @@ pub struct SlotDispatchMap {
 
 impl SlotDispatchMap {
     pub fn new() -> Self {
-        Self { inner: Mutex::new(SlotDispatchMapInner::default()) }
+        Self {
+            inner: Mutex::new(SlotDispatchMapInner::default()),
+        }
     }
 
     /// Records that a request holds a slot.
@@ -37,7 +39,7 @@ impl SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         guard.by_request.insert(request_id, (server_id, slot_id, Instant::now()));
         guard.by_slot.insert((server_id, slot_id), request_id);
     }
@@ -48,7 +50,7 @@ impl SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         if let Some((server_id, slot_id, _)) = guard.by_request.remove(request_id) {
             guard.by_slot.remove(&(server_id, slot_id));
             Some((server_id, slot_id))
@@ -63,7 +65,7 @@ impl SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         guard.by_request.get(request_id).map(|&(srv, slot, _)| (srv, slot))
     }
 
@@ -73,22 +75,18 @@ impl SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         guard.by_request.get(request_id).map(|&(_, _, instant)| instant)
     }
 
     /// Retrieves all active slots assigned to a given server.
-    pub fn get_dispatched_slots_for_server(
-        &self,
-        server_id: &ServerId,
-    ) -> Vec<(RequestId, SlotId, Instant)> {
+    pub fn get_dispatched_slots_for_server(&self, server_id: &ServerId) -> Vec<(RequestId, SlotId, Instant)> {
         let guard = self.inner.lock().unwrap_or_else(|p| {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
-        guard
-            .by_request
+        
+        guard.by_request
             .iter()
             .filter(|(_, (srv, _, _))| srv == server_id)
             .map(|(req, (_, slot, instant))| (*req, *slot, *instant))
@@ -108,7 +106,7 @@ impl SlotDispatchView for SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         guard.by_slot.get(&(*server_id, *slot_id)).copied()
     }
 
@@ -117,7 +115,7 @@ impl SlotDispatchView for SlotDispatchMap {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
-
+        
         guard.by_request.values().any(|(srv, _, _)| srv == server_id)
     }
 }
@@ -166,7 +164,7 @@ mod tests {
         let instant2 = map.get_dispatched_at(&r1).unwrap();
 
         assert_eq!(instant1, instant2);
-
+        
         map.remove(&r1);
         assert!(map.get_dispatched_at(&r1).is_none());
     }
@@ -182,12 +180,12 @@ mod tests {
         assert!(!map.has_unresolved(&s1));
 
         map.insert(r1, s1, slot1);
-
+        
         assert!(map.has_unresolved(&s1));
         assert!(!map.has_unresolved(&s2));
 
         map.remove(&r1);
-
+        
         assert!(!map.has_unresolved(&s1));
     }
 
@@ -215,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_get_request_for_slot_requires_trait() {
-        // Compile-time check documentations.
+        // Compile-time check documentations. 
         // We know from visibility rules that `get_request_for_slot` is part of `SlotDispatchView`
         // and cannot be called on the raw struct without trait import.
     }

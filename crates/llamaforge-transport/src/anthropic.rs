@@ -43,7 +43,16 @@ pub(crate) fn parse_anthropic_request(
         messages.push(Message { role, content: m.content });
     }
 
-    Ok(ChatCompletionRequest { messages })
+    Ok(ChatCompletionRequest {
+        model: request.model,
+        messages,
+        max_tokens: Some(request.max_tokens),
+        temperature: None,
+        stream: request.stream,
+        logit_bias: None,
+        tools: request.tools,
+        tool_choice: request.tool_choice,
+    })
 }
 
 /// Anthropic SSE state machine.
@@ -94,6 +103,8 @@ impl From<SseEvent> for axum::response::sse::Event {
 ///
 /// Ensures strict state machine transitions per design doc G-11.
 pub(crate) fn format_anthropic_event(
+    id: &str,
+    model: &str,
     chunk: &ChatCompletionChunk,
     state: &mut AnthropicState,
 ) -> Result<Vec<SseEvent>, AnthropicProtocolError> {
@@ -115,11 +126,11 @@ pub(crate) fn format_anthropic_event(
                     data: serde_json::json!({
                         "type": "message_start",
                         "message": {
-                            "id": "msg_123",
+                            "id": id,
                             "type": "message",
                             "role": "assistant",
                             "content": [],
-                            "model": "model",
+                            "model": model,
                             "stop_reason": null,
                             "stop_sequence": null,
                             "usage": {"input_tokens": 0, "output_tokens": 0}
@@ -143,6 +154,18 @@ pub(crate) fn format_anthropic_event(
                 });
             } else if state.phase != AnthropicStreamPhase::ContentBlock {
                 state.transition(AnthropicStreamPhase::ContentBlock)?;
+                events.push(SseEvent {
+                    event_type: "content_block_start",
+                    data: serde_json::json!({
+                        "type": "content_block_start",
+                        "index": state.block_index,
+                        "content_block": {
+                            "type": "text",
+                            "text": ""
+                        }
+                    })
+                    .to_string(),
+                });
             }
 
             events.push(SseEvent {
@@ -167,11 +190,11 @@ pub(crate) fn format_anthropic_event(
                     data: serde_json::json!({
                         "type": "message_start",
                         "message": {
-                            "id": "msg_123",
+                            "id": id,
                             "type": "message",
                             "role": "assistant",
                             "content": [],
-                            "model": "model",
+                            "model": model,
                             "stop_reason": null,
                             "stop_sequence": null,
                             "usage": {"input_tokens": 0, "output_tokens": 0}
@@ -214,7 +237,7 @@ pub(crate) fn format_anthropic_event(
                         "stop_reason": finish_reason,
                         "stop_sequence": null
                     },
-                    "usage": {"output_tokens": 10}
+                    "usage": {"output_tokens": 0} // Placeholder for v1 as true usage requires Engine support
                 })
                 .to_string(),
             });
@@ -285,18 +308,18 @@ mod tests {
         let mut state = AnthropicState::new();
         let token_chunk = ChatCompletionChunk::Token("Hi".to_string());
 
-        let events = format_anthropic_event(&token_chunk, &mut state).unwrap();
+        let events = format_anthropic_event("req_123", "claude", &token_chunk, &mut state).unwrap();
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].event_type, "message_start");
         assert_eq!(events[1].event_type, "content_block_start");
         assert_eq!(events[2].event_type, "content_block_delta");
 
-        let events2 = format_anthropic_event(&token_chunk, &mut state).unwrap();
+        let events2 = format_anthropic_event("req_123", "claude", &token_chunk, &mut state).unwrap();
         assert_eq!(events2.len(), 1);
         assert_eq!(events2[0].event_type, "content_block_delta");
 
         let stop_chunk = ChatCompletionChunk::Stop("end_turn".to_string());
-        let events_stop = format_anthropic_event(&stop_chunk, &mut state).unwrap();
+        let events_stop = format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
         assert_eq!(events_stop.len(), 3);
         assert_eq!(events_stop[0].event_type, "content_block_stop");
         assert_eq!(events_stop[1].event_type, "message_delta");
@@ -305,22 +328,16 @@ mod tests {
 
     #[test]
     fn test_anthropic_no_token_before_preamble() {
-        // Enforced by the format function internally setting state.
-        // We can't manually emit a token without it forcing preamble.
-        // However, if we mess with state manually to simulate bug:
         let mut state = AnthropicState::new();
         state.phase = AnthropicStreamPhase::PreambleSent;
-        // If we try to emit token now, the formatter checks if phase == Init to send preamble.
-        // It won't send preamble, but it will try to transition to ContentBlock.
         let token_chunk = ChatCompletionChunk::Token("x".to_string());
-        let res = format_anthropic_event(&token_chunk, &mut state);
-        assert!(res.is_ok());
+        let res = format_anthropic_event("req_123", "claude", &token_chunk, &mut state).unwrap();
+        assert_eq!(res.len(), 2);
+        assert_eq!(res[0].event_type, "content_block_start");
+        assert_eq!(res[1].event_type, "content_block_delta");
 
-        // Let's test the error propagation.
         let mut state = AnthropicState::new();
         state.phase = AnthropicStreamPhase::BlockStopped;
-        // Trying to emit token after block stopped should fail
-        let res = format_anthropic_event(&token_chunk, &mut state);
+        let res = format_anthropic_event("req_123", "claude", &token_chunk, &mut state);
         assert!(matches!(res, Err(AnthropicProtocolError::InvalidTransition { .. })));
-    }
-}
+    }}

@@ -89,17 +89,26 @@ pub(crate) fn parse_openai_request(
         messages.push(Message { role, content: m.content });
     }
 
-    Ok(ChatCompletionRequest { messages })
+    Ok(ChatCompletionRequest {
+        model: request.model,
+        messages,
+        max_tokens: request.max_tokens,
+        temperature: request.temperature,
+        stream: request.stream,
+        logit_bias: request.logit_bias,
+        tools: request.tools,
+        tool_choice: request.tool_choice,
+    })
 }
 
 /// Formats an internal chunk into an OpenAI SSE format string.
 ///
 /// Note: v2 could use `BytesMut` for zero-copy formatting.
-pub(crate) fn format_openai_chunk(chunk: &ChatCompletionChunk) -> String {
+pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> String {
     match chunk {
         ChatCompletionChunk::QueueUpdate { position } => {
             let update = serde_json::json!({
-                "id": "chatcmpl-q",
+                "id": id,
                 "choices": [{
                     "delta": {},
                     "index": 0
@@ -113,7 +122,7 @@ pub(crate) fn format_openai_chunk(chunk: &ChatCompletionChunk) -> String {
         }
         ChatCompletionChunk::Token(token) => {
             let token_json = serde_json::json!({
-                "id": "chatcmpl-t",
+                "id": id,
                 "choices": [{
                     "delta": { "content": token },
                     "index": 0
@@ -123,7 +132,7 @@ pub(crate) fn format_openai_chunk(chunk: &ChatCompletionChunk) -> String {
         }
         ChatCompletionChunk::Stop(finish_reason) => {
             let stop_json = serde_json::json!({
-                "id": "chatcmpl-s",
+                "id": id,
                 "choices": [{
                     "delta": {},
                     "index": 0,
@@ -188,16 +197,19 @@ mod tests {
     #[test]
     fn test_openai_chunk_formatting() {
         let queued = ChatCompletionChunk::QueueUpdate { position: 3 };
-        let formatted_queued = format_openai_chunk(&queued);
+        let formatted_queued = format_openai_chunk("req_123", &queued);
         assert!(formatted_queued.contains("\"llamaforge\":{\"position\":3,\"status\":\"queued\"}"));
+        assert!(formatted_queued.contains("\"id\":\"req_123\""));
 
         let token = ChatCompletionChunk::Token("Hello".to_string());
-        let formatted_token = format_openai_chunk(&token);
+        let formatted_token = format_openai_chunk("req_123", &token);
         assert!(formatted_token.contains("\"content\":\"Hello\""));
+        assert!(formatted_token.contains("\"id\":\"req_123\""));
 
         let stop = ChatCompletionChunk::Stop("stop".to_string());
-        let formatted_stop = format_openai_chunk(&stop);
+        let formatted_stop = format_openai_chunk("req_123", &stop);
         assert!(formatted_stop.contains("\"finish_reason\":\"stop\""));
+        assert!(formatted_stop.contains("\"id\":\"req_123\""));
         assert!(formatted_stop.ends_with("data: [DONE]\n\n"));
     }
 }
