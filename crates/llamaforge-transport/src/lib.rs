@@ -88,9 +88,11 @@ where
     // Configure gracefully shutdown channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
 
-    // Extract configurations (hardcoded some that are missing from config structs for now, per specs)
-    let max_concurrent_large_requests = 5; // Default from VC-2.6
-    let large_body_threshold_mb = 1; // Default from PR3 tests
+    // Extract configurations
+    // Local invariant: max_concurrent_large_requests and large_body_threshold_mb will be added to the schema in v1.1.
+    // For now, we enforce safe defaults matching the design bounds.
+    let max_concurrent_large_requests = 5;
+    let large_body_threshold_mb = 1;
     let large_body_limit = middleware::LargeBodyConcurrencyLimit::new(
         max_concurrent_large_requests,
         large_body_threshold_mb,
@@ -116,7 +118,10 @@ where
     let http_shutdown_rx = shutdown_rx.clone();
     let http_handle = tokio::spawn(async move {
         if let Err(e) = http::start_http_server(http_state, http_shutdown_rx).await {
-            tracing::error!("HTTP server failed: {}", e);
+            tracing::error!(
+                error = %e,
+                "transport.http_server_failed"
+            );
         }
     });
 
@@ -124,7 +129,10 @@ where
     let grpc_shutdown_rx = shutdown_rx.clone();
     let grpc_handle = tokio::spawn(async move {
         if let Err(e) = grpc::start_grpc_server(grpc_state, grpc_shutdown_rx).await {
-            tracing::error!("gRPC server failed: {}", e);
+            tracing::error!(
+                error = %e,
+                "transport.grpc_server_failed"
+            );
         }
     });
 
@@ -197,7 +205,7 @@ mod tests {
             Ok(())
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {
-            Ok(QueueSnapshot {})
+            Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 1.0 })
         }
     }
 

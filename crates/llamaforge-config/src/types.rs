@@ -226,11 +226,30 @@ pub struct AppConfig {
     #[serde(default)]
     pub web_ui: WebUiConfig,
     #[serde(default)]
+    pub cors: CorsConfig,
+    #[serde(default)]
     pub servers: HashMap<ServerId, ServerConfig>,
     #[serde(default)]
     pub priority_rules: PriorityRulesConfig,
     #[serde(default)]
     pub routing: RoutingConfig,
+}
+
+/// CORS configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CorsConfig {
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self { allowed_origins: default_allowed_origins() }
+    }
+}
+
+fn default_allowed_origins() -> Vec<String> {
+    vec!["*".to_string()]
 }
 
 /// Routing configuration.
@@ -729,6 +748,7 @@ mod tests {
             },
             prometheus: PrometheusConfig { port: 9999, path: "/metrics_test".to_string() },
             web_ui: WebUiConfig { enabled: false },
+            cors: CorsConfig::default(),
             servers: HashMap::new(),
             priority_rules: PriorityRulesConfig {
                 task_types: HashMap::from([(TaskTypeId::from("chat"), 500)]),

@@ -23,7 +23,7 @@ pub enum ApiError {
     #[error("Model not found")]
     ModelNotFound,
     #[error("Queue full")]
-    QueueFull,
+    QueueFull { retry_after_secs: u32 },
     #[error("Backend error")]
     BackendError,
     #[error("Timeout")]
@@ -42,7 +42,7 @@ impl IntoResponse for ApiError {
             ApiError::ModelNotFound => {
                 (StatusCode::NOT_FOUND, "model_not_found", "Model not found".to_string())
             }
-            ApiError::QueueFull => {
+            ApiError::QueueFull { .. } => {
                 (StatusCode::TOO_MANY_REQUESTS, "queue_full", "Queue is full".to_string())
             }
             ApiError::BackendError => {
@@ -63,12 +63,11 @@ impl IntoResponse for ApiError {
 
         let mut response = (status, body).into_response();
 
-        if let ApiError::QueueFull = self {
-            // TODO(PR7): Dynamically calculate Retry-After based on queue depth and throughput.
-            response.headers_mut().insert(
-                axum::http::header::RETRY_AFTER,
-                axum::http::HeaderValue::from_static("30"),
-            );
+        if let ApiError::QueueFull { retry_after_secs } = self {
+            if let Ok(header_val) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string())
+            {
+                response.headers_mut().insert(axum::http::header::RETRY_AFTER, header_val);
+            }
         }
 
         response
@@ -81,7 +80,7 @@ impl From<ApiError> for tonic::Status {
             ApiError::InvalidBody(msg) => tonic::Status::invalid_argument(msg),
             ApiError::AuthFailure => tonic::Status::unauthenticated("Authentication failed"),
             ApiError::ModelNotFound => tonic::Status::not_found("Model not found"),
-            ApiError::QueueFull => tonic::Status::resource_exhausted("Queue is full"),
+            ApiError::QueueFull { .. } => tonic::Status::resource_exhausted("Queue is full"),
             ApiError::BackendError => tonic::Status::internal("Backend error"),
             ApiError::Timeout => tonic::Status::deadline_exceeded("Request timed out"),
             ApiError::Internal(msg) => tonic::Status::internal(msg),

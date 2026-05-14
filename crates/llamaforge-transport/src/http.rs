@@ -110,7 +110,18 @@ where
     state
         .route_validator
         .validate_routable(&llamaforge_types::traits::IncomingRequest {})
-        .map_err(|_| ApiError::QueueFull)?;
+        .map_err(|_| {
+            let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
+                if status.estimated_throughput_req_sec > 0.0 {
+                    (status.depth as f32 / status.estimated_throughput_req_sec).ceil() as u32
+                } else {
+                    30
+                }
+            } else {
+                30
+            };
+            ApiError::QueueFull { retry_after_secs }
+        })?;
 
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
@@ -118,15 +129,62 @@ where
     let req_id_str = format!("chatcmpl-{}", request_id.as_uuid());
 
     if stream {
+        let qs = state.queue_submitter.clone();
+        let req_id = request_id;
         let sse_stream = response_stream.map(move |res| match res {
             Ok(chunk) => {
                 let sse_data = format_openai_chunk(&req_id_str, &chunk);
                 Ok(Event::default().data(sse_data))
             }
-            Err(_) => Err(axum::Error::new("Stream error")),
+            Err(_) => {
+                let sse_data = serde_json::json!({
+                    "error": {
+                        "message": "Stream error",
+                        "type": "internal_error",
+                        "param": null,
+                        "code": null
+                    }
+                })
+                .to_string();
+                Ok::<axum::response::sse::Event, axum::Error>(Event::default().data(sse_data))
+            }
         });
 
-        Ok(Sse::new(sse_stream).into_response())
+        struct StreamGuard<S> {
+            inner: S,
+            request_id: llamaforge_types::RequestId,
+            queue_submitter: std::sync::Arc<dyn llamaforge_types::traits::QueueSubmitter>,
+            finished: bool,
+        }
+        impl<S> Drop for StreamGuard<S> {
+            fn drop(&mut self) {
+                if !self.finished {
+                    tracing::debug!("Client disconnected, cancelling request {}", self.request_id);
+                    let _ = self.queue_submitter.cancel(&self.request_id);
+                }
+            }
+        }
+        impl<S: futures_core::Stream + Unpin> futures_core::Stream for StreamGuard<S> {
+            type Item = S::Item;
+            fn poll_next(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Self::Item>> {
+                let res = std::pin::Pin::new(&mut self.inner).poll_next(cx);
+                if let std::task::Poll::Ready(None) = res {
+                    self.finished = true;
+                }
+                res
+            }
+        }
+        let guarded_stream = StreamGuard {
+            inner: Box::pin(sse_stream),
+            request_id: req_id,
+            queue_submitter: qs,
+            finished: false,
+        };
+
+        Ok(Sse::new(guarded_stream).into_response())
     } else {
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
         let res = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
@@ -236,7 +294,18 @@ where
     state
         .route_validator
         .validate_routable(&llamaforge_types::traits::IncomingRequest {})
-        .map_err(|_| ApiError::QueueFull)?;
+        .map_err(|_| {
+            let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
+                if status.estimated_throughput_req_sec > 0.0 {
+                    (status.depth as f32 / status.estimated_throughput_req_sec).ceil() as u32
+                } else {
+                    30
+                }
+            } else {
+                30
+            };
+            ApiError::QueueFull { retry_after_secs }
+        })?;
 
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
@@ -245,6 +314,8 @@ where
 
     if stream {
         let mut anthropic_state = AnthropicState::new();
+        let qs = state.queue_submitter.clone();
+        let req_id = request_id;
 
         let sse_stream = response_stream.flat_map(move |res| {
             let chunks = match res {
@@ -257,13 +328,57 @@ where
                         Err(e) => vec![Err(axum::Error::new(e))],
                     }
                 }
-                Err(_) => vec![Err(axum::Error::new("Stream error"))],
+                Err(_) => {
+                    let err_json = serde_json::json!({
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": "Stream error"
+                        }
+                    })
+                    .to_string();
+                    vec![Ok(Event::default().event("error").data(err_json))]
+                }
             };
 
             futures_util::stream::iter(chunks)
         });
 
-        Ok(Sse::new(sse_stream).into_response())
+        struct StreamGuard<S> {
+            inner: S,
+            request_id: llamaforge_types::RequestId,
+            queue_submitter: std::sync::Arc<dyn llamaforge_types::traits::QueueSubmitter>,
+            finished: bool,
+        }
+        impl<S> Drop for StreamGuard<S> {
+            fn drop(&mut self) {
+                if !self.finished {
+                    tracing::debug!("Client disconnected, cancelling request {}", self.request_id);
+                    let _ = self.queue_submitter.cancel(&self.request_id);
+                }
+            }
+        }
+        impl<S: futures_core::Stream + Unpin> futures_core::Stream for StreamGuard<S> {
+            type Item = S::Item;
+            fn poll_next(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Self::Item>> {
+                let res = std::pin::Pin::new(&mut self.inner).poll_next(cx);
+                if let std::task::Poll::Ready(None) = res {
+                    self.finished = true;
+                }
+                res
+            }
+        }
+        let guarded_stream = StreamGuard {
+            inner: Box::pin(sse_stream),
+            request_id: req_id,
+            queue_submitter: qs,
+            finished: false,
+        };
+
+        Ok(Sse::new(guarded_stream).into_response())
     } else {
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
         let res = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
@@ -343,6 +458,7 @@ where
             large_body_limit_middleware,
         ))
         .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
+        .layer(crate::middleware::build_cors_layer(state.config_reader.clone()))
         .layer(CatchPanicLayer::new())
 }
 
@@ -391,7 +507,9 @@ mod tests {
     use futures_core::Stream;
     use llamaforge_config::{source::memory::InMemoryConfigSource, AppConfig, ConfigHandle};
     use llamaforge_types::{
-        traits::{IncomingRequest, QueueError, QueueSnapshot, QueueTicket, ServerSummary},
+        traits::{
+            AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueTicket, ServerSummary,
+        },
         ChatCompletionChunk, RequestId, ServerId, StreamError,
     };
     use std::pin::Pin;
@@ -480,7 +598,7 @@ mod tests {
             Ok(())
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {
-            Ok(QueueSnapshot {})
+            Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 1.0 })
         }
     }
 
@@ -581,5 +699,119 @@ mod tests {
 
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn test_json_error_format() {
+        let engine = MockEngine { chunks: vec![], sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        // trigger 404 by hitting wrong endpoint
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/servers/invalid-id/start")
+            .body(Body::empty())
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert!(json["error"].is_string());
+        assert!(json["message"].is_string());
+        assert!(json["request_id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn test_mid_stream_error_event() {
+        let chunks = vec![Ok(ChatCompletionChunk::Token("Hel".into())), Err(StreamError {})];
+        let engine = MockEngine { chunks, sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": true
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert!(body_str.contains("Hel"));
+        assert!(body_str.contains("\"error\":{")); // Check for error object
+        assert!(body_str.contains("Stream error"));
+    }
+
+    #[tokio::test]
+    async fn test_queue_full_returns_429_with_retry_after() {
+        struct MockRouteValidatorRejects;
+        impl RouteValidator for MockRouteValidatorRejects {
+            fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
+                Err(AdmissionError::QueueFull)
+            }
+        }
+
+        let mut config = AppConfig::default();
+        config.global.queue_default_timeout_secs = 1;
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+        struct MockQueueSubmitterFull;
+        impl QueueSubmitter for MockQueueSubmitterFull {
+            fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
+                Err(AdmissionError::QueueFull)
+            }
+            fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+                Ok(())
+            }
+            fn status(&self) -> Result<QueueSnapshot, QueueError> {
+                Ok(QueueSnapshot { depth: 100, estimated_throughput_req_sec: 10.0 })
+            }
+        }
+
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidatorRejects),
+            inference_engine: Arc::new(MockEngine { chunks: vec![], sleep_ms: 0 }),
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitterFull),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+        };
+
+        let app = build_router(state);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+
+        // Throughput is 10.0, depth is 100 -> 100 / 10 = 10s
+        let retry_after = res.headers().get("retry-after").unwrap();
+        assert_eq!(retry_after, "10");
     }
 }

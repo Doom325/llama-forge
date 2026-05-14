@@ -1,8 +1,37 @@
-use axum::{extract::Request, middleware::Next, response::Response};
+use axum::{
+    extract::Request,
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 use llamaforge_config::ConfigReader;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
+
+pub(crate) fn build_cors_layer(config_reader: Arc<dyn ConfigReader>) -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(move |origin: &axum::http::HeaderValue, _parts| {
+            let config = config_reader.snapshot();
+            let origins = &config.cors.allowed_origins;
+            if origins.iter().any(|o| o == "*") {
+                return true;
+            }
+            if let Ok(origin_str) = origin.to_str() {
+                origins.iter().any(|o| o == origin_str)
+            } else {
+                false
+            }
+        }))
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
+        .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+        .max_age(std::time::Duration::from_secs(3600))
+}
 
 #[derive(Clone)]
 pub struct LargeBodyConcurrencyLimit {
@@ -40,7 +69,7 @@ pub(crate) async fn large_body_limit_middleware(
                 res.extensions_mut().insert(Arc::new(p));
                 Ok(res)
             }
-            Err(_) => Err(crate::error::ApiError::QueueFull),
+            Err(_) => Err(crate::error::ApiError::QueueFull { retry_after_secs: 30 }),
         }
     } else {
         Ok(next.run(req).await)
@@ -119,12 +148,56 @@ pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Respo
 
     let mut response = next.run(req).await;
 
-    if response.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
-        tracing::warn!(
-            received_bytes = %content_length,
-            limit = 52428800,
-            "transport.body_too_large"
-        );
+    if response.status().is_client_error() || response.status().is_server_error() {
+        if response.status() == axum::http::StatusCode::PAYLOAD_TOO_LARGE {
+            tracing::warn!(
+                received_bytes = %content_length,
+                limit = 52428800,
+                "transport.body_too_large"
+            );
+            let body = axum::Json(serde_json::json!({
+                "error": "request_body_too_large",
+                "message": "Payload too large",
+                "max_bytes": 52428800,
+                "received_bytes": content_length.parse::<u64>().unwrap_or(0),
+                "request_id": request_id_str
+            }));
+            let mut new_res = body.into_response();
+            *new_res.status_mut() = axum::http::StatusCode::PAYLOAD_TOO_LARGE;
+            *new_res.headers_mut() = response.headers().clone();
+            response = new_res;
+        } else {
+            let status = response.status();
+            let headers = response.headers().clone();
+            if let Ok(body_bytes) = axum::body::to_bytes(response.into_body(), 1024 * 1024).await {
+                if let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                    if let Some(obj) = json.as_object_mut() {
+                        obj.insert("request_id".to_string(), serde_json::json!(request_id_str));
+                        let body = axum::Json(json);
+                        let mut new_res = body.into_response();
+                        *new_res.status_mut() = status;
+                        *new_res.headers_mut() = headers;
+                        new_res.headers_mut().insert(
+                            axum::http::header::CONTENT_TYPE,
+                            axum::http::HeaderValue::from_static("application/json"),
+                        );
+                        response = new_res;
+                    } else {
+                        let mut new_res = (status, body_bytes).into_response();
+                        *new_res.headers_mut() = headers;
+                        response = new_res;
+                    }
+                } else {
+                    let mut new_res = (status, body_bytes).into_response();
+                    *new_res.headers_mut() = headers;
+                    response = new_res;
+                }
+            } else {
+                let mut new_res = (status, "").into_response();
+                *new_res.headers_mut() = headers;
+                response = new_res;
+            }
+        }
     }
 
     if let Ok(header_val) = axum::http::HeaderValue::from_str(&request_id_str) {
@@ -246,5 +319,54 @@ mod tests {
         assert_eq!(res2.status(), StatusCode::TOO_MANY_REQUESTS); // QueueFull mapped to 429
 
         task1.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_cors_headers() {
+        let reader = setup_mock_config_reader(None) as Arc<dyn ConfigReader>;
+        let next = build_cors_layer(reader);
+        let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" })).layer(next);
+
+        let req = Request::builder()
+            .method("OPTIONS")
+            .uri("/")
+            .header("origin", "http://example.com")
+            .header("access-control-request-method", "POST")
+            .body(Body::empty())
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers().get("access-control-allow-origin").unwrap(), "http://example.com");
+        assert!(res.headers().contains_key("access-control-allow-methods"));
+    }
+
+    #[tokio::test]
+    async fn test_body_limit_rejection_format() {
+        let next = axum::middleware::from_fn(request_id_middleware);
+        let limit = tower_http::limit::RequestBodyLimitLayer::new(10);
+        let app = axum::Router::new()
+            .route("/", axum::routing::post(|_req: Request<axum::body::Body>| async { "ok" }))
+            .layer(limit)
+            .layer(next);
+
+        let body_str = "x".repeat(100);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("content-length", "100")
+            .body(Body::from(body_str))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(json["error"], "request_body_too_large");
+        assert_eq!(json["max_bytes"], 52428800);
+        assert_eq!(json["received_bytes"], 100);
+        assert!(json["request_id"].is_string());
     }
 }

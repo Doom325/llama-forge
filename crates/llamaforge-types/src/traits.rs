@@ -80,7 +80,10 @@ pub enum ServerError {
 pub struct QueueTicket {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct QueueSnapshot {}
+pub struct QueueSnapshot {
+    pub depth: u32,
+    pub estimated_throughput_req_sec: f32,
+}
 
 #[derive(Debug, Error)]
 pub enum AdmissionError {
