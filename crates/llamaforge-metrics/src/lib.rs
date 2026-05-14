@@ -29,13 +29,14 @@ pub use types::{
 };
 
 // Internal types exposed for integration tests
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "test-utils", feature = "test-fixtures"))]
 pub use metrics_recording::NoopMetrics;
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "test-utils", feature = "test-fixtures"))]
 pub use sqlite::{
     batch_collector::batch_collector_main,
     commands::WriterCommand,
+    in_memory::InMemoryStore,
     liveness::start_liveness_monitor,
     migrations::get_migrations,
     open_and_migrate,

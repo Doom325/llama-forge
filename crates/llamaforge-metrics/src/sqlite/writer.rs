@@ -436,13 +436,13 @@ fn execute_insert_metrics(
 
 /// A test-only struct that owns `SyncSender<WriterCommand>` + `JoinHandle<()>`.
 /// `impl Drop`: sends `WriterCommand::Shutdown` and `join()`s the thread.
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "test-utils", feature = "test-fixtures"))]
 pub struct WriterTestHandle {
     pub tx: std::sync::mpsc::SyncSender<WriterCommand>,
     pub handle: Option<std::thread::JoinHandle<()>>,
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(any(test, feature = "test-utils", feature = "test-fixtures"))]
 impl Drop for WriterTestHandle {
     fn drop(&mut self) {
         let _ = self.tx.send(WriterCommand::Shutdown);

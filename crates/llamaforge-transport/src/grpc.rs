@@ -262,12 +262,14 @@ where
     }
 }
 
-pub async fn start_grpc_server<CW>(
-    state: HttpAppState<CW>, // Reuse HttpAppState or pass individual arcs
+pub async fn start_grpc_server<CW, RMS, SM>(
+    state: HttpAppState<CW, RMS, SM>, // Reuse HttpAppState or pass individual arcs
     shutdown_rx: tokio::sync::watch::Receiver<()>,
 ) -> Result<(), TransportError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
+    RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
+    SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
     let config = state.config_reader.snapshot();
     let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.grpc_port);
@@ -303,7 +305,12 @@ where
 
     let auth_interceptor = AuthInterceptor { config_reader: state.config_reader.clone() };
 
-    tracing::info!("transport.started gRPC server on {}", addr);
+    tracing::info!(
+        bind_address = %config.global.bind_address,
+        port = config.global.grpc_port,
+        tls = grpc_config.tls_cert.is_some(),
+        "transport.started"
+    );
 
     let mut rx = shutdown_rx.clone();
 
@@ -497,6 +504,8 @@ mod tests {
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -560,6 +569,8 @@ mod tests {
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 

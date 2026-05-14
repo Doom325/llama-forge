@@ -157,7 +157,6 @@ where
     Ok(axum::http::StatusCode::OK.into_response())
 }
 
-#[allow(dead_code)]
 pub(crate) fn management_routes<CW, RMS, SM>(state: ManagementState<CW, RMS, SM>) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
