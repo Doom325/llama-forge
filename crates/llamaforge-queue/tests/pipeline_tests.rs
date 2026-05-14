@@ -1,14 +1,10 @@
-use async_trait::async_trait;
 use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_queue::admission::AdmissionController;
-use llamaforge_queue::pipeline::{run_scheduler, CompletionGuard, RequestPipeline};
+use llamaforge_queue::pipeline::{run_scheduler, RequestPipeline};
 use llamaforge_queue::queue::DispatchQueue;
 use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
 use llamaforge_routing::{CapacityChecker, RoutingDecision, ServerSelector};
-use llamaforge_types::traits::{
-    ActiveRequestProvider, AdmissionAccounting, DequeueReason, DispatchError, DispatchToken,
-    ResponseStream, SlotDispatcher, SlotNotifier,
-};
+use llamaforge_types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -30,22 +26,6 @@ impl ServerSelector for MockServerSelector {
         _: &dyn llamaforge_routing::RequestView,
     ) -> Result<RoutingDecision, llamaforge_routing::RoutingError> {
         Ok(RoutingDecision::new_for_test(ServerId::new(uuid::Uuid::now_v7())))
-    }
-}
-
-struct MockDispatcher;
-#[async_trait]
-impl SlotDispatcher for MockDispatcher {
-    async fn dispatch(
-        &self,
-        _server_id: &ServerId,
-        _request: Arc<dyn std::any::Any + Send + Sync>,
-    ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        struct DummyToken;
-        impl DispatchToken for DummyToken {}
-        Ok((Box::pin(stream), Box::new(DummyToken)))
     }
 }
 
@@ -197,65 +177,6 @@ async fn test_pipeline_cancel_notifies_admission() {
     assert_eq!(usage_after.0, 0);
 }
 
-#[test]
-fn test_completion_guard_drop() {
-    let comp_counter = Arc::new(AtomicU32::new(0));
-    let notif_counter = Arc::new(AtomicU32::new(0));
-
-    struct NormalAdmission(Arc<AtomicU32>);
-    impl AdmissionAccounting for NormalAdmission {
-        fn record_completion(&self, _: &RequestorId) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-        fn record_dequeue(&self, _: &RequestorId, _: DequeueReason) {}
-    }
-
-    struct MockSlotNotifier(Arc<AtomicU32>);
-    impl SlotNotifier for MockSlotNotifier {
-        fn notify_slot_available(&self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    let guard = CompletionGuard::new_for_test(
-        RequestorId::new(Arc::from("u1")),
-        Arc::new(NormalAdmission(comp_counter.clone())),
-        Arc::new(MockSlotNotifier(notif_counter.clone())),
-    );
-
-    drop(guard);
-    assert_eq!(comp_counter.load(Ordering::SeqCst), 1);
-    assert_eq!(notif_counter.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn test_completion_guard_panic_safety() {
-    let counter = Arc::new(AtomicU32::new(0));
-    struct PanicAdmission;
-    impl AdmissionAccounting for PanicAdmission {
-        fn record_completion(&self, _: &RequestorId) {
-            panic!("injected panic");
-        }
-        fn record_dequeue(&self, _: &RequestorId, _: DequeueReason) {}
-    }
-
-    struct MockSlotNotifier(Arc<AtomicU32>);
-    impl SlotNotifier for MockSlotNotifier {
-        fn notify_slot_available(&self) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    let guard = CompletionGuard::new_for_test(
-        RequestorId::new(Arc::from("u1")),
-        Arc::new(PanicAdmission),
-        Arc::new(MockSlotNotifier(counter.clone())),
-    );
-
-    drop(guard);
-    assert_eq!(counter.load(Ordering::SeqCst), 1);
-}
-
 #[tokio::test]
 async fn test_scheduler_loop_dispatches() {
     let config = test_config();
@@ -275,7 +196,6 @@ async fn test_scheduler_loop_dispatches() {
         admission.clone(),
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));
@@ -315,7 +235,6 @@ async fn test_scheduler_respects_shutdown() {
         admission.clone(),
         Arc::new(MockCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));
@@ -412,7 +331,6 @@ async fn test_health_signals() {
         admission.clone(),
         Arc::new(NoCapacityChecker),
         Arc::new(MockServerSelector),
-        Arc::new(MockDispatcher),
         health.clone(),
         shutdown.clone(),
     ));

@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use llamaforge_types::traits::{DispatchToken, ResponseStream};
 use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -269,7 +268,7 @@ pub struct DispatchCandidate {
 }
 
 pub enum DispatchResult {
-    Dispatched(ResponseStream, Box<dyn DispatchToken>),
+    Dispatched(llamaforge_types::ServerId, Option<llamaforge_types::SlotId>),
     TimedOut { waited: Duration },
     Cancelled,
     ShuttingDown,
@@ -278,7 +277,9 @@ pub enum DispatchResult {
 impl fmt::Debug for DispatchResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Dispatched(_, _) => f.debug_tuple("Dispatched").field(&"<dyn Stream>").finish(),
+            Self::Dispatched(server, slot) => {
+                f.debug_tuple("Dispatched").field(server).field(slot).finish()
+            }
             Self::TimedOut { waited } => {
                 f.debug_struct("TimedOut").field("waited", waited).finish()
             }
