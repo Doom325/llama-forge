@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use axum::{
     extract::Request,
     middleware::Next,
@@ -10,7 +9,7 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub(crate) struct LargeBodyConcurrencyLimit {
+pub struct LargeBodyConcurrencyLimit {
     semaphore: Arc<Semaphore>,
     threshold_bytes: u64,
 }
@@ -34,15 +33,19 @@ pub(crate) async fn large_body_limit_middleware(
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|val| val.to_str().ok())
         .and_then(|val| val.parse::<u64>().ok())
-        .unwrap_or(u64::MAX);
+        .unwrap_or(0);
 
     if content_length > state.threshold_bytes {
-        let _permit = state
-            .semaphore
-            .acquire()
-            .await
-            .map_err(|_| crate::error::ApiError::Internal("Semaphore closed".to_string()))?;
-        Ok(next.run(req).await)
+        let permit = state.semaphore.clone().try_acquire_owned();
+        match permit {
+            Ok(p) => {
+                let mut res = next.run(req).await;
+                // Bind permit to response extensions so it's dropped when the response completes
+                res.extensions_mut().insert(Arc::new(p));
+                Ok(res)
+            }
+            Err(_) => Err(crate::error::ApiError::QueueFull),
+        }
     } else {
         Ok(next.run(req).await)
     }
@@ -74,7 +77,7 @@ pub(crate) async fn auth_middleware(
         };
 
         if !is_valid {
-            // TODO: Record llamaforge_auth_failures_total metric
+            metrics::counter!("llamaforge_auth_failures_total").increment(1);
             return Err(crate::error::ApiError::AuthFailure);
         }
     }
@@ -93,14 +96,10 @@ pub(crate) async fn request_id_middleware(
 
     let mut response = next.run(req).await;
     
-    response.headers_mut().insert(
-        "x-request-id",
-        axum::http::HeaderValue::from_str(&request_id_str).unwrap(),
-    );
-    response.headers_mut().insert(
-        "x-llamaforge-request-id",
-        axum::http::HeaderValue::from_str(&request_id_str).unwrap(),
-    );
+    if let Ok(header_val) = axum::http::HeaderValue::from_str(&request_id_str) {
+        response.headers_mut().insert("x-request-id", header_val.clone());
+        response.headers_mut().insert("x-llamaforge-request-id", header_val);
+    }
 
     response
 }
@@ -109,19 +108,112 @@ pub(crate) async fn metrics_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let _method = req.method().clone();
-    let _path = if let Some(matched_path) = req.extensions().get::<axum::extract::MatchedPath>() {
+    let method = req.method().to_string();
+    let path = if let Some(matched_path) = req.extensions().get::<axum::extract::MatchedPath>() {
         matched_path.as_str().to_string()
     } else {
         "unknown".to_string()
     };
 
+    metrics::gauge!("llamaforge_active_connections").increment(1.0);
     let start = std::time::Instant::now();
     
     let response = next.run(req).await;
     
-    let _duration = start.elapsed().as_secs_f64();
-    let _status = response.status().as_u16().to_string();
+    let duration = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16().to_string();
+
+    metrics::gauge!("llamaforge_active_connections").decrement(1.0);
+    metrics::counter!("llamaforge_http_requests_total", "method" => method.clone(), "path" => path.clone(), "status" => status).increment(1);
+    metrics::histogram!("llamaforge_http_request_duration_seconds", "method" => method, "path" => path).record(duration);
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{body::Body, http::{Request, StatusCode}};
+    use llamaforge_config::{
+        AppConfig, GlobalConfig, ConfigHandle,
+        source::memory::InMemoryConfigSource,
+    };
+    use std::sync::Arc;
+    use tower::ServiceExt;
+
+    fn setup_mock_config_reader(api_key: Option<String>) -> Arc<ConfigHandle> {
+        let mut global = GlobalConfig::default();
+        global.api_key = api_key;
+        let config = AppConfig {
+            global,
+            servers: Default::default(),
+            grpc: Default::default(),
+            prometheus: Default::default(),
+            routing: Default::default(),
+            priority_rules: Default::default(),
+            web_ui: Default::default(),
+        };
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        Arc::new(ConfigHandle::load(source).unwrap())
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_pass_through() {
+        let reader = setup_mock_config_reader(None) as Arc<dyn ConfigReader>;
+        let req = Request::builder().body(Body::empty()).unwrap();
+        let next = axum::middleware::from_fn_with_state(reader, auth_middleware);
+        let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" })).layer(next);
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_rejection() {
+        let reader = setup_mock_config_reader(Some("secret".to_string())) as Arc<dyn ConfigReader>;
+        let req = Request::builder().body(Body::empty()).unwrap();
+        let next = axum::middleware::from_fn_with_state(reader, auth_middleware);
+        let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" })).layer(next);
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_request_id_injection() {
+        let next = axum::middleware::from_fn(request_id_middleware);
+        let app = axum::Router::new().route("/", axum::routing::get(|| async { "ok" })).layer(next);
+        let req = Request::builder().body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        assert!(res.headers().contains_key("x-request-id"));
+        assert!(res.headers().contains_key("x-llamaforge-request-id"));
+    }
+
+    #[tokio::test]
+    async fn test_large_body_concurrency_limit() {
+        let limit = LargeBodyConcurrencyLimit::new(1, 1); // 1MB threshold
+        let next = axum::middleware::from_fn_with_state(limit.clone(), large_body_limit_middleware);
+        
+        let handler = |_req: Request<Body>| async move {
+            // keep the permit alive long enough
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            "ok"
+        };
+        
+        let app = axum::Router::new().route("/", axum::routing::post(handler)).layer(next);
+        
+        let req1 = Request::builder().method("POST").uri("/").header("content-length", "2000000").body(Body::empty()).unwrap();
+        let req2 = Request::builder().method("POST").uri("/").header("content-length", "2000000").body(Body::empty()).unwrap();
+        
+        // Spawn first request which will acquire the permit and hold it
+        let app_clone1 = app.clone();
+        let task1 = tokio::spawn(async move { app_clone1.oneshot(req1).await.unwrap() });
+        
+        // Let it start
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        
+        // Second request should be rejected because max_concurrent is 1
+        let res2 = app.oneshot(req2).await.unwrap();
+        assert_eq!(res2.status(), StatusCode::TOO_MANY_REQUESTS); // QueueFull mapped to 429
+        
+        task1.await.unwrap();
+    }
 }

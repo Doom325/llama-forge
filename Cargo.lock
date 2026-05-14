@@ -1381,6 +1381,7 @@ dependencies = [
  "llamaforge-metrics",
  "llamaforge-proto",
  "llamaforge-types",
+ "metrics",
  "pin-project-lite",
  "reqwest",
  "serde",

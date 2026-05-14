@@ -7,6 +7,8 @@ pub(crate) mod middleware;
 pub(crate) mod openai;
 
 pub use error::{AnthropicProtocolError, ApiError, TransportError};
+pub use http::{start_http_server, HttpAppState};
+pub use middleware::LargeBodyConcurrencyLimit;
 pub use llamaforge_types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };

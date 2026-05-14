@@ -24,6 +24,7 @@ thiserror.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
+metrics = "0.24"
 
 # Dependency rationale: llamaforge-config and llamaforge-metrics are direct dependencies
 # despite cross-crate communication being via port traits because we need access to their
@@ -40,5 +41,6 @@ llamaforge-proto.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = { workspace = true, features = ["util"] }
+llamaforge-config = { workspace = true, features = ["test-utils"] }
 
 [build-dependencies]
