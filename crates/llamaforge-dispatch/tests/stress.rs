@@ -1,14 +1,18 @@
+use llamaforge_config::{
+    source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
+};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{Dispatcher, CompletionRequest, DispatchCandidate, CompletionParams};
+use llamaforge_dispatch::dispatcher::{
+    CompletionParams, CompletionRequest, DispatchCandidate, Dispatcher,
+};
 use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_config::{ConfigHandle, source::memory::InMemoryConfigSource, AppConfig, ServerConfig};
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::RoutingDecision;
 use llamaforge_routing::types::ServerStateView;
+use llamaforge_routing::RoutingDecision;
 use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
-use llamaforge_types::{ServerId, SlotId, RequestId};
+use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -17,7 +21,11 @@ use uuid::Uuid;
 struct MockBackendClient;
 #[async_trait::async_trait]
 impl BackendClient for MockBackendClient {
-    async fn post_completion(&self, _s: &ServerId, _p: CompletionRequest) -> Result<BackendResponseStream, DispatchError> {
+    async fn post_completion(
+        &self,
+        _s: &ServerId,
+        _p: CompletionRequest,
+    ) -> Result<BackendResponseStream, DispatchError> {
         // Simulate a small delay and successful completion
         tokio::time::sleep(Duration::from_millis(5)).await;
         Ok(Box::pin(tokio_stream::empty()))
@@ -31,7 +39,9 @@ impl ClientManager for MockClientManager {
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> { vec![] }
+    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+        vec![]
+    }
 }
 
 struct MockSlotNotifier;
@@ -52,10 +62,12 @@ fn create_dispatcher(srv_id: ServerId) -> Dispatcher {
     let config_srv_id = llamaforge_config::ServerId::from(srv_id.to_string());
     app_config.servers.insert(config_srv_id, ServerConfig::default());
 
-    let config = Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
+    let config =
+        Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
     let (metrics_tx, _) = mpsc::channel(1000);
     let (audit_tx, _) = mpsc::channel(1000);
-    let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+    let metrics =
+        MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
 
     Dispatcher::new(
         Arc::new(MockServerStateView),
@@ -80,14 +92,19 @@ async fn test_8_7_stress_100_concurrent_dispatches() {
     for _ in 0..100 {
         let d = Arc::clone(&dispatcher);
         let srv = server_id;
-        
+
         let candidate = DispatchCandidate {
             request_id: RequestId::new(Uuid::now_v7()),
             prompt: "stress".to_string(),
-            params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
+            params: CompletionParams {
+                n_predict: None,
+                temperature: 0.0,
+                stream: true,
+                stop: vec![],
+            },
             routing: RoutingDecision::new_for_test(srv),
         };
-        
+
         let (audit_tx, _) = mpsc::channel(1);
         handles.push(tokio::spawn(async move {
             let (_, mut rx) = d.dispatch(candidate, audit_tx).await;
@@ -116,24 +133,34 @@ async fn test_8_8_stress_rapid_client_refresh() {
     for i in 0..50 {
         let d = Arc::clone(&dispatcher);
         let srv = server_id;
-        
+
         if i % 5 == 0 {
             let d_clone = Arc::clone(&dispatcher);
             let s_clone = srv;
             tokio::spawn(async move {
-                d_clone.refresh_client(&s_clone, llamaforge_types::ClientRefreshEvent {
-                    server_id: s_clone, new_port: 8080, tls_config: None
-                });
+                d_clone.refresh_client(
+                    &s_clone,
+                    llamaforge_types::ClientRefreshEvent {
+                        server_id: s_clone,
+                        new_port: 8080,
+                        tls_config: None,
+                    },
+                );
             });
         }
-        
+
         let candidate = DispatchCandidate {
             request_id: RequestId::new(Uuid::now_v7()),
             prompt: "stress".to_string(),
-            params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
+            params: CompletionParams {
+                n_predict: None,
+                temperature: 0.0,
+                stream: true,
+                stop: vec![],
+            },
             routing: RoutingDecision::new_for_test(srv),
         };
-        
+
         let (audit_tx, _) = mpsc::channel(1);
         handles.push(tokio::spawn(async move {
             let (_, mut rx) = d.dispatch(candidate, audit_tx).await;

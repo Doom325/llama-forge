@@ -1,22 +1,28 @@
+use llamaforge_config::{
+    source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
+};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{Dispatcher, CompletionRequest};
+use llamaforge_dispatch::dispatcher::{CompletionRequest, Dispatcher};
 use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_config::{ConfigHandle, source::memory::InMemoryConfigSource, AppConfig, ServerConfig};
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
 use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
-use llamaforge_types::{ServerId, SlotId, RequestId};
+use llamaforge_types::{RequestId, ServerId, SlotId};
+use proptest::prelude::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use proptest::prelude::*;
 use uuid::Uuid;
 
 struct MockBackendClient;
 #[async_trait::async_trait]
 impl BackendClient for MockBackendClient {
-    async fn post_completion(&self, _s: &ServerId, _p: CompletionRequest) -> Result<BackendResponseStream, DispatchError> {
+    async fn post_completion(
+        &self,
+        _s: &ServerId,
+        _p: CompletionRequest,
+    ) -> Result<BackendResponseStream, DispatchError> {
         Ok(Box::pin(tokio_stream::empty()))
     }
 }
@@ -28,7 +34,9 @@ impl ClientManager for MockClientManager {
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> { vec![] }
+    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+        vec![]
+    }
 }
 
 struct MockSlotNotifier;
@@ -48,10 +56,12 @@ fn create_dispatcher() -> Dispatcher {
     let mut app_config = AppConfig::default();
     app_config.servers.insert(llamaforge_config::ServerId::from("s1"), ServerConfig::default());
 
-    let config = Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
+    let config =
+        Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
     let (metrics_tx, _) = mpsc::channel(100);
     let (audit_tx, _) = mpsc::channel(100);
-    let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+    let metrics =
+        MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
 
     Dispatcher::new(
         Arc::new(MockServerStateView),
@@ -72,7 +82,7 @@ proptest! {
     fn test_8_3_token_lifecycle(inserts in 0usize..256, removes in 0usize..256) {
         let registry = Arc::new(DispatchTrackerRegistry::new());
         let server_id = ServerId::new(Uuid::now_v7());
-        
+
         let mut tokens = Vec::new();
         for _ in 0..inserts {
             let req_id = RequestId::new(Uuid::now_v7());
@@ -82,15 +92,15 @@ proptest! {
             );
             tokens.push(token);
         }
-        
+
         let tracker = registry.get_or_create(&server_id);
         assert_eq!(tracker.count(), inserts);
-        
+
         let to_remove = std::cmp::min(inserts, removes);
         for _ in 0..to_remove {
             tokens.pop(); // drop releases token
         }
-        
+
         assert_eq!(tracker.count(), inserts - to_remove);
     }
 
@@ -99,7 +109,7 @@ proptest! {
     fn test_8_4_slot_dispatch_map_consistency(inserts in 0usize..256, removes in 0usize..256) {
         let map = SlotDispatchMap::new();
         let server_id = ServerId::new(Uuid::now_v7());
-        
+
         let mut ids = Vec::new();
         for i in 0..inserts {
             let req_id = RequestId::new(Uuid::now_v7());
@@ -107,13 +117,13 @@ proptest! {
             map.insert(req_id, server_id, slot_id);
             ids.push(req_id);
         }
-        
+
         // Wait, SlotDispatchMap doesn't expose `len()`. But we can test consistency by checking properties.
         let to_remove = std::cmp::min(inserts, removes);
         for id in ids.iter().take(to_remove) {
             map.remove(id);
         }
-        
+
         // Let's verify we can only find remaining items
         for id in ids.iter().take(to_remove) {
             assert!(map.get_slot_for_request(id).is_none());
@@ -130,21 +140,21 @@ proptest! {
         rt.block_on(async {
             let dispatcher = create_dispatcher();
             let server_id = ServerId::new(Uuid::now_v7());
-            
+
             // First reconcile with stray slots
             let mut stray = Vec::new();
             for i in 0..stray_slots {
                 stray.push(SlotId::new(i as u32));
             }
             dispatcher.reconcile_slots(&server_id, &stray).await;
-            
+
             // Now reconcile with actual processing slots
             let mut processing = Vec::new();
             for i in 0..processing_slots_count {
                 processing.push(SlotId::new((stray_slots + i) as u32));
             }
             dispatcher.reconcile_slots(&server_id, &processing).await;
-            
+
             assert!(dispatcher.get_reconciliation_map_size() <= processing_slots_count);
         });
     }

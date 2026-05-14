@@ -1,13 +1,15 @@
+use llamaforge_config::{
+    source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
+};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{Dispatcher, CompletionRequest};
+use llamaforge_dispatch::dispatcher::{CompletionRequest, Dispatcher};
 use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_config::{ConfigHandle, source::memory::InMemoryConfigSource, AppConfig, ServerConfig};
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
 use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
-use llamaforge_types::{ServerId, SlotId, RequestId};
+use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -16,7 +18,11 @@ use uuid::Uuid;
 struct MockBackendClient;
 #[async_trait::async_trait]
 impl BackendClient for MockBackendClient {
-    async fn post_completion(&self, _s: &ServerId, _p: CompletionRequest) -> Result<BackendResponseStream, DispatchError> {
+    async fn post_completion(
+        &self,
+        _s: &ServerId,
+        _p: CompletionRequest,
+    ) -> Result<BackendResponseStream, DispatchError> {
         Ok(Box::pin(tokio_stream::empty()))
     }
 }
@@ -28,7 +34,9 @@ impl ClientManager for MockClientManager {
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> { vec![] }
+    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+        vec![]
+    }
 }
 
 struct MockSlotNotifier;
@@ -40,7 +48,9 @@ struct MockSlotErasure {
     erased: Mutex<Vec<(ServerId, SlotId)>>,
 }
 impl MockSlotErasure {
-    fn new() -> Self { Self { erased: Mutex::new(Vec::new()) } }
+    fn new() -> Self {
+        Self { erased: Mutex::new(Vec::new()) }
+    }
 }
 #[async_trait::async_trait]
 impl SlotErasure for MockSlotErasure {
@@ -50,19 +60,23 @@ impl SlotErasure for MockSlotErasure {
     }
 }
 
-fn create_dispatcher(ctx_size: u32, map: Arc<SlotDispatchMap>, erasure: Arc<MockSlotErasure>, srv_id: ServerId) -> Dispatcher {
+fn create_dispatcher(
+    ctx_size: u32,
+    map: Arc<SlotDispatchMap>,
+    erasure: Arc<MockSlotErasure>,
+    srv_id: ServerId,
+) -> Dispatcher {
     let mut app_config = AppConfig::default();
     let config_srv_id = llamaforge_config::ServerId::from(srv_id.to_string());
-    let srv_cfg = ServerConfig {
-        ctx_size,
-        ..Default::default()
-    };
+    let srv_cfg = ServerConfig { ctx_size, ..Default::default() };
     app_config.servers.insert(config_srv_id, srv_cfg);
 
-    let config = Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
+    let config =
+        Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());
     let (metrics_tx, _) = mpsc::channel(1);
     let (audit_tx, _) = mpsc::channel(1);
-    let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+    let metrics =
+        MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
 
     Dispatcher::new(
         Arc::new(MockServerStateView),
@@ -95,7 +109,7 @@ async fn test_7_8_forward_reconciliation_detects_orphan() {
 
     // Must yield tokio runtime to let tokio::spawn for erase_slot run
     tokio::task::yield_now().await;
-    
+
     let erased = erasure.erased.lock().unwrap();
     assert_eq!(erased.len(), 1);
     assert_eq!(erased[0], (s1, slot));
@@ -128,7 +142,7 @@ async fn test_7_10_dynamic_grace_period() {
     let slot = SlotId::new(5);
 
     d.reconcile_slots(&s1, &[slot]).await;
-    
+
     // Advance 255s -> no erase
     tokio::time::advance(Duration::from_secs(255)).await;
     d.reconcile_slots(&s1, &[slot]).await;
@@ -171,9 +185,14 @@ async fn test_7_12_reverse_reconciliation_skips_when_unresolved() {
     let slot = SlotId::new(5);
 
     map.insert(req1, s1, slot);
-    
+
     // To simulate unresolved, we add a request to the tracker but NOT the map
-    let _token = llamaforge_dispatch::token::DispatchToken::new(d.trackers().get_or_create(&s1), req2, s1, Arc::new(MockSlotNotifier));
+    let _token = llamaforge_dispatch::token::DispatchToken::new(
+        d.trackers().get_or_create(&s1),
+        req2,
+        s1,
+        Arc::new(MockSlotNotifier),
+    );
 
     tokio::time::advance(Duration::from_secs(31)).await;
     d.reconcile_slots(&s1, &[]).await;
@@ -203,7 +222,7 @@ async fn test_7_13_first_seen_processing_cleanup() {
     map.remove(&req1); // remove from map so we can observe if it fires
     d.reconcile_slots(&s1, &[slot]).await; // adds it back as fresh
     tokio::task::yield_now().await;
-    
+
     // No erasure because the old entry was removed, and the new one hasn't hit grace yet.
     assert!(erasure.erased.lock().unwrap().is_empty());
 }
@@ -214,15 +233,20 @@ async fn test_7_14_end_to_end_reconciliation_cycle() {
     let erasure = Arc::new(MockSlotErasure::new());
     let s1 = ServerId::new(Uuid::now_v7());
     let d = create_dispatcher(4000, map.clone(), erasure.clone(), s1);
-    
+
     let req1 = RequestId::new(Uuid::now_v7());
     let slot = SlotId::new(5);
 
     // Insert dispatch into slot_dispatch_map
     map.insert(req1, s1, slot);
-    
+
     // Track the dispatch so it's formally active but not "unresolved"
-    let _token = llamaforge_dispatch::token::DispatchToken::new(d.trackers().get_or_create(&s1), req1, s1, Arc::new(MockSlotNotifier));
+    let _token = llamaforge_dispatch::token::DispatchToken::new(
+        d.trackers().get_or_create(&s1),
+        req1,
+        s1,
+        Arc::new(MockSlotNotifier),
+    );
 
     // Advance past grace
     tokio::time::advance(Duration::from_secs(31)).await;
