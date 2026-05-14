@@ -1204,6 +1204,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "llamaforge-adapters"
+version = "0.1.0-draft"
+dependencies = [
+ "async-trait",
+ "futures-core",
+ "llamaforge-config",
+ "llamaforge-dispatch",
+ "llamaforge-metrics",
+ "llamaforge-queue",
+ "llamaforge-routing",
+ "llamaforge-server-manager",
+ "llamaforge-transport",
+ "llamaforge-types",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "llamaforge-config"
 version = "0.1.0-draft"
 dependencies = [
