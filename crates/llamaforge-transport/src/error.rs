@@ -39,8 +39,5 @@ pub enum AnthropicStreamPhase {
 #[derive(Debug, Error)]
 pub enum AnthropicProtocolError {
     #[error("Invalid transition from {from:?} to {to:?}")]
-    InvalidTransition {
-        from: AnthropicStreamPhase,
-        to: AnthropicStreamPhase,
-    },
+    InvalidTransition { from: AnthropicStreamPhase, to: AnthropicStreamPhase },
 }

@@ -9,15 +9,15 @@ use crate::tracker::DispatchTrackerRegistry;
 use dashmap::DashMap;
 use llamaforge_config::ConfigHandle;
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::RoutingDecision;
 use llamaforge_routing::types::ServerStateView;
+use llamaforge_routing::RoutingDecision;
 use llamaforge_types::ports::{SlotErasure, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -135,7 +135,8 @@ impl Dispatcher {
         };
 
         // Step 4: Add task to `proxy_tasks` JoinSet
-        let tasks_mutex = self.proxy_tasks.entry(server_id).or_insert_with(|| Mutex::new(JoinSet::new()));
+        let tasks_mutex =
+            self.proxy_tasks.entry(server_id).or_insert_with(|| Mutex::new(JoinSet::new()));
         let mut tasks = tasks_mutex.lock().await;
 
         let backend_client = Arc::clone(&self.backend_client);
@@ -172,7 +173,11 @@ impl Dispatcher {
     }
 
     /// Refreshes the client for a specific server.
-    pub fn refresh_client(&self, server_id: &ServerId, event: llamaforge_types::ClientRefreshEvent) {
+    pub fn refresh_client(
+        &self,
+        server_id: &ServerId,
+        event: llamaforge_types::ClientRefreshEvent,
+    ) {
         self.client_manager.refresh(server_id, event);
     }
 
@@ -180,7 +185,7 @@ impl Dispatcher {
     pub async fn shutdown(&self) {
         let mut all_tasks = Vec::new();
         let mut total_count = 0;
-        
+
         let server_ids: Vec<_> = self.proxy_tasks.iter().map(|e| *e.key()).collect();
         for id in server_ids {
             if let Some((_, tasks_mutex)) = self.proxy_tasks.remove(&id) {
@@ -250,20 +255,25 @@ impl Dispatcher {
         for &slot_id in processing_slots {
             if self.slot_dispatch_map.get_request_for_slot(server_id, &slot_id).is_none() {
                 let key = (*server_id, slot_id);
-                let first_seen = *self.first_seen_processing.entry(key).or_insert_with(Instant::now);
+                let first_seen =
+                    *self.first_seen_processing.entry(key).or_insert_with(Instant::now);
                 if first_seen.elapsed() > grace_period {
                     metrics::counter!("llamaforge_reconciliation_erasures_total", "direction" => "forward").increment(1);
                     tracing::info!(server_id = %server_id, slot_id = %slot_id.into_inner(), "reconciliation.erasure.forward");
-                    
+
                     let erasure = Arc::clone(&self.slot_erasure);
                     let s_id = *server_id;
                     tokio::spawn(async move {
-                        let _ = tokio::time::timeout(Duration::from_secs(5), erasure.erase_slot(&s_id, &slot_id)).await;
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(5),
+                            erasure.erase_slot(&s_id, &slot_id),
+                        )
+                        .await;
                     });
                 }
             }
         }
-        
+
         // Cleanup first_seen_processing
         let mut keys_to_remove = Vec::new();
         for entry in self.first_seen_processing.iter() {
@@ -349,7 +359,11 @@ mod tests {
     struct MockSlotErasure;
     #[async_trait::async_trait]
     impl SlotErasure for MockSlotErasure {
-        async fn erase_slot(&self, _server_id: &ServerId, _slot_id: &SlotId) -> Result<(), llamaforge_types::ports::SlotError> {
+        async fn erase_slot(
+            &self,
+            _server_id: &ServerId,
+            _slot_id: &SlotId,
+        ) -> Result<(), llamaforge_types::ports::SlotError> {
             Ok(())
         }
     }
@@ -358,7 +372,8 @@ mod tests {
         let temp = tempfile::NamedTempFile::new().unwrap();
         let path = temp.path().to_path_buf();
         std::fs::write(&path, "[global]\n").unwrap();
-        let paths = llamaforge_config::ConfigPaths::new(path, Default::default(), Default::default());
+        let paths =
+            llamaforge_config::ConfigPaths::new(path, Default::default(), Default::default());
         Arc::new(ConfigHandle::load(Arc::new(TomlFileConfigSource::new(paths))).unwrap())
     }
 
@@ -369,7 +384,11 @@ mod tests {
         let config = create_test_config();
         let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
         let (audit_tx, _) = tokio::sync::mpsc::channel(1);
-        let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+        let metrics = MetricsIngest::new_for_test(
+            metrics_tx,
+            audit_tx,
+            Arc::new(tokio::sync::Semaphore::new(1)),
+        );
 
         let dispatcher = Dispatcher::new(
             Arc::new(MockServerStateView),
@@ -394,7 +413,11 @@ mod tests {
         let config = create_test_config();
         let (metrics_tx, _) = tokio::sync::mpsc::channel(1);
         let (audit_tx, _) = tokio::sync::mpsc::channel(1);
-        let metrics = MetricsIngest::new_for_test(metrics_tx, audit_tx, Arc::new(tokio::sync::Semaphore::new(1)));
+        let metrics = MetricsIngest::new_for_test(
+            metrics_tx,
+            audit_tx,
+            Arc::new(tokio::sync::Semaphore::new(1)),
+        );
 
         let dispatcher = Dispatcher::new(
             Arc::new(MockServerStateView),

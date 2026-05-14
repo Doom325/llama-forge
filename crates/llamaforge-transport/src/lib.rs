@@ -6,8 +6,10 @@ pub(crate) mod management;
 pub(crate) mod middleware;
 pub(crate) mod openai;
 
-pub use error::{ApiError, AnthropicProtocolError, TransportError};
-pub use llamaforge_types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
+pub use error::{AnthropicProtocolError, ApiError, TransportError};
+pub use llamaforge_types::traits::{
+    MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
+};
 
 use futures_core::Stream;
 use llamaforge_config::{ConfigReader, ConfigWriter};
@@ -57,11 +59,7 @@ impl TransportHandles {
         grpc_handle: tokio::task::JoinHandle<()>,
         shutdown_tx: tokio::sync::watch::Sender<()>,
     ) -> Self {
-        Self {
-            http_handle,
-            grpc_handle,
-            shutdown_tx,
-        }
+        Self { http_handle, grpc_handle, shutdown_tx }
     }
 
     pub fn shutdown(&self) {
@@ -76,7 +74,9 @@ impl TransportHandles {
     }
 }
 
-pub async fn start_servers<CW, RMS, SM>(_deps: TransportDeps<CW, RMS, SM>) -> Result<TransportHandles, TransportError>
+pub async fn start_servers<CW, RMS, SM>(
+    _deps: TransportDeps<CW, RMS, SM>,
+) -> Result<TransportHandles, TransportError>
 where
     CW: ConfigWriter + 'static,
     RMS: RequestMetricsStore + 'static,
@@ -84,9 +84,5 @@ where
 {
     // Placeholder to satisfy signature for PR1
     let (tx, _) = tokio::sync::watch::channel(());
-    Ok(TransportHandles::new(
-        tokio::spawn(async {}),
-        tokio::spawn(async {}),
-        tx,
-    ))
+    Ok(TransportHandles::new(tokio::spawn(async {}), tokio::spawn(async {}), tx))
 }

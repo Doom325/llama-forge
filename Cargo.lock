@@ -1382,6 +1382,7 @@ dependencies = [
  "llamaforge-types",
  "pin-project-lite",
  "reqwest",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

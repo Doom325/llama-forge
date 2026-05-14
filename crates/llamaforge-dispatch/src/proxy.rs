@@ -13,9 +13,9 @@ use llamaforge_types::{RequestId, ServerId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
@@ -82,7 +82,7 @@ pub async fn proxy_task(
 
     // PreConnect phase
     let connect_future = client.post_completion(&server_id, request);
-    
+
     let mut stream = tokio::select! {
         biased;
         _ = cancel_token.cancelled() => {
@@ -159,7 +159,7 @@ pub async fn proxy_task(
                     if let Ok(line) = std::str::from_utf8(&line_bytes) {
                         let line = line.trim();
                         if line.is_empty() { continue; }
-                        
+
                         if let Some(data) = line.strip_prefix("data: ") {
                             if data == "[DONE]" {
                                 chunks_to_send.push(ParsedChunk {
@@ -210,7 +210,19 @@ pub async fn proxy_task(
     }
 
     tracing::debug!("dispatch.completed");
-    cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, success, slot_notifier, audit_tx, slot_dispatch_map);
+    cleanup(
+        token,
+        server_id,
+        request_id,
+        id_slot,
+        start_time,
+        ttft,
+        tokens_predicted,
+        success,
+        slot_notifier,
+        audit_tx,
+        slot_dispatch_map,
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -239,20 +251,15 @@ fn cleanup(
     slot_notifier.notify_slot_available(&server_id);
 
     // Record final metrics
-    metrics::counter!("llamaforge_dispatches_total", "server_id" => server_id.to_string()).increment(1);
+    metrics::counter!("llamaforge_dispatches_total", "server_id" => server_id.to_string())
+        .increment(1);
     metrics::histogram!("llamaforge_dispatch_duration_seconds").record(duration.as_secs_f64());
     metrics::counter!("llamaforge_tokens_completion_total").increment(tokens_predicted as u64);
     metrics::gauge!("llamaforge_pending_dispatches").decrement(1.0);
 
     // Audit record (fire and forget with timeout)
-    let audit_record = AuditRecord {
-        request_id,
-        server_id,
-        duration,
-        ttft,
-        tokens_predicted,
-        success,
-    };
+    let audit_record =
+        AuditRecord { request_id, server_id, duration, ttft, tokens_predicted, success };
 
     tokio::spawn(async move {
         let _ = timeout(Duration::from_secs(10), audit_tx.send(audit_record)).await;
