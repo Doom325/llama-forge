@@ -152,19 +152,11 @@ where
         Ok(Response::new(CancelRequestResponse {}))
     }
 
-    // TODO(chore): move ConfigWriter to #[async_trait] in a chore PR, then remove spawn_blocking+block_on
     async fn reload_config(
         &self,
         _request: Request<ReloadConfigRequest>,
     ) -> Result<Response<ReloadConfigResponse>, Status> {
-        let cw = self.config_writer.clone();
-        let res = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(async { cw.reload().await })
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        res.map_err(|e| Status::internal(e.to_string()))?;
+        self.config_writer.reload().await.map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(ReloadConfigResponse {}))
     }
 }
