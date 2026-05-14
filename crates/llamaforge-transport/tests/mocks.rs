@@ -1,6 +1,7 @@
 use futures_core::Stream;
 use std::pin::Pin;
 
+use llamaforge_transport::InferenceEngine;
 use llamaforge_types::{
     traits::{
         AdmissionError, IncomingRequest, MetricsExporter, QueueError, QueueSnapshot,
@@ -10,12 +11,12 @@ use llamaforge_types::{
 };
 
 pub struct MockEngine {
-    pub chunks: Vec<Result<ChatCompletionChunk, StreamError>>,
+    pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
     pub sleep_ms: u64,
 }
 
 #[async_trait::async_trait]
-impl llamaforge_transport::InferenceEngine for MockEngine {
+impl InferenceEngine for MockEngine {
     async fn chat_completion(
         &self,
         _req: llamaforge_types::ChatCompletionRequest,
@@ -23,7 +24,7 @@ impl llamaforge_transport::InferenceEngine for MockEngine {
         Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
         llamaforge_types::traits::DispatchError,
     > {
-        let chunks = self.chunks.clone();
+        let chunks = std::mem::take(&mut *self.chunks.lock().unwrap());
         let sleep_time = self.sleep_ms;
 
         let stream = futures_util::stream::unfold(
@@ -71,7 +72,12 @@ impl ServerControl for MockServerControl {
 pub struct MockQueueSubmitter;
 impl QueueSubmitter for MockQueueSubmitter {
     fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
-        Ok(QueueTicket {})
+        Ok(QueueTicket {
+            request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+            admitted_at: chrono::Utc::now(),
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            events: tokio::sync::mpsc::channel(1).1,
+        })
     }
     fn cancel(&self, _id: &RequestId) -> Result<(), QueueError> {
         Ok(())

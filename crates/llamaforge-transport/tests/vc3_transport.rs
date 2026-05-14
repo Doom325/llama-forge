@@ -61,7 +61,7 @@ fn default_deps() -> (
     (
         Arc::new(mocks::MockRouteValidator),
         Arc::new(mocks::MockQueueSubmitter),
-        Arc::new(mocks::MockEngine { chunks: vec![], sleep_ms: 0 }),
+        Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 }),
         Arc::new(mocks::MockServerControl),
     )
 }
@@ -73,7 +73,7 @@ async fn test_vc3_1_openai_streaming_lifecycle() {
         Ok(ChatCompletionChunk::Token("Tok1".into())),
         Ok(ChatCompletionChunk::Stop("stop".into())),
     ];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
     let (_handles, _) = setup_test_server(50200, |_| {}, rv, qs, ie, sc).await;
 
@@ -104,7 +104,7 @@ async fn test_vc3_2_anthropic_streaming_lifecycle() {
         Ok(ChatCompletionChunk::Token("Tok1".into())),
         Ok(ChatCompletionChunk::Stop("stop".into())),
     ];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
     let (_handles, _) = setup_test_server(50201, |_| {}, rv, qs, ie, sc).await;
 
@@ -139,7 +139,7 @@ async fn test_vc3_3_grpc_streaming_lifecycle() {
         Ok(ChatCompletionChunk::Token("Tok1".into())),
         Ok(ChatCompletionChunk::Stop("stop".into())),
     ];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
     let (_handles, _) = setup_test_server(50202, |_| {}, rv, qs, ie, sc).await;
 
@@ -164,7 +164,7 @@ async fn test_vc3_3_grpc_streaming_lifecycle() {
 #[tokio::test]
 async fn test_vc3_4_non_streaming_timeout() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 2000 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 2000 });
     let (rv, qs, _, sc) = default_deps();
     let (_handles, _) =
         setup_test_server(50203, |c| c.global.queue_default_timeout_secs = 0, rv, qs, ie, sc).await;
@@ -274,7 +274,7 @@ async fn test_vc3_6_auth_on_both_transports() {
 #[tokio::test]
 async fn test_vc3_7_client_disconnect_cleanup() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 1000 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 1000 });
 
     let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let cancelled_clone = cancelled.clone();
@@ -282,7 +282,12 @@ async fn test_vc3_7_client_disconnect_cleanup() {
     struct MockQueueSubmitterCancels(Arc<std::sync::atomic::AtomicBool>);
     impl QueueSubmitter for MockQueueSubmitterCancels {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
-            Ok(QueueTicket {})
+            Ok(QueueTicket {
+                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                admitted_at: chrono::Utc::now(),
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                events: tokio::sync::mpsc::channel(1).1,
+            })
         }
         fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
             self.0.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -324,9 +329,9 @@ async fn test_vc3_8_mid_stream_backend_error() {
     let chunks = vec![
         Ok(ChatCompletionChunk::Token("Tok1".into())),
         Ok(ChatCompletionChunk::Token("Tok2".into())),
-        Err(StreamError {}),
+        Err(StreamError::Cancelled),
     ];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 0 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
     let (_handles, _) = setup_test_server(50207, |_| {}, rv, qs, ie, sc).await;
 
@@ -412,7 +417,7 @@ async fn test_vc3_10_management_api_round_trip() {
 #[serial_test::serial]
 async fn test_vc3_11_large_body_concurrency_limit() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 1000 }); // Slow to hold concurrency
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 1000 }); // Slow to hold concurrency
     let (rv, qs, _, sc) = default_deps();
 
     let (_handles, _) = setup_test_server(50210, |_| {}, rv, qs, ie, sc).await;
@@ -469,7 +474,7 @@ async fn test_vc3_11_large_body_concurrency_limit() {
 #[tokio::test]
 async fn test_vc3_12_graceful_shutdown_drain() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
-    let ie = Arc::new(mocks::MockEngine { chunks, sleep_ms: 1000 });
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 1000 });
     let (rv, qs, _, sc) = default_deps();
     let (handles, _) = setup_test_server(50211, |_| {}, rv, qs, ie, sc).await;
 
@@ -572,7 +577,6 @@ async fn test_vc3_14_panic_recovery_grpc() {
     let err = stream.message().await.unwrap_err();
     assert_eq!(err.code(), tonic::Code::Internal);
 }
-
 #[tokio::test]
 #[ignore]
 async fn test_vc3_15_memory_bounds() {

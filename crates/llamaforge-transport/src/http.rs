@@ -109,7 +109,20 @@ where
 {
     state
         .route_validator
-        .validate_routable(&llamaforge_types::traits::IncomingRequest {})
+        .validate_routable(&llamaforge_types::traits::IncomingRequest {
+            request_id,
+            requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
+            requestor_class: llamaforge_types::RequestorClass::new("default".into()),
+            model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
+                "dummy".into(),
+            )),
+            capabilities: Default::default(),
+            messages: vec![],
+            params: Default::default(),
+            stream: false,
+            session_id: None,
+            submitted_at: chrono::Utc::now(),
+        })
         .map_err(|_| {
             let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
                 if status.estimated_throughput_req_sec > 0.0 {
@@ -293,7 +306,20 @@ where
 
     state
         .route_validator
-        .validate_routable(&llamaforge_types::traits::IncomingRequest {})
+        .validate_routable(&llamaforge_types::traits::IncomingRequest {
+            request_id,
+            requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
+            requestor_class: llamaforge_types::RequestorClass::new("default".into()),
+            model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
+                "dummy".into(),
+            )),
+            capabilities: Default::default(),
+            messages: vec![],
+            params: Default::default(),
+            stream: false,
+            session_id: None,
+            submitted_at: chrono::Utc::now(),
+        })
         .map_err(|_| {
             let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
                 if status.estimated_throughput_req_sec > 0.0 {
@@ -518,7 +544,7 @@ mod tests {
 
     // A mock InferenceEngine to inject into the app state
     struct MockEngine {
-        chunks: Vec<Result<ChatCompletionChunk, StreamError>>,
+        chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
         sleep_ms: u64,
     }
     #[async_trait::async_trait]
@@ -530,7 +556,7 @@ mod tests {
             Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
             llamaforge_types::traits::DispatchError,
         > {
-            let chunks = self.chunks.clone();
+            let chunks = std::mem::take(&mut *self.chunks.lock().unwrap());
             let sleep_time = self.sleep_ms;
 
             let stream = futures_util::stream::unfold(
@@ -592,7 +618,12 @@ mod tests {
             &self,
             _req: IncomingRequest,
         ) -> Result<QueueTicket, llamaforge_types::traits::AdmissionError> {
-            Ok(QueueTicket {})
+            Ok(QueueTicket {
+                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                admitted_at: chrono::Utc::now(),
+                cancel_token: tokio_util::sync::CancellationToken::new(),
+                events: tokio::sync::mpsc::channel(1).1,
+            })
         }
         fn cancel(&self, _id: &RequestId) -> Result<(), QueueError> {
             Ok(())
@@ -626,7 +657,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_body_limit_rejection() {
-        let engine = MockEngine { chunks: vec![], sleep_ms: 0 };
+        let engine = MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 };
         let app = build_test_router(engine);
 
         // Limit is 50MB. Make a dummy body of 51MB.
@@ -651,7 +682,7 @@ mod tests {
             Ok(ChatCompletionChunk::Token("lo".into())),
             Ok(ChatCompletionChunk::Stop("stop".into())),
         ];
-        let engine = MockEngine { chunks, sleep_ms: 0 };
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
         let app = build_test_router(engine);
 
         let body = serde_json::json!({
@@ -681,7 +712,7 @@ mod tests {
     #[tokio::test]
     async fn test_non_streaming_timeout() {
         // Sleep for 2000ms > 1 second timeout configured above
-        let engine = MockEngine { chunks: vec![], sleep_ms: 2000 };
+        let engine = MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 2000 };
         let app = build_test_router(engine);
 
         let body = serde_json::json!({
@@ -703,7 +734,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_error_format() {
-        let engine = MockEngine { chunks: vec![], sleep_ms: 0 };
+        let engine = MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 };
         let app = build_test_router(engine);
 
         // trigger 404 by hitting wrong endpoint
@@ -725,8 +756,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mid_stream_error_event() {
-        let chunks = vec![Ok(ChatCompletionChunk::Token("Hel".into())), Err(StreamError {})];
-        let engine = MockEngine { chunks, sleep_ms: 0 };
+        let chunks =
+            vec![Ok(ChatCompletionChunk::Token("Hel".into())), Err(StreamError::Cancelled)];
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
         let app = build_test_router(engine);
 
         let body = serde_json::json!({
@@ -783,7 +815,10 @@ mod tests {
             config_reader: handle.clone(),
             config_writer: handle.clone(),
             route_validator: Arc::new(MockRouteValidatorRejects),
-            inference_engine: Arc::new(MockEngine { chunks: vec![], sleep_ms: 0 }),
+            inference_engine: Arc::new(MockEngine {
+                chunks: std::sync::Mutex::new(vec![]),
+                sleep_ms: 0,
+            }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitterFull),
