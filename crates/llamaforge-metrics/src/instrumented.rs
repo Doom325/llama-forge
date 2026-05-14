@@ -189,4 +189,12 @@ impl StoreMaintenance for InstrumentedMetricsStore {
             res
         }
     }
+
+    async fn wal_checkpoint(
+        &self,
+        mode: crate::types::CheckpointMode,
+    ) -> Result<crate::types::CheckpointResult, StoreError> {
+        let span = info_span!("metrics.wal_checkpoint");
+        self.inner.wal_checkpoint(mode).instrument(span).await
+    }
 }

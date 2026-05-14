@@ -75,6 +75,12 @@ pub trait StoreMaintenance: Send + Sync + private::Sealed {
     fn estimated_size_bytes(
         &self,
     ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
+
+    /// Perform a WAL checkpoint.
+    async fn wal_checkpoint(
+        &self,
+        mode: crate::types::CheckpointMode,
+    ) -> Result<crate::types::CheckpointResult, StoreError>;
 }
 
 /// An override for a specific configuration value on a specific server.

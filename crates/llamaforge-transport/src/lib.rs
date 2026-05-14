@@ -12,6 +12,7 @@ pub use http::{start_http_server, HttpAppState};
 pub use llamaforge_types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
+pub use management::{management_routes, ManagementState};
 pub use middleware::LargeBodyConcurrencyLimit;
 
 use futures_core::Stream;

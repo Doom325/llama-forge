@@ -540,6 +540,19 @@ impl StoreMaintenance for SqliteMetricsStore {
             Ok((page_count * page_size) as u64)
         })
     }
+
+    async fn wal_checkpoint(&self, mode: CheckpointMode) -> Result<CheckpointResult, StoreError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let cmd = WriterCommand::Checkpoint { mode, reply: reply_tx, span: Span::current() };
+
+        self.cmd_tx
+            .send(cmd)
+            .map_err(|_| StoreError::Unavailable { message: "Writer thread is dead".into() })?;
+
+        reply_rx.await.map_err(|_| StoreError::Unavailable {
+            message: "Writer thread dropped the request".into(),
+        })?
+    }
 }
 
 impl Drop for SqliteMetricsStore {
