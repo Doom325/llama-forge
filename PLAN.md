@@ -155,9 +155,9 @@ Why a separate crate (not the binary): the orchestrator needs the same adapter t
 
 ### PR2 Acceptance Criteria
 
-- [ ] `cargo build -p llamaforge-adapters` succeeds (with stub impls).
-- [ ] No production code outside `llamaforge-adapters` depends on it yet.
-- [ ] 5 local gates green + 3/3 CI green.
+- [x] `cargo build -p llamaforge-adapters` succeeds (with stub impls).
+- [x] No production code outside `llamaforge-adapters` depends on it yet.
+- [x] 5 local gates green + 3/3 CI green.
 
 ---
 

@@ -7,7 +7,7 @@ members = [
     "crates/llamaforge-metrics",
     "crates/llamaforge-server-manager",
     "crates/llamaforge-types",
-    "crates/llamaforge-queue", "crates/llamaforge-routing", "crates/llamaforge-dispatch", "crates/llamaforge-transport",
+    "crates/llamaforge-queue", "crates/llamaforge-routing", "crates/llamaforge-dispatch", "crates/llamaforge-transport", "crates/llamaforge-adapters",
 ]
 
 [workspace.package]
@@ -29,6 +29,10 @@ llamaforge-types = { path = "crates/llamaforge-types", version = "0.1.0-draft" }
 llamaforge-queue = { path = "crates/llamaforge-queue", version = "0.1.0-draft" }
 llamaforge-routing = { path = "crates/llamaforge-routing", version = "0.1.0-draft" }
 llamaforge-proto = { path = "crates/llamaforge-proto", version = "0.1.0-draft" }
+llamaforge-server-manager = { path = "crates/llamaforge-server-manager", version = "0.1.0-draft" }
+llamaforge-dispatch = { path = "crates/llamaforge-dispatch", version = "0.1.0-draft" }
+llamaforge-transport = { path = "crates/llamaforge-transport", version = "0.1.0-draft" }
+llamaforge-adapters = { path = "crates/llamaforge-adapters", version = "0.1.0-draft" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }

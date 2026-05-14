@@ -1,0 +1,23 @@
+[package]
+name = "llamaforge-adapters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+llamaforge-types = { workspace = true }
+llamaforge-config = { workspace = true }
+llamaforge-queue = { workspace = true }
+llamaforge-server-manager = { workspace = true }
+llamaforge-routing = { workspace = true }
+llamaforge-dispatch = { workspace = true }
+llamaforge-metrics = { workspace = true }
+
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+futures-core.workspace = true
+llamaforge-transport.workspace = true
