@@ -103,15 +103,6 @@ pub enum MetricsError {
     Failed,
 }
 
-/// Open trait. ConfigReader
-pub trait ConfigReader: Send + Sync {}
-
-/// Open trait. ConfigWriter
-#[async_trait::async_trait]
-pub trait ConfigWriter: Send + Sync {
-    async fn reload(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-}
-
 /// Open trait. ServerControl
 #[async_trait::async_trait]
 pub trait ServerControl: Send + Sync {
