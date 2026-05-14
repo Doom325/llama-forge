@@ -23,7 +23,7 @@ use crate::{
     InferenceEngine, TransportError,
 };
 
-pub struct HttpAppState<CW> {
+pub struct HttpAppState<CW, RMS, SM> {
     pub config_reader: Arc<dyn ConfigReader>,
     pub route_validator: Arc<dyn RouteValidator>,
     pub inference_engine: Arc<dyn InferenceEngine>,
@@ -31,10 +31,12 @@ pub struct HttpAppState<CW> {
     pub server_control: Arc<dyn ServerControl>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
     pub config_writer: Arc<CW>,
+    pub request_metrics_store: Arc<RMS>,
+    pub store_maintenance: Arc<SM>,
     pub large_body_limit: LargeBodyConcurrencyLimit,
 }
 
-impl<CW> Clone for HttpAppState<CW> {
+impl<CW, RMS, SM> Clone for HttpAppState<CW, RMS, SM> {
     fn clone(&self) -> Self {
         Self {
             config_reader: self.config_reader.clone(),
@@ -44,25 +46,27 @@ impl<CW> Clone for HttpAppState<CW> {
             server_control: self.server_control.clone(),
             queue_submitter: self.queue_submitter.clone(),
             config_writer: self.config_writer.clone(),
+            request_metrics_store: self.request_metrics_store.clone(),
+            store_maintenance: self.store_maintenance.clone(),
             large_body_limit: self.large_body_limit.clone(),
         }
     }
 }
 
-impl<CW> axum::extract::FromRef<HttpAppState<CW>> for LargeBodyConcurrencyLimit {
-    fn from_ref(state: &HttpAppState<CW>) -> Self {
+impl<CW, RMS, SM> axum::extract::FromRef<HttpAppState<CW, RMS, SM>> for LargeBodyConcurrencyLimit {
+    fn from_ref(state: &HttpAppState<CW, RMS, SM>) -> Self {
         state.large_body_limit.clone()
     }
 }
 
-impl<CW> axum::extract::FromRef<HttpAppState<CW>> for Arc<dyn ConfigReader> {
-    fn from_ref(state: &HttpAppState<CW>) -> Self {
+impl<CW, RMS, SM> axum::extract::FromRef<HttpAppState<CW, RMS, SM>> for Arc<dyn ConfigReader> {
+    fn from_ref(state: &HttpAppState<CW, RMS, SM>) -> Self {
         state.config_reader.clone()
     }
 }
 
-pub(crate) async fn openai_chat_completion_handler<CW>(
-    State(state): State<HttpAppState<CW>>,
+pub(crate) async fn openai_chat_completion_handler<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
@@ -94,8 +98,8 @@ where
     handle_openai_request(state, request_id, req, stream).await
 }
 
-async fn handle_openai_request<CW>(
-    state: HttpAppState<CW>,
+async fn handle_openai_request<CW, RMS, SM>(
+    state: HttpAppState<CW, RMS, SM>,
     request_id: llamaforge_types::RequestId,
     req: llamaforge_types::ChatCompletionRequest,
     stream: bool,
@@ -150,8 +154,8 @@ where
     }
 }
 
-pub(crate) async fn openai_completion_handler<CW>(
-    State(state): State<HttpAppState<CW>>,
+pub(crate) async fn openai_completion_handler<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
@@ -198,8 +202,8 @@ where
     handle_openai_request(state, request_id, chat_req, req_json.stream).await
 }
 
-pub(crate) async fn anthropic_messages_handler<CW>(
-    State(state): State<HttpAppState<CW>>,
+pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
@@ -295,8 +299,8 @@ pub(crate) async fn health_check() -> axum::response::Response {
     axum::Json(serde_json::json!({"status": "ok"})).into_response()
 }
 
-pub(crate) async fn prometheus_export<CW>(
-    State(state): State<HttpAppState<CW>>,
+pub(crate) async fn prometheus_export<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
 ) -> axum::response::Response
 where
     CW: ConfigWriter + Send + Sync + 'static,
@@ -305,34 +309,51 @@ where
     (axum::http::StatusCode::OK, text).into_response()
 }
 
-pub(crate) fn build_router<CW>(state: HttpAppState<CW>) -> Router
+pub(crate) fn build_router<CW, RMS, SM>(state: HttpAppState<CW, RMS, SM>) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
+    RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
+    SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
-    Router::new()
-        .route("/v1/chat/completions", post(openai_chat_completion_handler::<CW>))
-        .route("/v1/completions", post(openai_completion_handler::<CW>))
-        .route("/v1/messages", post(anthropic_messages_handler::<CW>))
+    let management_state = crate::management::ManagementState {
+        server_control: state.server_control.clone(),
+        queue_submitter: state.queue_submitter.clone(),
+        config_writer: state.config_writer.clone(),
+        request_metrics_store: state.request_metrics_store.clone(),
+        store_maintenance: state.store_maintenance.clone(),
+    };
+
+    let management_router = crate::management::management_routes(management_state);
+
+    let inference_router = Router::new()
+        .route("/v1/chat/completions", post(openai_chat_completion_handler::<CW, RMS, SM>))
+        .route("/v1/completions", post(openai_completion_handler::<CW, RMS, SM>))
+        .route("/v1/messages", post(anthropic_messages_handler::<CW, RMS, SM>))
         .route("/health", get(health_check))
-        .route("/metrics", get(prometheus_export::<CW>))
+        .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
+        .with_state(state.clone());
+
+    inference_router
+        .merge(management_router)
         .layer(axum::middleware::from_fn(metrics_middleware))
+        .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
             state.large_body_limit.clone(),
             large_body_limit_middleware,
         ))
         .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
-        .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(CatchPanicLayer::new())
-        .with_state(state)
 }
 
-pub async fn start_http_server<CW>(
-    state: HttpAppState<CW>,
+pub async fn start_http_server<CW, RMS, SM>(
+    state: HttpAppState<CW, RMS, SM>,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
 ) -> Result<(), TransportError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
+    RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
+    SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
     let config = state.config_reader.snapshot();
     let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.http_port);
@@ -477,6 +498,8 @@ mod tests {
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
 

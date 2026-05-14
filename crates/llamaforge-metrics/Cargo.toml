@@ -8,6 +8,7 @@ repository.workspace = true
 
 [features]
 test-utils = []
+test-fixtures = []
 
 [dependencies]
 llamaforge-config = { workspace = true }

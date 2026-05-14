@@ -105,6 +105,8 @@ where
         server_control: deps.server_control.clone(),
         queue_submitter: deps.queue_submitter.clone(),
         config_writer: deps.config_writer.clone(),
+        request_metrics_store: deps.request_metrics_store.clone(),
+        store_maintenance: deps.store_maintenance.clone(),
         large_body_limit,
     };
 
