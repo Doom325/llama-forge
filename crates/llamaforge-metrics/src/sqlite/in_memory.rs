@@ -122,6 +122,15 @@ impl StoreMaintenance for InMemoryStore {
             + self.snapshots.lock().len();
         async move { Ok((total_items * 1024) as u64) }
     }
+
+    #[allow(clippy::manual_async_fn)]
+    fn wal_checkpoint(
+        &self,
+        _mode: crate::types::CheckpointMode,
+    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send
+    {
+        async move { Ok(crate::types::CheckpointResult { pages_checkpointed: 0 }) }
+    }
 }
 
 #[cfg(test)]
