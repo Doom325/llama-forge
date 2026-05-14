@@ -135,7 +135,8 @@ where
         _request: Request<QueueStatusRequest>,
     ) -> Result<Response<QueueStatusResponse>, Status> {
         let status = self.queue_submitter.status().map_err(|e| Status::internal(e.to_string()))?;
-        let payload = serde_json::to_string(&status).unwrap_or_default();
+        let payload =
+            serde_json::to_string(&status).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(QueueStatusResponse { payload }))
     }
 
@@ -155,7 +156,15 @@ where
         &self,
         _request: Request<ReloadConfigRequest>,
     ) -> Result<Response<ReloadConfigResponse>, Status> {
-        Err(Status::unimplemented("Pending PR6"))
+        let cw = self.config_writer.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async { cw.reload().await })
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        res.map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(ReloadConfigResponse {}))
     }
 }
 
@@ -287,7 +296,7 @@ where
     let management_service = ManagementServiceServer::new(GrpcManagementService {
         server_control: state.server_control.clone(),
         queue_submitter: state.queue_submitter.clone(),
-        _config_writer: state.config_writer.clone(),
+        config_writer: state.config_writer.clone(),
     })
     .max_decoding_message_size(max_message_size)
     .max_encoding_message_size(max_message_size);
