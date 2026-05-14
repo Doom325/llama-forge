@@ -11,3 +11,8 @@ description = "Generated protobuf and tonic bindings for LlamaForge gRPC service
 path = "src/lib.rs"
 
 [dependencies]
+tonic.workspace = true
+prost.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true

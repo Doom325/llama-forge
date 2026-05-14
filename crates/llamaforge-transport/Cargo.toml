@@ -11,8 +11,7 @@ repository.workspace = true
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
-tonic.workspace = true
-prost.workspace = true
+tonic = { workspace = true, features = ["tls-native-roots", "gzip"] }
 hyper.workspace = true
 serde_json.workspace = true
 tokio-stream.workspace = true
@@ -30,6 +29,7 @@ async-trait.workspace = true
 llamaforge-config.workspace = true
 llamaforge-metrics.workspace = true
 llamaforge-types.workspace = true
+llamaforge-proto.workspace = true
 
 [dev-dependencies]
 # reqwest: used for full-stack integration tests (real HTTP client -> real server).
@@ -39,4 +39,3 @@ tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = { workspace = true, features = ["util"] }
 
 [build-dependencies]
-tonic-build.workspace = true

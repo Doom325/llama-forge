@@ -136,8 +136,3 @@ pub trait QueueSubmitter: Send + Sync {
 pub trait MetricsExporter: Send + Sync {
     fn gather_text(&self) -> String;
 }
-
-/// Open trait. MetricsStore
-pub trait MetricsStore: Send + Sync {
-    fn wal_checkpoint(&self) -> Result<(), MetricsError>;
-}

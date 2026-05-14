@@ -26,9 +26,8 @@ pub enum ApiError {
     Internal(String),
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AnthropicStreamPhase {
+pub enum AnthropicStreamPhase {
     Init,
     PreambleSent,
     ContentBlock,
@@ -37,7 +36,6 @@ pub(crate) enum AnthropicStreamPhase {
     Complete,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum AnthropicProtocolError {
     #[error("Invalid transition from {from:?} to {to:?}")]

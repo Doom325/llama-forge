@@ -1285,6 +1285,11 @@ dependencies = [
 [[package]]
 name = "llamaforge-proto"
 version = "0.1.0-draft"
+dependencies = [
+ "prost",
+ "tonic",
+ "tonic-build",
+]
 
 [[package]]
 name = "llamaforge-queue"
@@ -1373,16 +1378,15 @@ dependencies = [
  "hyper",
  "llamaforge-config",
  "llamaforge-metrics",
+ "llamaforge-proto",
  "llamaforge-types",
  "pin-project-lite",
- "prost",
  "reqwest",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tonic",
- "tonic-build",
  "tower",
  "tower-http",
  "uuid",

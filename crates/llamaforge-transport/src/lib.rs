@@ -5,18 +5,16 @@ pub(crate) mod http;
 pub(crate) mod management;
 pub(crate) mod middleware;
 pub(crate) mod openai;
-mod proto;
 
-pub use error::{ApiError, TransportError};
-pub use llamaforge_types::traits::*;
+pub use error::{ApiError, AnthropicProtocolError, TransportError};
+pub use llamaforge_types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
 
 use futures_core::Stream;
+use llamaforge_config::{ConfigReader, ConfigWriter};
+use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
+use llamaforge_types::{ChatCompletionChunk, ChatCompletionRequest, StreamError};
 use std::pin::Pin;
 use std::sync::Arc;
-
-pub struct ChatCompletionRequest {}
-pub struct ChatCompletionChunk {}
-pub struct StreamError {}
 
 /// InferenceEngine protocol-agnostic core trait.
 #[async_trait::async_trait]
@@ -26,17 +24,23 @@ pub trait InferenceEngine: Send + Sync + 'static {
         request: ChatCompletionRequest,
     ) -> Result<
         Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
-        crate::DispatchError,
+        llamaforge_types::traits::DispatchError,
     >;
 }
 
-pub struct TransportDeps {
+pub struct TransportDeps<CW, RMS, SM>
+where
+    CW: ConfigWriter + 'static,
+    RMS: RequestMetricsStore + 'static,
+    SM: StoreMaintenance + 'static,
+{
     pub config_reader: Arc<dyn ConfigReader>,
-    pub config_writer: Arc<dyn ConfigWriter>,
+    pub config_writer: Arc<CW>,
     pub server_control: Arc<dyn ServerControl>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
     pub metrics_exporter: Arc<dyn MetricsExporter>,
-    pub metrics_store: Arc<dyn MetricsStore>,
+    pub request_metrics_store: Arc<RMS>,
+    pub store_maintenance: Arc<SM>,
     pub route_validator: Arc<dyn RouteValidator>,
     pub inference_engine: Arc<dyn InferenceEngine>,
 }
@@ -72,7 +76,12 @@ impl TransportHandles {
     }
 }
 
-pub async fn start_servers(_deps: TransportDeps) -> Result<TransportHandles, TransportError> {
+pub async fn start_servers<CW, RMS, SM>(_deps: TransportDeps<CW, RMS, SM>) -> Result<TransportHandles, TransportError>
+where
+    CW: ConfigWriter + 'static,
+    RMS: RequestMetricsStore + 'static,
+    SM: StoreMaintenance + 'static,
+{
     // Placeholder to satisfy signature for PR1
     let (tx, _) = tokio::sync::watch::channel(());
     Ok(TransportHandles::new(
