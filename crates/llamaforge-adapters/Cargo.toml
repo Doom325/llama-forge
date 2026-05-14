@@ -14,10 +14,15 @@ llamaforge-server-manager = { workspace = true }
 llamaforge-routing = { workspace = true }
 llamaforge-dispatch = { workspace = true }
 llamaforge-metrics = { workspace = true }
+llamaforge-transport = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-futures-core.workspace = true
-llamaforge-transport.workspace = true
+futures-core = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
