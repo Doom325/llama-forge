@@ -407,10 +407,18 @@ impl Default for GrpcConfig {
     }
 }
 
-fn default_grpc_max_message_size_mb() -> u32 { 16 }
-fn default_grpc_keepalive_interval_secs() -> u32 { 30 }
-fn default_grpc_keepalive_timeout_secs() -> u32 { 10 }
-fn default_grpc_max_concurrent_streams() -> u32 { 1000 }
+fn default_grpc_max_message_size_mb() -> u32 {
+    16
+}
+fn default_grpc_keepalive_interval_secs() -> u32 {
+    30
+}
+fn default_grpc_keepalive_timeout_secs() -> u32 {
+    10
+}
+fn default_grpc_max_concurrent_streams() -> u32 {
+    1000
+}
 
 /// Prometheus metrics configuration.
 /// See design doc Section 2.6.

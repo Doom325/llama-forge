@@ -62,7 +62,6 @@ impl ConfigReader for ConfigHandle {
     }
 }
 
-#[async_trait::async_trait]
 impl ConfigWriter for ConfigHandle {
     async fn reload(&self) -> Result<ConfigDiff, ConfigReloadError> {
         let _guard = self.reload_mutex.lock().await;

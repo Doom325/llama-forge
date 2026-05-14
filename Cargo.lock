@@ -1208,7 +1208,6 @@ name = "llamaforge-config"
 version = "0.1.0-draft"
 dependencies = [
  "arc-swap",
- "async-trait",
  "metrics",
  "nix",
  "parking_lot",

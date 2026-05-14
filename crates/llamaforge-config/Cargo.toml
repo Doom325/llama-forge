@@ -21,7 +21,6 @@ tracing.workspace = true
 nix.workspace = true
 parking_lot.workspace = true
 metrics.workspace = true
-async-trait.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
