@@ -142,16 +142,13 @@ mod tests {
     use tower::ServiceExt;
 
     fn setup_mock_config_reader(api_key: Option<String>) -> Arc<ConfigHandle> {
-        let mut global = GlobalConfig::default();
-        global.api_key = api_key;
+        let global = GlobalConfig {
+            api_key,
+            ..Default::default()
+        };
         let config = AppConfig {
             global,
-            servers: Default::default(),
-            grpc: Default::default(),
-            prometheus: Default::default(),
-            routing: Default::default(),
-            priority_rules: Default::default(),
-            web_ui: Default::default(),
+            ..Default::default()
         };
         let source = Arc::new(InMemoryConfigSource::new(config));
         Arc::new(ConfigHandle::load(source).unwrap())

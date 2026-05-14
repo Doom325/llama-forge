@@ -372,10 +372,7 @@ mod tests {
                 if delay > 0 {
                     tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                 }
-                match iter.next() {
-                    Some(item) => Some((item, (iter, delay))),
-                    None => None,
-                }
+                iter.next().map(|item| (item, (iter, delay)))
             });
             
             Ok(Box::pin(stream))
