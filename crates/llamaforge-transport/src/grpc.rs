@@ -59,10 +59,10 @@ impl InferenceService for GrpcInferenceService {
         tokio::spawn(async move {
             while let Some(chunk_res) = response_stream.next().await {
                 let resp = match chunk_res {
-                    Ok(chunk) => {
-                        let payload = serde_json::to_string(&chunk).unwrap_or_default();
-                        Ok(InferenceResponse { payload })
-                    }
+                    Ok(chunk) => match serde_json::to_string(&chunk) {
+                        Ok(payload) => Ok(InferenceResponse { payload }),
+                        Err(e) => Err(Status::internal(e.to_string())),
+                    },
                     Err(_e) => Err(Status::internal("Stream error")),
                 };
                 if tx.send(resp).await.is_err() {
@@ -152,6 +152,7 @@ where
         Ok(Response::new(CancelRequestResponse {}))
     }
 
+    // TODO(chore): move ConfigWriter to #[async_trait] in a chore PR, then remove spawn_blocking+block_on
     async fn reload_config(
         &self,
         _request: Request<ReloadConfigRequest>,
