@@ -289,10 +289,7 @@ where
     CW: ConfigWriter + Send + Sync + 'static,
 {
     let text = state.metrics_exporter.gather_text();
-    axum::response::Response::builder()
-        .status(200)
-        .body(axum::body::Body::from(text))
-        .unwrap()
+    (axum::http::StatusCode::OK, text).into_response()
 }
 
 pub(crate) fn build_router<CW>(state: HttpAppState<CW>) -> Router 
