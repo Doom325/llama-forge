@@ -313,12 +313,14 @@ mod tests {
         assert_eq!(events[1].event_type, "content_block_start");
         assert_eq!(events[2].event_type, "content_block_delta");
 
-        let events2 = format_anthropic_event("req_123", "claude", &token_chunk, &mut state).unwrap();
+        let events2 =
+            format_anthropic_event("req_123", "claude", &token_chunk, &mut state).unwrap();
         assert_eq!(events2.len(), 1);
         assert_eq!(events2[0].event_type, "content_block_delta");
 
         let stop_chunk = ChatCompletionChunk::Stop("end_turn".to_string());
-        let events_stop = format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
+        let events_stop =
+            format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
         assert_eq!(events_stop.len(), 3);
         assert_eq!(events_stop[0].event_type, "content_block_stop");
         assert_eq!(events_stop[1].event_type, "message_delta");
@@ -339,4 +341,5 @@ mod tests {
         state.phase = AnthropicStreamPhase::BlockStopped;
         let res = format_anthropic_event("req_123", "claude", &token_chunk, &mut state);
         assert!(matches!(res, Err(AnthropicProtocolError::InvalidTransition { .. })));
-    }}
+    }
+}

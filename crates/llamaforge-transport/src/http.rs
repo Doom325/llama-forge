@@ -6,17 +6,19 @@ use axum::{
 };
 use futures_util::stream::StreamExt;
 use llamaforge_config::{ConfigReader, ConfigWriter};
-use llamaforge_types::traits::{MetricsExporter, RouteValidator, ServerControl, QueueSubmitter};
+use llamaforge_types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
 use std::sync::Arc;
-use tower_http::{
-    catch_panic::CatchPanicLayer,
-    limit::RequestBodyLimitLayer,
-};
+use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
 
 use crate::{
-    anthropic::{format_anthropic_event, parse_anthropic_request, AnthropicMessagesRequest, AnthropicState},
+    anthropic::{
+        format_anthropic_event, parse_anthropic_request, AnthropicMessagesRequest, AnthropicState,
+    },
     error::ApiError,
-    middleware::{auth_middleware, large_body_limit_middleware, metrics_middleware, request_id_middleware, LargeBodyConcurrencyLimit},
+    middleware::{
+        auth_middleware, large_body_limit_middleware, metrics_middleware, request_id_middleware,
+        LargeBodyConcurrencyLimit,
+    },
     openai::{format_openai_chunk, parse_openai_request, OpenAiChatRequest},
     InferenceEngine, TransportError,
 };
@@ -63,12 +65,12 @@ pub(crate) async fn openai_chat_completion_handler<CW>(
     State(state): State<HttpAppState<CW>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
-) -> Result<axum::response::Response, ApiError> 
+) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
     let body_len = req_bytes.len();
-    
+
     let request: OpenAiChatRequest = if body_len > 1_048_576 {
         tokio::task::spawn_blocking(move || {
             serde_json::from_slice(&req_bytes).map_err(|e| ApiError::InvalidBody(e.to_string()))
@@ -80,7 +82,7 @@ where
     };
 
     let stream = request.stream;
-    
+
     let req = if body_len > 1_048_576 {
         tokio::task::spawn_blocking(move || parse_openai_request(request))
             .await
@@ -97,29 +99,29 @@ async fn handle_openai_request<CW>(
     request_id: llamaforge_types::RequestId,
     req: llamaforge_types::ChatCompletionRequest,
     stream: bool,
-) -> Result<axum::response::Response, ApiError> 
+) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    state.route_validator.validate_routable(&llamaforge_types::traits::IncomingRequest {})
+    state
+        .route_validator
+        .validate_routable(&llamaforge_types::traits::IncomingRequest {})
         .map_err(|_| ApiError::QueueFull)?;
 
-    let mut response_stream = state.inference_engine.chat_completion(req).await
-        .map_err(|_| ApiError::BackendError)?;
+    let mut response_stream =
+        state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
 
     let req_id_str = format!("chatcmpl-{}", request_id.as_uuid());
 
     if stream {
-        let sse_stream = response_stream.map(move |res| {
-            match res {
-                Ok(chunk) => {
-                    let sse_data = format_openai_chunk(&req_id_str, &chunk);
-                    Ok(Event::default().data(sse_data))
-                }
-                Err(_) => Err(axum::Error::new("Stream error")),
+        let sse_stream = response_stream.map(move |res| match res {
+            Ok(chunk) => {
+                let sse_data = format_openai_chunk(&req_id_str, &chunk);
+                Ok(Event::default().data(sse_data))
             }
+            Err(_) => Err(axum::Error::new("Stream error")),
         });
-        
+
         Ok(Sse::new(sse_stream).into_response())
     } else {
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
@@ -131,8 +133,10 @@ where
                 }
             }
             full_text
-        }).await.map_err(|_| ApiError::Timeout)?;
-        
+        })
+        .await
+        .map_err(|_| ApiError::Timeout)?;
+
         Ok(axum::Json(serde_json::json!({
             "id": req_id_str,
             "choices": [{
@@ -141,7 +145,8 @@ where
                     "content": res
                 }
             }]
-        })).into_response())
+        }))
+        .into_response())
     }
 }
 
@@ -149,7 +154,7 @@ pub(crate) async fn openai_completion_handler<CW>(
     State(state): State<HttpAppState<CW>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
-) -> Result<axum::response::Response, ApiError> 
+) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
@@ -197,12 +202,12 @@ pub(crate) async fn anthropic_messages_handler<CW>(
     State(state): State<HttpAppState<CW>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
     req_bytes: axum::body::Bytes,
-) -> Result<axum::response::Response, ApiError> 
+) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
     let body_len = req_bytes.len();
-    
+
     let request: AnthropicMessagesRequest = if body_len > 1_048_576 {
         tokio::task::spawn_blocking(move || {
             serde_json::from_slice(&req_bytes).map_err(|e| ApiError::InvalidBody(e.to_string()))
@@ -224,31 +229,36 @@ where
         parse_anthropic_request(request)?
     };
 
-    state.route_validator.validate_routable(&llamaforge_types::traits::IncomingRequest {})
+    state
+        .route_validator
+        .validate_routable(&llamaforge_types::traits::IncomingRequest {})
         .map_err(|_| ApiError::QueueFull)?;
 
-    let mut response_stream = state.inference_engine.chat_completion(req).await
-        .map_err(|_| ApiError::BackendError)?;
+    let mut response_stream =
+        state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
 
     let req_id_str = format!("msg_{}", request_id.as_uuid());
 
     if stream {
         let mut anthropic_state = AnthropicState::new();
-        
+
         let sse_stream = response_stream.flat_map(move |res| {
             let chunks = match res {
                 Ok(chunk) => {
-                    match format_anthropic_event(&req_id_str, &model, &chunk, &mut anthropic_state) {
-                        Ok(events) => events.into_iter().map(|evt| Ok(Event::from(evt))).collect::<Vec<_>>(),
+                    match format_anthropic_event(&req_id_str, &model, &chunk, &mut anthropic_state)
+                    {
+                        Ok(events) => {
+                            events.into_iter().map(|evt| Ok(Event::from(evt))).collect::<Vec<_>>()
+                        }
                         Err(e) => vec![Err(axum::Error::new(e))],
                     }
                 }
                 Err(_) => vec![Err(axum::Error::new("Stream error"))],
             };
-            
+
             futures_util::stream::iter(chunks)
         });
-        
+
         Ok(Sse::new(sse_stream).into_response())
     } else {
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
@@ -260,8 +270,10 @@ where
                 }
             }
             full_text
-        }).await.map_err(|_| ApiError::Timeout)?;
-        
+        })
+        .await
+        .map_err(|_| ApiError::Timeout)?;
+
         Ok(axum::Json(serde_json::json!({
             "id": req_id_str,
             "type": "message",
@@ -274,7 +286,8 @@ where
             "stop_reason": "end_turn",
             "stop_sequence": null,
             "usage": {"input_tokens": 0, "output_tokens": 0}
-        })).into_response())
+        }))
+        .into_response())
     }
 }
 
@@ -284,7 +297,7 @@ pub(crate) async fn health_check() -> axum::response::Response {
 
 pub(crate) async fn prometheus_export<CW>(
     State(state): State<HttpAppState<CW>>,
-) -> axum::response::Response 
+) -> axum::response::Response
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
@@ -292,7 +305,7 @@ where
     (axum::http::StatusCode::OK, text).into_response()
 }
 
-pub(crate) fn build_router<CW>(state: HttpAppState<CW>) -> Router 
+pub(crate) fn build_router<CW>(state: HttpAppState<CW>) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
@@ -304,7 +317,10 @@ where
         .route("/metrics", get(prometheus_export::<CW>))
         .layer(axum::middleware::from_fn(metrics_middleware))
         .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
-        .layer(axum::middleware::from_fn_with_state(state.large_body_limit.clone(), large_body_limit_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            state.large_body_limit.clone(),
+            large_body_limit_middleware,
+        ))
         .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(CatchPanicLayer::new())
@@ -314,18 +330,20 @@ where
 pub async fn start_http_server<CW>(
     state: HttpAppState<CW>,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
-) -> Result<(), TransportError> 
+) -> Result<(), TransportError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
     let config = state.config_reader.snapshot();
     let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.http_port);
     let router = build_router(state);
-    
+
     tracing::info!("transport.started HTTP server on {}", addr);
-    
-    let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| TransportError::Bootstrap(e.to_string()))?;
-    
+
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(|e| TransportError::Bootstrap(e.to_string()))?;
+
     let mut rx = shutdown_rx.clone();
     axum::serve(listener, router)
         .with_graceful_shutdown(async move {
@@ -333,23 +351,26 @@ where
         })
         .await
         .map_err(|e| TransportError::Bootstrap(e.to_string()))?;
-        
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
-    use llamaforge_config::{AppConfig, ConfigHandle, source::memory::InMemoryConfigSource};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use futures_core::Stream;
+    use llamaforge_config::{source::memory::InMemoryConfigSource, AppConfig, ConfigHandle};
     use llamaforge_types::{
         traits::{IncomingRequest, QueueError, QueueSnapshot, QueueTicket, ServerSummary},
-        RequestId, ServerId, ChatCompletionChunk, StreamError,
+        ChatCompletionChunk, RequestId, ServerId, StreamError,
     };
     use std::pin::Pin;
     use std::sync::Arc;
     use tower::ServiceExt;
-    use futures_core::Stream;
 
     // A mock InferenceEngine to inject into the app state
     struct MockEngine {
@@ -361,46 +382,80 @@ mod tests {
         async fn chat_completion(
             &self,
             _req: llamaforge_types::ChatCompletionRequest,
-        ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>, llamaforge_types::traits::DispatchError> {
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
+            llamaforge_types::traits::DispatchError,
+        > {
             let chunks = self.chunks.clone();
             let sleep_time = self.sleep_ms;
-            
-            let stream = futures_util::stream::unfold((chunks.into_iter(), sleep_time), |(mut iter, delay)| async move {
-                if delay > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                }
-                iter.next().map(|item| (item, (iter, delay)))
-            });
-            
+
+            let stream = futures_util::stream::unfold(
+                (chunks.into_iter(), sleep_time),
+                |(mut iter, delay)| async move {
+                    if delay > 0 {
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+                    }
+                    iter.next().map(|item| (item, (iter, delay)))
+                },
+            );
+
             Ok(Box::pin(stream))
         }
     }
 
     struct MockRouteValidator;
     impl RouteValidator for MockRouteValidator {
-        fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), llamaforge_types::traits::AdmissionError> {
+        fn validate_routable(
+            &self,
+            _req: &IncomingRequest,
+        ) -> Result<(), llamaforge_types::traits::AdmissionError> {
             Ok(())
         }
     }
 
     struct MockMetricsExporter;
     impl MetricsExporter for MockMetricsExporter {
-        fn gather_text(&self) -> String { "".into() }
+        fn gather_text(&self) -> String {
+            "".into()
+        }
     }
 
     struct MockServerControl;
     #[async_trait::async_trait]
     impl ServerControl for MockServerControl {
-        async fn list_servers(&self) -> Result<Vec<ServerSummary>, llamaforge_types::traits::ServerError> { Ok(vec![]) }
-        async fn start_server(&self, _id: &ServerId) -> Result<(), llamaforge_types::traits::ServerError> { Ok(()) }
-        async fn stop_server(&self, _id: &ServerId) -> Result<(), llamaforge_types::traits::ServerError> { Ok(()) }
+        async fn list_servers(
+            &self,
+        ) -> Result<Vec<ServerSummary>, llamaforge_types::traits::ServerError> {
+            Ok(vec![])
+        }
+        async fn start_server(
+            &self,
+            _id: &ServerId,
+        ) -> Result<(), llamaforge_types::traits::ServerError> {
+            Ok(())
+        }
+        async fn stop_server(
+            &self,
+            _id: &ServerId,
+        ) -> Result<(), llamaforge_types::traits::ServerError> {
+            Ok(())
+        }
     }
 
     struct MockQueueSubmitter;
     impl QueueSubmitter for MockQueueSubmitter {
-        fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, llamaforge_types::traits::AdmissionError> { Ok(QueueTicket {}) }
-        fn cancel(&self, _id: &RequestId) -> Result<(), QueueError> { Ok(()) }
-        fn status(&self) -> Result<QueueSnapshot, QueueError> { Ok(QueueSnapshot {}) }
+        fn submit(
+            &self,
+            _req: IncomingRequest,
+        ) -> Result<QueueTicket, llamaforge_types::traits::AdmissionError> {
+            Ok(QueueTicket {})
+        }
+        fn cancel(&self, _id: &RequestId) -> Result<(), QueueError> {
+            Ok(())
+        }
+        fn status(&self) -> Result<QueueSnapshot, QueueError> {
+            Ok(QueueSnapshot {})
+        }
     }
 
     fn build_test_router(engine: MockEngine) -> Router {
