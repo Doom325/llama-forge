@@ -192,6 +192,7 @@ impl EventStore for SqliteMetricsStore {
     }
 }
 
+#[async_trait::async_trait]
 impl RequestMetricsStore for SqliteMetricsStore {
     async fn insert_request_metrics(&self, metrics: Vec<RequestMetrics>) -> Result<(), StoreError> {
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -489,6 +490,7 @@ impl ProcessStore for SqliteMetricsStore {
     }
 }
 
+#[async_trait::async_trait]
 impl StoreMaintenance for SqliteMetricsStore {
     async fn insert_config_snapshot(&self, snapshot: &ConfigSnapshot) -> Result<(), StoreError> {
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -507,10 +509,7 @@ impl StoreMaintenance for SqliteMetricsStore {
         })?
     }
 
-    fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let cmd = WriterCommand::Prune { cutoff, reply: reply_tx, span: Span::current() };
 
@@ -519,16 +518,13 @@ impl StoreMaintenance for SqliteMetricsStore {
             .send(cmd)
             .map_err(|_| StoreError::Unavailable { message: "Writer thread is dead".into() });
 
-        async move {
-            cmd_tx_res?;
-            reply_rx.await.map_err(|_| StoreError::Unavailable {
-                message: "Writer thread dropped the request".into(),
-            })?
-        }
+        cmd_tx_res?;
+        reply_rx.await.map_err(|_| StoreError::Unavailable {
+            message: "Writer thread dropped the request".into(),
+        })?
     }
-    fn estimated_size_bytes(
-        &self,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         self.interact_with_timeout(move |conn| {
             let page_count: i64 = conn
                 .query_row("PRAGMA page_count", [], |r| r.get(0))
@@ -539,6 +535,7 @@ impl StoreMaintenance for SqliteMetricsStore {
 
             Ok((page_count * page_size) as u64)
         })
+        .await
     }
 
     async fn wal_checkpoint(&self, mode: CheckpointMode) -> Result<CheckpointResult, StoreError> {

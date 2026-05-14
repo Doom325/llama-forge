@@ -1,6 +1,5 @@
 //! In-memory test double for the metrics store.
 
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 
 use crate::error::StoreError;
@@ -45,6 +44,7 @@ impl EventStore for InMemoryStore {
     }
 }
 
+#[async_trait::async_trait]
 impl RequestMetricsStore for InMemoryStore {
     async fn insert_request_metrics(&self, metrics: Vec<RequestMetrics>) -> Result<(), StoreError> {
         self.metrics.lock().extend(metrics);
@@ -92,16 +92,17 @@ impl ProcessStore for InMemoryStore {
     }
 }
 
+#[async_trait::async_trait]
 impl StoreMaintenance for InMemoryStore {
     async fn insert_config_snapshot(&self, snapshot: &ConfigSnapshot) -> Result<(), StoreError> {
         self.snapshots.lock().push(snapshot.clone());
         Ok(())
     }
 
-    fn prune_events_older_than(
+    async fn prune_events_older_than(
         &self,
-        cutoff: DateTime<Utc>,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, StoreError> {
         let mut events = self.events.lock();
         let initial_len = events.len();
         events.retain(|e| e.created_at >= cutoff);
@@ -110,26 +111,22 @@ impl StoreMaintenance for InMemoryStore {
         let mut metrics = self.metrics.lock();
         metrics.retain(|m| m.received_at >= cutoff);
 
-        async move { Ok(deleted) }
+        Ok(deleted)
     }
 
-    fn estimated_size_bytes(
-        &self,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         let total_items = self.events.lock().len()
             + self.metrics.lock().len()
             + self.processes.lock().len()
             + self.snapshots.lock().len();
-        async move { Ok((total_items * 1024) as u64) }
+        Ok((total_items * 1024) as u64)
     }
 
-    #[allow(clippy::manual_async_fn)]
-    fn wal_checkpoint(
+    async fn wal_checkpoint(
         &self,
         _mode: crate::types::CheckpointMode,
-    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send
-    {
-        async move { Ok(crate::types::CheckpointResult { pages_checkpointed: 0 }) }
+    ) -> Result<crate::types::CheckpointResult, StoreError> {
+        Ok(crate::types::CheckpointResult { pages_checkpointed: 0 })
     }
 }
 

@@ -23,7 +23,7 @@ pub trait EventStore: Send + Sync + private::Sealed {
 }
 
 /// Storage operations for request-level metrics.
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait RequestMetricsStore: Send + Sync + private::Sealed {
     /// Insert a batch of request metrics.
     async fn insert_request_metrics(&self, metrics: Vec<RequestMetrics>) -> Result<(), StoreError>;
@@ -58,7 +58,7 @@ pub trait ProcessStore: Send + Sync + private::Sealed {
 }
 
 /// Administrative storage operations.
-#[allow(async_fn_in_trait)]
+#[async_trait::async_trait]
 pub trait StoreMaintenance: Send + Sync + private::Sealed {
     /// Insert a snapshot of the application configuration.
     async fn insert_config_snapshot(&self, snapshot: &ConfigSnapshot) -> Result<(), StoreError>;
@@ -66,21 +66,16 @@ pub trait StoreMaintenance: Send + Sync + private::Sealed {
     /// Prune old events and request metrics.
     ///
     /// Returns the number of rows deleted.
-    fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError>;
 
     /// Return the estimated size of the database in bytes.
-    fn estimated_size_bytes(
-        &self,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send;
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError>;
 
     /// Perform a WAL checkpoint.
-    fn wal_checkpoint(
+    async fn wal_checkpoint(
         &self,
         mode: crate::types::CheckpointMode,
-    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send;
+    ) -> Result<crate::types::CheckpointResult, StoreError>;
 }
 
 /// An override for a specific configuration value on a specific server.

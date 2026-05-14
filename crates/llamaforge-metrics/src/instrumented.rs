@@ -76,6 +76,7 @@ impl EventStore for InstrumentedMetricsStore {
     }
 }
 
+#[async_trait::async_trait]
 impl RequestMetricsStore for InstrumentedMetricsStore {
     async fn insert_request_metrics(&self, metrics: Vec<RequestMetrics>) -> Result<(), StoreError> {
         let start = Instant::now();
@@ -147,6 +148,7 @@ impl ProcessStore for InstrumentedMetricsStore {
     }
 }
 
+#[async_trait::async_trait]
 impl StoreMaintenance for InstrumentedMetricsStore {
     async fn insert_config_snapshot(&self, snapshot: &ConfigSnapshot) -> Result<(), StoreError> {
         let start = Instant::now();
@@ -158,54 +160,32 @@ impl StoreMaintenance for InstrumentedMetricsStore {
         res
     }
 
-    fn prune_events_older_than(
-        &self,
-        cutoff: DateTime<Utc>,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+    async fn prune_events_older_than(&self, cutoff: DateTime<Utc>) -> Result<u64, StoreError> {
         let span = info_span!("metrics.prune_events", cutoff = %cutoff);
-        let future = self.inner.prune_events_older_than(cutoff).instrument(span);
-        let metrics = self.metrics.clone();
-
-        async move {
-            let start = Instant::now();
-            let res = future.await;
-            metrics.observe_write_duration(start.elapsed().as_secs_f64());
-            metrics.record_write_result(if res.is_ok() { "ok" } else { "error" });
-            if let Ok(deleted) = &res {
-                metrics.record_prune_rows(*deleted);
-            }
-            res
+        let start = Instant::now();
+        let res = self.inner.prune_events_older_than(cutoff).instrument(span).await;
+        self.metrics.observe_write_duration(start.elapsed().as_secs_f64());
+        self.metrics.record_write_result(if res.is_ok() { "ok" } else { "error" });
+        if let Ok(deleted) = &res {
+            self.metrics.record_prune_rows(*deleted);
         }
+        res
     }
 
-    fn estimated_size_bytes(
-        &self,
-    ) -> impl std::future::Future<Output = Result<u64, StoreError>> + Send {
+    async fn estimated_size_bytes(&self) -> Result<u64, StoreError> {
         let span = info_span!("metrics.estimated_size_bytes");
-        let future = self.inner.estimated_size_bytes().instrument(span);
-
-        async move {
-            let res = future.await;
-            res
-        }
+        self.inner.estimated_size_bytes().instrument(span).await
     }
 
-    #[allow(clippy::manual_async_fn)]
-    fn wal_checkpoint(
+    async fn wal_checkpoint(
         &self,
         mode: crate::types::CheckpointMode,
-    ) -> impl std::future::Future<Output = Result<crate::types::CheckpointResult, StoreError>> + Send
-    {
+    ) -> Result<crate::types::CheckpointResult, StoreError> {
         let span = info_span!("metrics.wal_checkpoint");
-        let future = self.inner.wal_checkpoint(mode).instrument(span);
-        let metrics = self.metrics.clone();
-
-        async move {
-            let start = std::time::Instant::now();
-            let res = future.await;
-            metrics.observe_write_duration(start.elapsed().as_secs_f64());
-            metrics.record_write_result(if res.is_ok() { "ok" } else { "error" });
-            res
-        }
+        let start = std::time::Instant::now();
+        let res = self.inner.wal_checkpoint(mode).instrument(span).await;
+        self.metrics.observe_write_duration(start.elapsed().as_secs_f64());
+        self.metrics.record_write_result(if res.is_ok() { "ok" } else { "error" });
+        res
     }
 }

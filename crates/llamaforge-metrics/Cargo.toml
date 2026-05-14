@@ -27,6 +27,7 @@ deadpool-sqlite = { workspace = true }
 deadpool-sync = { workspace = true }
 deadpool = { workspace = true }
 uuid = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 llamaforge-metrics = { path = ".", version = "0.1.0-draft", features = ["test-utils"] }
