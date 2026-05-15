@@ -21,6 +21,10 @@ llamaforge-dispatch = { workspace = true }
 llamaforge-queue = { workspace = true }
 llamaforge-transport = { workspace = true }
 llamaforge-adapters = { workspace = true }
+llamaforge = { workspace = true }
+llamaforge-proto = { workspace = true }
+futures-util = { workspace = true }
+tonic = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
@@ -30,6 +34,7 @@ reqwest = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 llamaforge-config = { workspace = true, features = ["test-utils"] }

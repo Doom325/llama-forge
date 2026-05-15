@@ -220,7 +220,10 @@ impl InferenceEngine for InferenceEngineAdapter {
                                 if parsed.stop {
                                     metrics::counter!("llamaforge_tokens_total")
                                         .increment(parsed.tokens_predicted as u64);
-                                    let reason = parsed.finish_reason.unwrap_or_default();
+                                    let reason = parsed
+                                        .finish_reason
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or_else(|| "stop".to_string());
                                     yield Ok(ChatCompletionChunk::Stop(reason));
                                     return;
                                 } else if !parsed.text.is_empty() {
@@ -244,7 +247,7 @@ impl InferenceEngine for InferenceEngineAdapter {
                                 // Stop; otherwise we surface the loss as
                                 // BackendDisconnect.
                                 if tokens_emitted > 0 {
-                                    yield Ok(ChatCompletionChunk::Stop(String::new()));
+                                    yield Ok(ChatCompletionChunk::Stop("stop".to_string()));
                                 } else {
                                     yield Err(StreamError::BackendDisconnect);
                                 }

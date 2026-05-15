@@ -1,8 +1,7 @@
-mod build;
 mod init;
-mod serve;
-mod tracing_init;
 mod validate;
+
+use llamaforge::serve;
 
 use clap::Parser;
 use llamaforge_config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
