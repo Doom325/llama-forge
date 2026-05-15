@@ -73,7 +73,14 @@ pub struct MockLlama {
 impl MockLlama {
     /// Bind on an ephemeral local port and start serving.
     pub async fn start(config: MockConfig) -> std::io::Result<Self> {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+        Self::start_on_port(0, config).await
+    }
+
+    /// Bind on a specific local port. Used by the standalone `mock-llama`
+    /// binary when launched by server-manager subprocess tests that pass
+    /// a fixed `--port`.
+    pub async fn start_on_port(port: u16, config: MockConfig) -> std::io::Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", port)).await?;
         let addr = listener.local_addr()?;
         let state = Arc::new(MockState::default());
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
