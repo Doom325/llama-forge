@@ -20,7 +20,7 @@ async fn test_vc2_1_end_to_end_reload() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -44,16 +44,16 @@ ctx_size = 2048
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 
-[[servers.s1.lora_adapters]]
+[[servers."00000000-0000-0000-0000-000000000001".lora_adapters]]
 path = "lora1.gguf"
 scale = 1.0
 
-[servers.s2]
+[servers."00000000-0000-0000-0000-000000000002"]
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 4096
@@ -67,7 +67,14 @@ ctx_size = 4096
     // 5. Verify snapshot reflects changes and subscriber got diff
     let snap = handle.snapshot();
     assert_eq!(snap.servers.len(), 2);
-    assert_eq!(snap.servers.get(&ServerId::from("s1")).unwrap().lora_adapters.len(), 1);
+    assert_eq!(
+        snap.servers
+            .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+            .unwrap()
+            .lora_adapters
+            .len(),
+        1
+    );
 
     let broadcast_diff = rx.recv().await.unwrap();
     assert_eq!(diff.changes.len(), 2);
@@ -85,7 +92,7 @@ async fn test_vc2_3_concurrent_reload_stress() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -137,9 +144,12 @@ async fn test_vc2_4_validation_rejects_bad_config() {
         }
     };
 
-    check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
-    check_val("[servers.s1]\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
-    check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
+    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.\"00000000-0000-0000-0000-000000000002\"]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+    check_val(
+        "[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path=''\nport=8080\nctx_size=1",
+        "empty model_path",
+    );
+    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
 }
 
 #[tokio::test]
@@ -154,7 +164,7 @@ async fn test_vc2_5_backward_compatibility() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -167,7 +177,7 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let snap = handle.snapshot();
-    let server = snap.servers.get(&ServerId::from("s1")).unwrap();
+    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
 
     // Check defaults were populated
     assert_eq!(server.gpu_layers, -1);

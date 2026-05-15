@@ -31,7 +31,7 @@ async fn test_vc3_1_full_lifecycle() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -51,12 +51,12 @@ ctx_size = 2048
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 
-[servers.s2]
+[servers."00000000-0000-0000-0000-000000000002"]
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 4096
@@ -71,7 +71,7 @@ ctx_size = 4096
 
     // writeback
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -115,11 +115,11 @@ async fn test_vc3_4_startup_failure_validation_error() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
-[servers.s2]
+[servers."00000000-0000-0000-0000-000000000002"]
 model_path = "m2.gguf"
 port = 8080
 ctx_size = 2048
@@ -141,7 +141,7 @@ async fn test_vc3_5_hot_reload_add_server() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -155,11 +155,11 @@ ctx_size = 2048
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
-[servers.s2]
+[servers."00000000-0000-0000-0000-000000000002"]
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 2048
@@ -179,11 +179,11 @@ async fn test_vc3_6_hot_reload_remove_server() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
-[servers.s2]
+[servers."00000000-0000-0000-0000-000000000002"]
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 2048
@@ -197,7 +197,7 @@ ctx_size = 2048
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -217,7 +217,7 @@ async fn test_vc3_7_hot_reload_change_requiring_restart() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -231,7 +231,7 @@ ctx_size = 2048
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 4096
@@ -257,7 +257,7 @@ async fn test_vc3_8_hot_reload_change_not_requiring_restart() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -271,7 +271,7 @@ ctx_size = 2048
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -299,7 +299,7 @@ async fn test_vc3_9_hot_reload_parse_error_preserves_old_config() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -327,7 +327,7 @@ async fn test_vc3_10_writeback_crash_safety() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -338,7 +338,7 @@ ctx_size = 2048
     let instrumented = setup_stack(main_path.clone(), PathBuf::new(), state_dir.clone()).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -358,7 +358,7 @@ async fn test_vc3_11_writeback_read_only_fs() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -373,7 +373,7 @@ ctx_size = 2048
     perms.set_readonly(true);
     fs::set_permissions(&state_dir, perms).unwrap();
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
     let err = instrumented.writeback(mutation).await.unwrap_err();
@@ -396,7 +396,7 @@ async fn test_vc3_12_concurrent_stress_test() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -419,7 +419,7 @@ ctx_size = 2048
             tasks.push(tokio::spawn(async move {
                 let _ = handle
                     .writeback(ConfigMutation::SetLoraAdapters {
-                        server_id: ServerId::from("s1"),
+                        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
                         adapters: vec![],
                     })
                     .await;
@@ -480,7 +480,7 @@ async fn test_vc3_13_observability_verification() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -504,7 +504,7 @@ async fn test_vc3_14_cached_config_reader_consistency() {
     fs::write(
         &main_path,
         r#"
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048

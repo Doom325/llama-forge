@@ -478,6 +478,79 @@ impl ServerManager {
         self.servers.get(id).map(|s| s.slots.clone())
     }
 
+    pub fn all_servers(&self) -> Vec<(ServerId, ServerStateSnapshot)> {
+        self.servers.iter().map(|s| (s.id.clone(), s.to_snapshot())).collect()
+    }
+
+    pub async fn request_start(
+        self: &Arc<Self>,
+        server_id: &ServerId,
+    ) -> Result<(), ServerManagerError> {
+        if let Some(state) = self.servers.get(server_id) {
+            if state.lifecycle != ServerLifecycle::Stopped
+                && state.lifecycle != ServerLifecycle::Failed
+            {
+                return Err(ServerManagerError::StartFailed {
+                    id: server_id.clone(),
+                    reason: "Server is already running or starting".into(),
+                });
+            }
+        } else {
+            return Err(ServerManagerError::ServerNotFound { id: server_id.clone() });
+        }
+
+        let app_config = self.config.snapshot();
+        if let Some(server_config) = app_config.servers.get(server_id) {
+            let srv = server_id.clone();
+            let cfg = server_config.clone();
+            let mgr = self.clone();
+
+            mgr.servers.insert(
+                srv.clone(),
+                ServerState {
+                    id: srv.clone(),
+                    lifecycle: ServerLifecycle::Starting,
+                    pid: None,
+                    port: cfg.port,
+                    model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
+                    parallel_slots: cfg.parallel_slots,
+                    ctx_size: cfg.ctx_size,
+                    slots: vec![],
+                    last_health_check: None,
+                    restart_count: 0,
+                    cumulative_requests: 0,
+                    capabilities: None,
+                    first_health_ok_at: None,
+                    last_n_decoded: std::collections::HashMap::new(),
+                    gpu_id: cfg
+                        .devices
+                        .first()
+                        .map(|d| d.gpu_id.clone())
+                        .unwrap_or_else(|| GpuId(0)),
+                    gguf_metadata: None,
+                    reserved_vram_bytes: 0,
+                    task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                    #[cfg(any(test, feature = "test-utils"))]
+                    test_warm_tps_samples: None,
+                },
+            );
+
+            self.tasks.lock().await.spawn(async move {
+                crate::task::spawn_server_task(mgr, srv, cfg, None).await;
+            });
+            return Ok(());
+        }
+        Err(ServerManagerError::ServerNotFound { id: server_id.clone() })
+    }
+
+    pub async fn request_stop(&self, server_id: &ServerId) -> Result<(), ServerManagerError> {
+        if !self.servers.contains_key(server_id) {
+            return Err(ServerManagerError::ServerNotFound { id: server_id.clone() });
+        }
+        self.stop_server(server_id).await;
+        Ok(())
+    }
+
     // --- Task 3.4: Cumulative requests ---
 
     /// Gets the cumulative request count for a server.

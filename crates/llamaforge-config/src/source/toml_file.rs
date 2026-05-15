@@ -334,7 +334,7 @@ mod tests {
             r#"
 [global]
 http_port = 9000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -356,7 +356,14 @@ check_interval_secs = 60
         let config = source.load().unwrap();
 
         assert_eq!(config.global.http_port, 9000);
-        assert_eq!(config.servers.get(&ServerId::from("s1")).unwrap().port, 8080);
+        assert_eq!(
+            config
+                .servers
+                .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+                .unwrap()
+                .port,
+            8080
+        );
         assert_eq!(config.priority_rules.starvation.check_interval_secs, 60);
     }
 
@@ -405,22 +412,22 @@ check_interval_secs = 60
         };
 
         // Rule 2: Duplicate port
-        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
 
         // Rule 3: Empty model_path
-        check_val("[servers.s1]\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
 
         // Rule 4: ctx_size 0
-        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
 
         // Rule 5: parallel_slots 0
         check_val(
-            "[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
+            "[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
             "parallel_slots must be > 0",
         );
 
         // Rule 6: Duplicate GPU ID
-        check_val("[servers.s1]\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
 
         // Rule 7: queue_default_timeout_secs 0
         check_val(
@@ -498,7 +505,7 @@ check_interval_secs = 60
             &main_path,
             r#"
 # This is a comment we want to preserve
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -511,7 +518,7 @@ ctx_size = 2048
         let config = source.load().unwrap();
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("s1"),
+            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
             adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
         };
 
@@ -524,7 +531,10 @@ ctx_size = 2048
         assert!(updated_content.contains("1.0"));
 
         let updated_config = source.load().unwrap();
-        let s1 = updated_config.servers.get(&ServerId::from("s1")).unwrap();
+        let s1 = updated_config
+            .servers
+            .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+            .unwrap();
         assert_eq!(s1.lora_adapters.len(), 1);
         assert_eq!(s1.lora_adapters[0].path, PathBuf::from("lora.gguf"));
     }

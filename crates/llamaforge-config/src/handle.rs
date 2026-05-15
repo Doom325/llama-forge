@@ -24,6 +24,16 @@ impl ConfigHandle {
     /// Load the initial configuration and construct the handle.
     pub fn load(source: Arc<dyn ConfigSource>) -> Result<Self, ConfigLoadError> {
         let config = source.load()?;
+
+        // Enforce UUID-shaped IDs
+        for server_id in config.servers.keys() {
+            if uuid::Uuid::parse_str(server_id.0.as_str()).is_err() {
+                return Err(ConfigLoadError::ValidationError {
+                    message: format!("ServerId '{}' is not a valid UUID", server_id.0),
+                });
+            }
+        }
+
         let (change_tx, _) = broadcast::channel(16);
 
         Ok(Self {
@@ -286,13 +296,16 @@ mod tests {
     #[tokio::test]
     async fn test_config_handle_writeback_happy_path() {
         let mut config = AppConfig::default();
-        config.servers.insert(ServerId::from("s1"), ServerConfig::default());
+        config.servers.insert(
+            ServerId::from("00000000-0000-0000-0000-000000000001"),
+            ServerConfig::default(),
+        );
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
         let handle = ConfigHandle::load(source).unwrap();
         let mut rx = handle.subscribe();
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("s1"),
+            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
             adapters: vec![crate::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,
@@ -304,14 +317,21 @@ mod tests {
 
         match &diff.changes[0] {
             ConfigChange::ServerChanged { id, diff } => {
-                assert_eq!(id.0, "s1");
+                assert_eq!(id.0, "00000000-0000-0000-0000-000000000001");
                 assert!(diff.hot_reloadable());
             }
             _ => panic!("Expected ServerChanged"),
         }
 
         let snap = handle.snapshot();
-        assert_eq!(snap.servers.get(&ServerId::from("s1")).unwrap().lora_adapters.len(), 1);
+        assert_eq!(
+            snap.servers
+                .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+                .unwrap()
+                .lora_adapters
+                .len(),
+            1
+        );
 
         let broadcast_diff = rx.recv().await.unwrap();
         assert_eq!(broadcast_diff.changes.len(), 1);

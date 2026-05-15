@@ -20,7 +20,7 @@ async fn test_filesystem_writeback_happy_path_and_comments() {
 http_port = 8000
 
 # Server 1 configuration comment
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -34,7 +34,7 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
 
@@ -44,7 +44,7 @@ ctx_size = 2048
     assert_eq!(diff.changes.len(), 1);
     match &diff.changes[0] {
         ConfigChange::ServerChanged { id, diff } => {
-            assert_eq!(id.0, "s1");
+            assert_eq!(id.0, "00000000-0000-0000-0000-000000000001");
             assert!(diff.hot_reloadable());
             assert!(diff.fields_changed.contains(&ServerConfigField::LoraAdapters));
         }
@@ -53,7 +53,7 @@ ctx_size = 2048
 
     // Verify snapshot updated
     let snap = handle.snapshot();
-    let server = snap.servers.get(&ServerId::from("s1")).unwrap();
+    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
     assert_eq!(server.lora_adapters.len(), 1);
     assert_eq!(server.lora_adapters[0].path, PathBuf::from("lora1.gguf"));
 
@@ -81,7 +81,7 @@ async fn test_filesystem_writeback_readonly() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -99,7 +99,7 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
 

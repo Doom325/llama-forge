@@ -250,13 +250,16 @@ mod tests {
         RECORDED.store(false, Ordering::SeqCst);
 
         let mut config = AppConfig::default();
-        config.servers.insert(ServerId::from("s1"), crate::types::ServerConfig::default());
+        config.servers.insert(
+            ServerId::from("00000000-0000-0000-0000-000000000001"),
+            crate::types::ServerConfig::default(),
+        );
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
         let handle = ConfigHandle::load(source).unwrap();
         let instrumented = InstrumentedConfigHandle::new(handle);
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("s1"),
+            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
             adapters: vec![crate::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,
