@@ -30,7 +30,7 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
     config_str.push_str("[metrics]\n");
     config_str.push_str(&format!(
         r#"
-[servers.srv_e2e]
+[servers.00000000-0000-0000-0000-000000000000]
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -78,7 +78,7 @@ async fn test_e2e_lifecycle() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("srv_e2e".into());
+    let srv_id = ServerId("00000000-0000-0000-0000-000000000000".into());
 
     // Wait for Running
     let mut is_running = false;
@@ -208,7 +208,7 @@ async fn test_id_task_overflow() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("srv_e2e".into());
+    let srv_id = ServerId("00000000-0000-0000-0000-000000000000".into());
 
     // Wait for Running
     let mut is_running = false;

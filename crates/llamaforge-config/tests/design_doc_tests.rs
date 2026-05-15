@@ -29,7 +29,7 @@ async fn test_concurrent_sighups_serialized() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -64,7 +64,7 @@ async fn test_writeback_atomic_rename() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -76,7 +76,7 @@ parallel_slots = 4
     let instrumented = setup_stack(main_path.clone(), PathBuf::new(), state_dir.clone()).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -111,7 +111,7 @@ async fn test_serde_default_backward_compat() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -124,7 +124,7 @@ parallel_slots = 4
     let snap = instrumented.snapshot();
 
     assert_eq!(snap.global.grpc_port, 50051);
-    let server = snap.servers.get(&ServerId::from("s1")).unwrap();
+    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
     assert_eq!(server.gpu_layers, -1);
 }
 
@@ -139,7 +139,7 @@ async fn test_broadcast_lagged_subscriber() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -170,7 +170,7 @@ async fn test_readonly_fs_writeback_graceful() {
         r#"
 [global]
 http_port = 8000
-[servers.s1]
+[servers."00000000-0000-0000-0000-000000000001"]
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -186,7 +186,7 @@ parallel_slots = 4
     perms.set_readonly(true);
     fs::set_permissions(&state_dir, perms).unwrap();
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("s1"),
+        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
     let err = instrumented.writeback(mutation).await.unwrap_err();
