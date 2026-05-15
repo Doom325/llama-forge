@@ -9,6 +9,27 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
+/// Resolves the workspace `mock-llama` binary path at runtime.
+///
+/// `env!("CARGO_BIN_EXE_*")` is only populated for integration tests in
+/// the same package as the binary; since `mock-llama` is now its own
+/// workspace member, we walk from this crate's manifest dir up to the
+/// workspace root and into `target/{debug,release}/mock-llama`.
+fn mock_llama_bin() -> String {
+    let target = std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(
+        |_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target")
+        },
+    );
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target.join(profile).join("mock-llama").to_string_lossy().into_owned()
+}
+
 struct MockTelemetry;
 impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_config::GpuId) -> Result<u64, TelemetryError> {
@@ -40,7 +61,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         mock_port,
     ));
 
@@ -115,7 +136,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port + 1,
     ));
     std::fs::write(&main_path, &config_str).unwrap();
@@ -190,7 +211,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port,
     ));
     std::fs::write(&main_path, &config_str2).unwrap();

@@ -1444,6 +1444,7 @@ dependencies = [
  "llamaforge-types",
  "metrics",
  "metrics-util 0.18.0",
+ "mock-llama",
  "nix",
  "parking_lot",
  "proptest",
