@@ -222,6 +222,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub grpc: GrpcConfig,
     #[serde(default)]
+    pub gateway: GatewayConfig,
+    #[serde(default)]
     pub prometheus: PrometheusConfig,
     #[serde(default)]
     pub web_ui: WebUiConfig,
@@ -233,6 +235,58 @@ pub struct AppConfig {
     pub priority_rules: PriorityRulesConfig,
     #[serde(default)]
     pub routing: RoutingConfig,
+}
+
+/// Gateway / large-body request handling configuration.
+/// See design doc Section 6.2 (gateway knobs).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayConfig {
+    /// Maximum allowed request body size in bytes. Default 50 MiB.
+    #[serde(default = "default_max_request_body_bytes")]
+    pub max_request_body_bytes: u64,
+    /// Threshold above which a request is classified as "large body" and
+    /// subject to per-shape concurrency limits, in megabytes. Default 1.
+    #[serde(default = "default_large_body_threshold_mb")]
+    pub large_body_threshold_mb: u64,
+    /// Maximum concurrent large-body requests admitted at any time. Default 5.
+    #[serde(default = "default_max_concurrent_large_requests")]
+    pub max_concurrent_large_requests: usize,
+    /// Default WAL checkpoint mode used by the `wal_checkpoint` REST handler
+    /// when the request does not specify one. Default `Passive`.
+    #[serde(default)]
+    pub wal_checkpoint_mode: WalCheckpointMode,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            max_request_body_bytes: default_max_request_body_bytes(),
+            large_body_threshold_mb: default_large_body_threshold_mb(),
+            max_concurrent_large_requests: default_max_concurrent_large_requests(),
+            wal_checkpoint_mode: WalCheckpointMode::default(),
+        }
+    }
+}
+
+fn default_max_request_body_bytes() -> u64 {
+    50 * 1024 * 1024
+}
+fn default_large_body_threshold_mb() -> u64 {
+    1
+}
+fn default_max_concurrent_large_requests() -> usize {
+    5
+}
+
+/// Config-side WAL checkpoint mode (mirrors `llamaforge_metrics::CheckpointMode`
+/// without creating a dependency edge in the wrong direction). Hand-mapped at
+/// the transport boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WalCheckpointMode {
+    #[default]
+    Passive,
+    Truncate,
 }
 
 /// CORS configuration.
@@ -407,6 +461,10 @@ pub struct GrpcConfig {
     pub keepalive_timeout_secs: u32,
     #[serde(default = "default_grpc_max_concurrent_streams")]
     pub max_concurrent_streams: u32,
+    /// Whether to terminate TLS on the gRPC listener. When true,
+    /// `tls_cert` and `tls_key` must both be set. Default false.
+    #[serde(default)]
+    pub tls_enabled: bool,
     #[serde(default)]
     pub tls_cert: Option<PathBuf>,
     #[serde(default)]
@@ -420,6 +478,7 @@ impl Default for GrpcConfig {
             keepalive_interval_secs: default_grpc_keepalive_interval_secs(),
             keepalive_timeout_secs: default_grpc_keepalive_timeout_secs(),
             max_concurrent_streams: default_grpc_max_concurrent_streams(),
+            tls_enabled: false,
             tls_cert: None,
             tls_key: None,
         }
@@ -708,6 +767,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_gateway_config_defaults() {
+        let g = GatewayConfig::default();
+        assert_eq!(g.max_request_body_bytes, 50 * 1024 * 1024);
+        assert_eq!(g.large_body_threshold_mb, 1);
+        assert_eq!(g.max_concurrent_large_requests, 5);
+        assert_eq!(g.wal_checkpoint_mode, WalCheckpointMode::Passive);
+    }
+
+    #[test]
+    fn test_gateway_config_serde_roundtrip() {
+        let g = GatewayConfig {
+            max_request_body_bytes: 100 * 1024 * 1024,
+            large_body_threshold_mb: 4,
+            max_concurrent_large_requests: 8,
+            wal_checkpoint_mode: WalCheckpointMode::Truncate,
+        };
+        let toml = toml::to_string(&g).unwrap();
+        let parsed: GatewayConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn test_gateway_config_parses_from_toml_section() {
+        let toml = r#"
+[gateway]
+max_request_body_bytes = 10485760
+max_concurrent_large_requests = 2
+wal_checkpoint_mode = "truncate"
+"#;
+        let parsed: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(parsed.gateway.max_request_body_bytes, 10485760);
+        assert_eq!(parsed.gateway.max_concurrent_large_requests, 2);
+        assert_eq!(parsed.gateway.large_body_threshold_mb, 1); // default preserved
+        assert_eq!(parsed.gateway.wal_checkpoint_mode, WalCheckpointMode::Truncate);
+    }
+
+    #[test]
+    fn test_grpc_tls_serde_roundtrip() {
+        let g = GrpcConfig {
+            tls_enabled: true,
+            tls_cert: Some(PathBuf::from("/etc/cert.pem")),
+            tls_key: Some(PathBuf::from("/etc/key.pem")),
+            ..Default::default()
+        };
+        let toml = toml::to_string(&g).unwrap();
+        let parsed: GrpcConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
     fn test_app_config_serde_roundtrip() {
         let mut config = AppConfig::default();
         config.servers.insert(
@@ -746,6 +855,7 @@ mod tests {
                 tls_key: Some(PathBuf::from("key.pem")),
                 ..Default::default()
             },
+            gateway: GatewayConfig::default(),
             prometheus: PrometheusConfig { port: 9999, path: "/metrics_test".to_string() },
             web_ui: WebUiConfig { enabled: false },
             cors: CorsConfig::default(),

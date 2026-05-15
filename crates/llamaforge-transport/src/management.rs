@@ -4,7 +4,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use llamaforge_config::ConfigWriter;
+use llamaforge_config::{ConfigReader, ConfigWriter};
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use llamaforge_types::{
     traits::{QueueSubmitter, ServerControl},
@@ -17,6 +17,7 @@ use crate::error::ApiError;
 pub struct ManagementState<CW, RMS, SM> {
     pub server_control: Arc<dyn ServerControl>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
+    pub config_reader: Arc<dyn ConfigReader>,
     pub config_writer: Arc<CW>,
     pub request_metrics_store: Arc<RMS>,
     pub store_maintenance: Arc<SM>,
@@ -27,6 +28,7 @@ impl<CW, RMS, SM> Clone for ManagementState<CW, RMS, SM> {
         Self {
             server_control: self.server_control.clone(),
             queue_submitter: self.queue_submitter.clone(),
+            config_reader: self.config_reader.clone(),
             config_writer: self.config_writer.clone(),
             request_metrics_store: self.request_metrics_store.clone(),
             store_maintenance: self.store_maintenance.clone(),
@@ -101,10 +103,14 @@ where
     Ok(axum::http::StatusCode::OK.into_response())
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 pub(crate) struct MetricsQueryParams {
+    #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
     pub offset: Option<usize>,
+    #[serde(flatten)]
+    pub filter: llamaforge_metrics::MetricsFilter,
 }
 
 pub(crate) async fn query_request_metrics<CW, RMS, SM>(
@@ -114,44 +120,93 @@ pub(crate) async fn query_request_metrics<CW, RMS, SM>(
 where
     RMS: RequestMetricsStore + Send + Sync + 'static,
 {
-    // Local invariant: filter query parameters will be supported in v1.1
-    let filter = llamaforge_metrics::MetricsFilter::default();
     let metrics = state
         .request_metrics_store
-        .query_request_metrics(&filter, params.limit, params.offset)
+        .query_request_metrics(&params.filter, params.limit, params.offset)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(metrics).into_response())
+}
+
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct AggregatedQueryParams {
+    /// Comma-separated list of fields to group by, e.g. `?group_by=server_id,hour`.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    #[serde(flatten)]
+    pub filter: llamaforge_metrics::MetricsFilter,
+}
+
+fn parse_group_by(s: &str) -> Result<Vec<llamaforge_metrics::GroupByField>, ApiError> {
+    s.split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| match p {
+            "server_id" => Ok(llamaforge_metrics::GroupByField::ServerId),
+            "hour" => Ok(llamaforge_metrics::GroupByField::Hour),
+            "model_name" => Ok(llamaforge_metrics::GroupByField::ModelName),
+            "requestor" => Ok(llamaforge_metrics::GroupByField::Requestor),
+            other => Err(ApiError::Internal(format!("invalid group_by field: {}", other))),
+        })
+        .collect()
 }
 
 pub(crate) async fn query_aggregated<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
+    Query(params): Query<AggregatedQueryParams>,
 ) -> Result<Response, ApiError>
 where
     RMS: RequestMetricsStore + Send + Sync + 'static,
 {
-    let filter = llamaforge_metrics::MetricsFilter::default();
-    // Local invariant: group_by query parameters will be supported in v1.1
-    let group_by = vec![];
+    let group_by = match &params.group_by {
+        Some(s) => parse_group_by(s)?,
+        None => Vec::new(),
+    };
     let metrics = state
         .request_metrics_store
-        .aggregate_request_metrics(&filter, &group_by)
+        .aggregate_request_metrics(&params.filter, &group_by)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(Json(metrics).into_response())
 }
 
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct WalCheckpointQuery {
+    #[serde(default)]
+    pub mode: Option<llamaforge_metrics::CheckpointMode>,
+}
+
+fn map_config_checkpoint_mode(
+    m: llamaforge_config::WalCheckpointMode,
+) -> llamaforge_metrics::CheckpointMode {
+    match m {
+        llamaforge_config::WalCheckpointMode::Passive => {
+            llamaforge_metrics::CheckpointMode::Passive
+        }
+        llamaforge_config::WalCheckpointMode::Truncate => {
+            llamaforge_metrics::CheckpointMode::Truncate
+        }
+    }
+}
+
 pub(crate) async fn wal_checkpoint<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
+    Query(params): Query<WalCheckpointQuery>,
 ) -> Result<Response, ApiError>
 where
+    CW: ConfigWriter + Send + Sync + 'static,
     SM: StoreMaintenance + Send + Sync + 'static,
 {
-    // Local invariant: CheckpointMode parameterization will be supported in v1.1.
-    // Use passive checkpoint as a safe default for manual checkpoints via REST API.
+    let mode = match params.mode {
+        Some(m) => m,
+        None => {
+            let snap = state.config_reader.snapshot();
+            map_config_checkpoint_mode(snap.gateway.wal_checkpoint_mode)
+        }
+    };
     state
         .store_maintenance
-        .wal_checkpoint(llamaforge_metrics::CheckpointMode::Passive)
+        .wal_checkpoint(mode)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(axum::http::StatusCode::OK.into_response())
@@ -220,12 +275,13 @@ mod tests {
     fn build_test_state() -> ManagementState<ConfigHandle, (), ()> {
         let config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
         let source = Arc::new(InMemoryConfigSource::new(config));
-        let cw = Arc::new(ConfigHandle::load(source).unwrap());
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
 
         ManagementState {
             server_control: Arc::new(MockServerControl),
             queue_submitter: Arc::new(MockQueueSubmitter),
-            config_writer: cw,
+            config_reader: handle.clone(),
+            config_writer: handle,
             request_metrics_store: Arc::new(()),
             store_maintenance: Arc::new(()),
         }

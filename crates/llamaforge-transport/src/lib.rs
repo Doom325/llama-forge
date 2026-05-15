@@ -88,14 +88,14 @@ where
     // Configure gracefully shutdown channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
 
-    // Extract configurations
-    // Local invariant: max_concurrent_large_requests and large_body_threshold_mb will be added to the schema in v1.1.
-    // For now, we enforce safe defaults matching the design bounds.
-    let max_concurrent_large_requests = 5;
-    let large_body_threshold_mb = 1;
+    // Extract gateway concurrency settings from config at boot. Hot-reload of
+    // the gateway section is observable via `ConfigChange::GatewayConfigChanged`
+    // but isn't propagated into the running limiter today; subscribers can
+    // restart the gateway layer if they need a new bound. See design doc §6.2.
+    let gateway = deps.config_reader.snapshot().gateway.clone();
     let large_body_limit = middleware::LargeBodyConcurrencyLimit::new(
-        max_concurrent_large_requests,
-        large_body_threshold_mb,
+        gateway.max_concurrent_large_requests,
+        gateway.large_body_threshold_mb,
     );
 
     // Prepare HttpAppState

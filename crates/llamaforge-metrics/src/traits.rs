@@ -89,7 +89,7 @@ pub struct ConfigOverlay {
 
 /// Storage operations for server configuration overrides.
 ///
-/// v1.1: trait defined, impl deferred. See design doc Section 2.8.
+/// Trait defined; production implementation deferred per design doc §2.8.
 #[allow(async_fn_in_trait)]
 pub trait ConfigOverlayStore: Send + Sync + private::Sealed {
     /// Get a specific overlay.

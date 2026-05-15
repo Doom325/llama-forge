@@ -24,9 +24,9 @@ pub use source::ConfigSource;
 pub use traits::{ConfigReader, ConfigWriter};
 pub use types::{
     AllowedPriorityRange, AppConfig, Backend, CacheType, ConfigMutation, ConfigPaths, DeviceSpec,
-    FairShareConfig, FlashAttnMode, GlobalConfig, GpuId, GrpcConfig, LogFormat, LogLevel,
-    LoraAdapterConfig, ModelArchitecture, MutationOutcome, PreemptionConfig, PriorityRulesConfig,
-    PrometheusConfig, RequestorClassPolicy, RequestorId, RoutingConfig, RoutingWeightsConfig,
-    ServerConfig, ServerId, SpeculativeMethod, StarvationConfig, TaskClassName, TaskTypeId,
-    WebUiConfig,
+    FairShareConfig, FlashAttnMode, GatewayConfig, GlobalConfig, GpuId, GrpcConfig, LogFormat,
+    LogLevel, LoraAdapterConfig, ModelArchitecture, MutationOutcome, PreemptionConfig,
+    PriorityRulesConfig, PrometheusConfig, RequestorClassPolicy, RequestorId, RoutingConfig,
+    RoutingWeightsConfig, ServerConfig, ServerId, SpeculativeMethod, StarvationConfig,
+    TaskClassName, TaskTypeId, WalCheckpointMode, WebUiConfig,
 };

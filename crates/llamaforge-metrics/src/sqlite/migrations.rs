@@ -76,7 +76,7 @@ pub fn get_migrations() -> Migrations<'static> {
         );
         CREATE INDEX IF NOT EXISTS idx_config_snapshots_created_at ON config_snapshots(created_at);
 
-        -- Targeted overrides for server configuration (v1.1 feature)
+        -- Targeted overrides for server configuration (see design doc §2.8)
         CREATE TABLE IF NOT EXISTS config_overlays (
             server_id TEXT NOT NULL,
             overlay_key TEXT NOT NULL,

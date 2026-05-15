@@ -18,19 +18,30 @@ pub struct EventFilter {
 }
 
 /// Filter for querying request metrics.
-#[derive(Debug, Clone, Default)]
+///
+/// The `Deserialize` impl enables direct extraction from a URL query string
+/// via `axum::extract::Query<MetricsFilter>` — see
+/// `llamaforge-transport::management`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MetricsFilter {
+    #[serde(default)]
     pub server_id: Option<ServerId>,
+    #[serde(default)]
     pub model_name: Option<String>,
+    #[serde(default)]
     pub requestor: Option<RequestorId>,
+    #[serde(default)]
     pub status: Option<RequestStatus>,
+    #[serde(default)]
     pub since: Option<DateTime<Utc>>,
+    #[serde(default)]
     pub until: Option<DateTime<Utc>>,
 }
 
 /// Fields by which request metrics can be aggregated.
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum GroupByField {
     ServerId,
     Hour,
