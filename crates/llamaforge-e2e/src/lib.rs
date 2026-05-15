@@ -40,8 +40,12 @@ pub struct OrchestratorHandle {
     pub grpc_url: String,
     pub http_addr: SocketAddr,
     pub grpc_addr: SocketAddr,
-    pub shutdown: CancellationToken,
     pub config_path: PathBuf,
+    /// Cancellation token wired into the in-process composition root.
+    /// Kept private so tests can't fire it without going through
+    /// [`OrchestratorHandle::shutdown_and_wait`], which is the only
+    /// path that also drains transports and joins the scheduler.
+    shutdown: CancellationToken,
     transport: Option<llamaforge_transport::TransportHandles>,
     server_manager: Arc<llamaforge_server_manager::ServerManager>,
     scheduler: Option<JoinHandle<()>>,
@@ -125,13 +129,13 @@ alias = "{alias}"
     /// `mock-llama` itself; the test drives the orchestrator's HTTP /
     /// gRPC endpoints via the returned [`OrchestratorHandle`].
     pub async fn start_full() -> anyhow::Result<OrchestratorHandle> {
-        // The HTTP handler today hardcodes `ModelTarget::Exact("dummy")`
-        // when calling the route validator (see `transport/src/http.rs`
-        // — known pre-PR10 issue; not in scope here). Using `dummy` as
-        // the server alias makes admission control admit the request;
-        // tests still send their own `"model"` in the request body and
-        // get the real backend response, since chat_completion uses the
-        // parsed request, not the validator's placeholder.
+        // The HTTP handler hardcodes `ModelTarget::Exact("dummy")` when
+        // calling the route validator (see `transport/src/http.rs`).
+        // Using `dummy` as the server alias makes admission control
+        // admit the request; tests still send their own `"model"` in
+        // the request body and get the real backend response, since
+        // `chat_completion` uses the parsed request — not the
+        // validator's placeholder.
         Self::start_full_with_alias("dummy").await
     }
 

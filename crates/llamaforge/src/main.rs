@@ -1,8 +1,6 @@
 mod init;
 mod validate;
 
-use llamaforge::serve;
-
 use clap::Parser;
 use llamaforge_config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
 use std::env;
@@ -245,7 +243,7 @@ fn main() {
                             process::exit(70);
                         }
                     };
-                    if let Err(e) = rt.block_on(serve::run(Arc::new(handle))) {
+                    if let Err(e) = rt.block_on(llamaforge::run(Arc::new(handle))) {
                         eprintln!("error: {}", e);
                         process::exit(1);
                     }
