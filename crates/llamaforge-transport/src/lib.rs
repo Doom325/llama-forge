@@ -1,3 +1,10 @@
+//! Dual-protocol transport gateway: gRPC on :50051 (canonical) plus an
+//! HTTP/SSE shim for OpenAI- and Anthropic-compatible SDK clients.
+//!
+//! Implements design.md §5.1 (Transport Layer) and §7 (API
+//! Specification). Component spec:
+//! `docs/component-designs/07_TRANSPORT_LAYER.md`.
+
 pub(crate) mod anthropic;
 pub(crate) mod error;
 pub(crate) mod grpc;

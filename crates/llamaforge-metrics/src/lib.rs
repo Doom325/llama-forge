@@ -1,3 +1,10 @@
+//! Metrics, audit log, and event-store persistence.
+//!
+//! Implements design.md §5.4 (Metrics Collector & Aggregator),
+//! §5.6 (Audit Log & Event Store), §6.2 (SQLite Schema), and §13
+//! (Persistence Backend). Component spec:
+//! `docs/component-designs/02_METRICS_AND_STORAGE.md`.
+
 pub(crate) mod error;
 pub(crate) mod filter;
 pub(crate) mod ingest;

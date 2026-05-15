@@ -1,4 +1,8 @@
-//! LlamaForge orchestrator library surface.
+//! LlamaForge orchestrator library surface — wires the seven component
+//! crates plus the five adapters into a single `TransportDeps` (the
+//! composition root).
+//!
+//! Implements design.md §4 (System Architecture Overview).
 //!
 //! The binary at `src/main.rs` is the production entry point. This lib
 //! target exists so workspace integration tests (`llamaforge-e2e`) can

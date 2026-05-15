@@ -1,3 +1,8 @@
+//! Core domain types — request/response shapes, IDs, port traits.
+//!
+//! Implements design.md §6.1 (Core Types). Used by every component
+//! crate; the only crate that depends on no other LlamaForge crate.
+
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::Arc;

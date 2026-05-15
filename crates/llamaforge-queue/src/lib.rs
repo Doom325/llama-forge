@@ -1,10 +1,14 @@
-//! LlamaForge Request Queue & Scheduler crate.
+//! Request Queue & Scheduler — priority-aware FIFO with per-requestor
+//! limits, admission control, and queue-only preemption.
 //!
-//! **Contract Note for PR3 & PR4:**
-//! `Arc<AtomicU32>` for queue depth is created by the composition root (`main.rs`)
-//! and injected into both `AdmissionController::new()` and `DispatchQueue::new()`.
-//! PR3 and PR4 implementations must accept `queue_depth: Arc<AtomicU32>` as a
-//! constructor parameter and must NOT create their own distinct counters.
+//! Implements design.md §5.2 (Request Queue & Scheduler) and §9
+//! (Priority System & Eviction). Component spec:
+//! `docs/component-designs/04_REQUEST_QUEUE_AND_SCHEDULER.md`.
+//!
+//! **Queue-depth gauge invariant.** The `Arc<AtomicU32>` counter is
+//! constructed by the composition root and injected into both
+//! `AdmissionController::new()` and `DispatchQueue::new()`. Both must
+//! accept the shared counter rather than creating their own.
 
 pub mod admission;
 pub mod config;

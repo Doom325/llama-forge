@@ -1,6 +1,9 @@
-//! LlamaForge Dispatch & Proxy component.
+//! Dispatch & Proxy: streams completions from the chosen backend to
+//! the client; owns SSE keepalive, cancellation, and timeout policy.
 //!
-//! See design doc Section 2.
+//! Implements design.md §5.1 (Transport-side dispatch surface) and
+//! §8 (Request Lifecycle). Component spec:
+//! `docs/component-designs/06_DISPATCH_AND_PROXY.md`.
 
 pub mod client;
 pub mod dispatcher;
