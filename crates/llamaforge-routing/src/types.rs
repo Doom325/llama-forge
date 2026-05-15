@@ -99,6 +99,29 @@ impl RoutingDecision {
         self.score
     }
 
+    /// Construct a `RoutingDecision` from a pick already made by the queue
+    /// scheduler (`DispatchEvent::Dispatched { server_id, slot_id }`).
+    ///
+    /// The scheduler runs `ServerSelector::select_server` internally and
+    /// emits the result on the dispatch-event channel; adapters that consume
+    /// those events need to re-form a `RoutingDecision` to feed into the
+    /// `Dispatcher`. The recorded `reason` is a placeholder (the original
+    /// reason isn't propagated through the dispatch-event channel today);
+    /// the field is consumed by telemetry, not by dispatch logic.
+    ///
+    /// See design doc §2.2.
+    pub fn for_scheduler_pick(server_id: ServerId, slot: Option<SlotId>) -> Self {
+        Self {
+            server_id,
+            reason: RoutingReason::RoundRobin { counter: 0 },
+            score: 0.0,
+            slot_target: match slot {
+                Some(id) => SlotTarget::Pinned(id),
+                None => SlotTarget::Auto,
+            },
+        }
+    }
+
     /// Consumes the decision and returns the server ID.
     pub fn into_server_id(self) -> ServerId {
         self.server_id
