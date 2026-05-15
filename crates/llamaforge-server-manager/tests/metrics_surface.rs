@@ -13,16 +13,15 @@ use tokio_util::sync::CancellationToken;
 
 /// See `config_tests::mock_llama_bin` — same rationale.
 fn mock_llama_bin() -> String {
-    let target = std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(
-        |_| {
+    let target =
+        std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .parent()
                 .unwrap()
                 .parent()
                 .unwrap()
                 .join("target")
-        },
-    );
+        });
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     target.join(profile).join("mock-llama").to_string_lossy().into_owned()
 }
