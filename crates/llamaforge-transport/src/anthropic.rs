@@ -180,7 +180,7 @@ pub(crate) fn format_anthropic_event(
                 .to_string(),
             });
         }
-        ChatCompletionChunk::Stop(finish_reason) => {
+        ChatCompletionChunk::Stop { finish_reason, output_tokens } => {
             if state.phase == AnthropicStreamPhase::Init {
                 // Handle case where stream ended before any tokens were sent
                 state.transition(AnthropicStreamPhase::PreambleSent)?;
@@ -236,7 +236,7 @@ pub(crate) fn format_anthropic_event(
                         "stop_reason": finish_reason,
                         "stop_sequence": null
                     },
-                    "usage": {"output_tokens": 0} // Placeholder for v1 as true usage requires Engine support
+                    "usage": {"output_tokens": output_tokens}
                 })
                 .to_string(),
             });
@@ -318,13 +318,27 @@ mod tests {
         assert_eq!(events2.len(), 1);
         assert_eq!(events2[0].event_type, "content_block_delta");
 
-        let stop_chunk = ChatCompletionChunk::Stop("end_turn".to_string());
+        let stop_chunk =
+            ChatCompletionChunk::Stop { finish_reason: "end_turn".to_string(), output_tokens: 0 };
         let events_stop =
             format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
         assert_eq!(events_stop.len(), 3);
         assert_eq!(events_stop[0].event_type, "content_block_stop");
         assert_eq!(events_stop[1].event_type, "message_delta");
         assert_eq!(events_stop[2].event_type, "message_stop");
+    }
+
+    #[test]
+    fn test_anthropic_stop_carries_output_tokens() {
+        let mut state = AnthropicState::new();
+        state.phase = AnthropicStreamPhase::ContentBlock;
+        let stop_chunk =
+            ChatCompletionChunk::Stop { finish_reason: "end_turn".to_string(), output_tokens: 17 };
+        let events = format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
+        // The `message_delta` event carries `usage.output_tokens`.
+        let delta = events.iter().find(|e| e.event_type == "message_delta").expect("message_delta");
+        let payload: serde_json::Value = serde_json::from_str(&delta.data).unwrap();
+        assert_eq!(payload["usage"]["output_tokens"].as_u64(), Some(17));
     }
 
     #[test]

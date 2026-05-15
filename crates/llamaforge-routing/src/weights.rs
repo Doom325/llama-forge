@@ -98,7 +98,7 @@ impl RoutingWeightsBuilder {
 
         let sum = self.w_slots + self.w_kv + self.w_queue + self.w_affinity;
         if (sum - 1.0).abs() > f64::EPSILON {
-            tracing::warn!("Routing weights sum to {}, expected 1.0", sum);
+            tracing::warn!(sum, "routing.weights_sum_not_one");
         }
 
         Ok(RoutingWeights {
@@ -135,7 +135,8 @@ mod tests {
         assert_eq!(weights.w_queue(), 0.1);
         assert_eq!(weights.w_affinity(), 0.2);
 
-        assert!(logs_contain("Routing weights sum to 0.5, expected 1.0"));
+        assert!(logs_contain("routing.weights_sum_not_one"));
+        assert!(logs_contain("sum=0.5"));
     }
 
     #[test]

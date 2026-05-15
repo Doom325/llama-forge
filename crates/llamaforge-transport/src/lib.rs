@@ -248,15 +248,15 @@ mod tests {
     }
 
     fn build_test_deps(
-        http_port: u16,
-        grpc_port: u16,
         sleep_ms: u64,
     ) -> TransportDeps<
         ConfigHandle,
         llamaforge_metrics::InMemoryStore,
         llamaforge_metrics::InMemoryStore,
     > {
-        let global = GlobalConfig { http_port, grpc_port, ..Default::default() };
+        // Bind on ephemeral ports; `TransportHandles` carries the
+        // resolved addresses back to the test.
+        let global = GlobalConfig { http_port: 0, grpc_port: 0, ..Default::default() };
         let config = AppConfig { global, ..Default::default() };
         let source = Arc::new(InMemoryConfigSource::new(config));
         let handle = Arc::new(ConfigHandle::load(source).unwrap());
@@ -277,15 +277,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_dual_server_startup_and_shutdown() {
-        let deps = build_test_deps(50058, 50059, 0);
+        let deps = build_test_deps(0);
         let handles = start_servers(deps).await.unwrap();
+        let http_addr = handles.http_addr;
+        let grpc_addr = handles.grpc_addr;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let http_resp = reqwest::get("http://127.0.0.1:50058/health").await.unwrap();
+        let http_resp = reqwest::get(format!("http://{}/health", http_addr)).await.unwrap();
         assert_eq!(http_resp.status(), 200);
 
-        let channel = tonic::transport::Channel::from_static("http://127.0.0.1:50059")
+        let channel = tonic::transport::Endpoint::new(format!("http://{}", grpc_addr))
+            .unwrap()
             .connect()
             .await
             .unwrap();
@@ -305,8 +308,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_graceful_shutdown() {
-        let deps = build_test_deps(50060, 50061, 500); // 500ms sleep in engine
+        let deps = build_test_deps(500); // 500ms sleep in engine
         let handles = start_servers(deps).await.unwrap();
+        let url = format!("http://{}/v1/chat/completions", handles.http_addr);
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -318,9 +322,9 @@ mod tests {
             "stream": false
         });
 
-        let req_future = tokio::spawn(async move {
-            client.post("http://127.0.0.1:50060/v1/chat/completions").json(&body).send().await
-        });
+        let url_for_task = url.clone();
+        let req_future =
+            tokio::spawn(async move { client.post(&url_for_task).json(&body).send().await });
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         handles.shutdown();
@@ -330,7 +334,7 @@ mod tests {
 
         let client2 = reqwest::Client::new();
         let res_new = client2
-            .post("http://127.0.0.1:50060/v1/chat/completions")
+            .post(&url)
             .json(&serde_json::json!({
                 "model": "test",
                 "messages": [{"role": "user", "content": "hi"}],
@@ -345,12 +349,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_prometheus_endpoint() {
-        let deps = build_test_deps(50062, 50063, 0);
+        let deps = build_test_deps(0);
         let handles = start_servers(deps).await.unwrap();
+        let http_addr = handles.http_addr;
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        let res = reqwest::get("http://127.0.0.1:50062/metrics").await.unwrap();
+        let res = reqwest::get(format!("http://{}/metrics", http_addr)).await.unwrap();
         assert_eq!(res.status(), 200);
 
         let text = res.text().await.unwrap();
