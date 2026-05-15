@@ -10,7 +10,6 @@ use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
 use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
@@ -102,7 +101,8 @@ async fn test_8_7_stress_100_concurrent_dispatches() {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(srv),
+            server_id: srv,
+            slot_target: None,
         };
 
         let (audit_tx, _) = mpsc::channel(1);
@@ -158,7 +158,8 @@ async fn test_8_8_stress_rapid_client_refresh() {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(srv),
+            server_id: srv,
+            slot_target: None,
         };
 
         let (audit_tx, _) = mpsc::channel(1);

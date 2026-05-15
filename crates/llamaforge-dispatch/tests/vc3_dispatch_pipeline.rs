@@ -11,7 +11,6 @@ use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
 use llamaforge_types::ports::{SlotDispatchView, SlotErasure, SlotError, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
@@ -143,7 +142,8 @@ async fn test_vc3_1_full_lifecycle() {
         request_id: req_id,
         prompt: req_id.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let (audit_tx, mut audit_rx) = mpsc::channel(1);
@@ -190,7 +190,8 @@ async fn test_vc3_2_token_never_leaked() {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(ctx.server_id),
+            server_id: ctx.server_id,
+            slot_target: None,
         };
 
         // 1 disconnected
@@ -252,7 +253,8 @@ async fn test_vc3_3_cancellation_priority() {
         request_id: req_id,
         prompt: req_id.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let (audit_tx, _) = mpsc::channel(1);
@@ -322,7 +324,8 @@ async fn test_vc3_5_backpressure_disconnect() {
         request_id: req_id,
         prompt: req_id.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let (audit_tx, _) = mpsc::channel(1);
@@ -356,14 +359,16 @@ async fn test_vc3_6_connection_pool_poisoning_recovery() {
         request_id: req_id1,
         prompt: req_id1.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let candidate2 = DispatchCandidate {
         request_id: req_id2,
         prompt: req_id2.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let (audit_tx, _) = mpsc::channel(1);
@@ -395,7 +400,8 @@ async fn test_vc3_7_concurrent_dispatches() {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(ctx.server_id),
+            server_id: ctx.server_id,
+            slot_target: None,
         };
 
         let c = Arc::clone(&ctx);
@@ -423,7 +429,8 @@ async fn test_vc3_8_panic_safety() {
         request_id: req_id,
         prompt: req_id.to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(ctx.server_id),
+        server_id: ctx.server_id,
+        slot_target: None,
     };
 
     let (audit_tx, _) = mpsc::channel(1);

@@ -10,7 +10,7 @@ use dashmap::DashMap;
 use llamaforge_config::ConfigHandle;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
+
 use llamaforge_types::ports::{SlotErasure, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
@@ -40,7 +40,8 @@ pub struct DispatchCandidate {
     pub request_id: RequestId,
     pub prompt: String,
     pub params: CompletionParams,
-    pub routing: RoutingDecision,
+    pub server_id: ServerId,
+    pub slot_target: Option<SlotId>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +112,7 @@ impl Dispatcher {
         tokio::task::AbortHandle,
         tokio::sync::mpsc::Receiver<Result<crate::proxy::ParsedChunk, crate::error::StreamError>>,
     ) {
-        let server_id = *candidate.routing.server_id();
+        let server_id = candidate.server_id;
 
         // Step 1: Get or create tracker for `routing.server_id`.
         let tracker = self.trackers.get_or_create(&server_id);
@@ -131,7 +132,7 @@ impl Dispatcher {
             temperature: candidate.params.temperature,
             stream: candidate.params.stream,
             stop: candidate.params.stop,
-            id_slot: candidate.routing.slot_target(),
+            id_slot: candidate.slot_target,
         };
 
         // Step 4: Add task to `proxy_tasks` JoinSet
@@ -443,7 +444,8 @@ mod tests {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(server_id),
+            server_id,
+            slot_target: None,
         };
 
         let (audit_tx_dispatch, _) = tokio::sync::mpsc::channel(1);

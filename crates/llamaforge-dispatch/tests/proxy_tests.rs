@@ -346,7 +346,6 @@ use llamaforge_dispatch::client::ClientManager;
 use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
@@ -415,7 +414,8 @@ async fn test_6_19_graceful_shutdown() {
         request_id: RequestId::new(Uuid::now_v7()),
         prompt: "".to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(server_id),
+        server_id,
+        slot_target: None,
     };
 
     let (audit_tx, _) = tokio::sync::mpsc::channel(1);
@@ -453,7 +453,8 @@ async fn test_6_20_drain_server() {
                 stream: true,
                 stop: vec![],
             },
-            routing: RoutingDecision::new_for_test(server_id),
+            server_id,
+            slot_target: None,
         };
         let _ = dispatcher.dispatch(candidate, audit_tx.clone()).await;
     }

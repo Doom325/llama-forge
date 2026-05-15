@@ -11,7 +11,6 @@ use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
 use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
@@ -125,7 +124,8 @@ async fn test_cancellation_checked_before_chunk() {
         request_id: RequestId::new(Uuid::now_v7()),
         prompt: "slow_connect".to_string(), // backend sleeps 50ms before returning stream
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(server_id),
+        server_id,
+        slot_target: None,
     };
     let (audit_tx, _) = mpsc::channel(1);
     let (handle, mut rx) = dispatcher.dispatch(candidate, audit_tx).await;
@@ -153,7 +153,8 @@ async fn test_slot_released_before_audit_send() {
         request_id: RequestId::new(Uuid::now_v7()),
         prompt: "normal".to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(server_id),
+        server_id,
+        slot_target: None,
     };
 
     // Create an audit channel that is full so sending to it blocks (or drops if timeout)
@@ -214,7 +215,8 @@ async fn test_backpressure_timeout_disconnects() {
         request_id: RequestId::new(Uuid::now_v7()),
         prompt: "infinite_stream".to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(server_id),
+        server_id,
+        slot_target: None,
     };
     let (audit_tx, _) = mpsc::channel(1);
 
@@ -247,7 +249,8 @@ async fn test_non_streaming_absolute_timeout() {
         request_id: RequestId::new(Uuid::now_v7()),
         prompt: "hang_forever".to_string(),
         params: CompletionParams { n_predict: None, temperature: 0.0, stream: true, stop: vec![] },
-        routing: RoutingDecision::new_for_test(server_id),
+        server_id,
+        slot_target: None,
     };
     let (audit_tx, _) = mpsc::channel(1);
 
