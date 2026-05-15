@@ -1,6 +1,6 @@
 # LlamaForge — User Journeys & UX Design
 
-**Version:** 0.2.0-draft  
+**Version:** 0.3.0-draft  
 **Author:** Sumanth Gottipati  
 **Date:** 2026-05-15  
 **Status:** Design Phase  
@@ -12,25 +12,24 @@
 1. [User Personas](#1-user-personas)
 2. [Journey Map Overview](#2-journey-map-overview)
 3. [Journey 1 — First Contact](#3-journey-1--first-contact)
-4. [Journey 2 — Adding a Model to a Running System](#4-journey-2--adding-a-model-to-a-running-system)
+4. [Journey 2 — Adding a Model](#4-journey-2--adding-a-model-to-a-running-system)
 5. [Journey 3 — The Morning Check-In](#5-journey-3--the-morning-check-in)
 6. [Journey 4 — Plugging In from an Application](#6-journey-4--plugging-in-from-an-application)
-7. [Journey 5 — Changing Configuration Without Breaking Things](#7-journey-5--changing-configuration-without-breaking-things)
-8. [Journey 6 — "Why Is My Code Review Slow?"](#8-journey-6--why-is-my-code-review-slow)
+7. [Journey 5 — Changing Configuration](#7-journey-5--changing-configuration-without-breaking-things)
+8. [Journey 6 — Why Is My Code Review Slow?](#8-journey-6--why-is-my-code-review-slow)
 9. [Journey 7 — Something Is Wrong](#9-journey-7--something-is-wrong)
 10. [Journey 8 — Outgrowing a Single Model](#10-journey-8--outgrowing-a-single-model)
 11. [Journey 9 — Planning for Next Month](#11-journey-9--planning-for-next-month)
 12. [Journey 10 — Planned Downtime](#12-journey-10--planned-downtime)
 13. [Journey 11 — The Power User](#13-journey-11--the-power-user)
 14. [Journey 12 — Inheriting Someone Else's Forge](#14-journey-12--inheriting-someone-elses-forge)
-15. [Empty States Catalog](#15-empty-states-catalog)
-16. [Accessibility & State Encoding](#16-accessibility--state-encoding)
-17. [Cross-Cutting UX Principles](#17-cross-cutting-ux-principles)
-18. [Vocabulary](#18-vocabulary)
-19. [Extensibility Framework](#19-extensibility-framework)
-20. [UI Surface Mapping](#20-ui-surface-mapping)
-
----
+15. [Mobile-First Journey Designs](#15-mobile-first-journey-designs)
+16. [Empty States Catalog](#16-empty-states-catalog)
+17. [Accessibility & State Encoding](#17-accessibility--state-encoding)
+18. [Cross-Cutting UX Principles](#18-cross-cutting-ux-principles)
+19. [Vocabulary](#19-vocabulary)
+20. [Extensibility Framework](#20-extensibility-framework)
+21. [UI Surface Mapping](#21-ui-surface-mapping)
 
 ## 1. User Personas
 
@@ -69,6 +68,8 @@ LlamaForge serves three user tiers. The gRPC-primary API, priority task types li
 **Success metric:** `openai.ChatCompletion.create(model="qwen3:30b", ...)` just works, with predictable latency.
 
 **Fear:** A flaky inference endpoint makes their CI flaky, and CI flakiness erodes trust in everything they build on top of it. If the endpoint is unreliable, they'll route around it — back to a hosted API — and the Operator-Developer's whole infrastructure investment loses its reason to exist.
+
+**Role note:** In small teams (which are most of LlamaForge's audience), the API Consumer is often the Operator-Developer wearing a different hat. The same person who configured the servers also writes the code that calls them. The persona separation is useful for designing surfaces — the API Consumer's needs are real even when the human is the same — but the design should respect that the consumer often already knows the system. Error messages from the API can reference operator concepts; onboarding copy can skip "what is a model alias" when the consumer is also the operator.
 
 ### Persona 3: The Power User (Tertiary)
 
@@ -118,28 +119,68 @@ graph LR
 
 ## 2. Journey Map Overview
 
-The twelve journeys below trace the complete user lifecycle from first contact through mature operations and succession. They are ordered by the time at which a user first encounters each workflow.
+The twelve journeys trace the complete user lifecycle from first contact through mature operations and succession. But different personas enter at different points and experience different subsets. The map below shows three parallel tracks — one per persona — so you can trace each person's arc independently.
 
 ```mermaid
-journey
-    title LlamaForge User Lifecycle
-    section First Hour
-      Install and first request: 3: Operator, Power User
-      Point an app at the endpoint: 4: API Consumer
-    section First Week
-      Morning check-in ritual: 5: Operator, Power User
-      Add a second model: 4: Operator
-      Tune a config value: 3: Operator
-    section First Month
-      Diagnose a slow request: 2: Operator, API Consumer
-      Set up priority rules: 3: Operator
-      Scale to multi-model fleet: 3: Operator
-    section Ongoing
-      Capacity planning: 4: Operator
-      Planned maintenance: 3: Operator
-    section Succession
-      New person inherits the system: 2: Operator
+flowchart LR
+    subgraph First Hour
+        J1[J1: First Contact]
+        J2[J2: Adding a Model]
+        J4[J4: Plugging In]
+    end
+    subgraph First Week
+        J3[J3: Morning Check-In]
+        J5[J5: Config Change]
+    end
+    subgraph First Month
+        J6[J6: Why Is It Slow?]
+        J7[J7: Something Is Wrong]
+        J8[J8: Multi-Model Fleet]
+    end
+    subgraph Ongoing
+        J9[J9: Capacity Planning]
+        J10[J10: Planned Downtime]
+    end
+    subgraph Succession
+        J12[J12: Inheriting a Forge]
+    end
+    subgraph Always
+        J11[J11: Power User]
+    end
+
+    J1 --> J2 --> J3
+    J3 --> J5 --> J6
+    J6 --> J8 --> J9
+    J9 --> J10
+    J4 --> J6
+    J1 --> J11
+    J10 --> J12
+
+    style J1 fill:#4A90D9,color:#fff
+    style J2 fill:#4A90D9,color:#fff
+    style J3 fill:#4A90D9,color:#fff
+    style J5 fill:#4A90D9,color:#fff
+    style J6 fill:#4A90D9,color:#fff
+    style J7 fill:#4A90D9,color:#fff
+    style J8 fill:#4A90D9,color:#fff
+    style J9 fill:#4A90D9,color:#fff
+    style J10 fill:#4A90D9,color:#fff
+    style J12 fill:#4A90D9,color:#fff
+    style J4 fill:#7B68EE,color:#fff
+    style J11 fill:#E8A838,color:#fff
 ```
+
+**Persona Lanes — Who experiences what, and when:**
+
+| Phase | Operator-Developer | API Consumer | Power User |
+|-------|-------------------|--------------|------------|
+| **First Hour** | J1 First Contact, J2 Adding a Model | J4 Plugging In | J1 First Contact (via friend) |
+| **First Week** | J3 Morning Check-In, J5 Config Change | — (just consuming the API) | J3 Morning Check-In (Simple View) |
+| **First Month** | J6 Why Is It Slow?, J7 Something Is Wrong, J8 Multi-Model Fleet | J6 Why Is It Slow? (from their side) | J11 Power User (ongoing) |
+| **Ongoing** | J9 Capacity Planning, J10 Planned Downtime | — (notices maintenance windows) | J11 Power User (ongoing) |
+| **Succession** | J12 Inheriting a Forge | — | — |
+
+*Color key: Blue = Operator-Developer primary, Purple = API Consumer primary, Gold = Power User primary. Journeys appear in the lane of the persona who drives them; other personas may participate passively.*
 
 ---
 
@@ -407,9 +448,9 @@ Alerts:
 
 ## 6. Journey 4 — Plugging In from an Application
 
-You're building a code review bot. You've been using the OpenAI API, and it works, but it costs $400/month and you're sending proprietary code to a third party. Your teammate just set up LlamaForge on the office server. You want to switch your bot to use the local endpoint.
+You're building a code review bot. You've been using the OpenAI API, and it works, but it costs $400/month and you're sending proprietary code to a third party. Your teammate just set up LlamaForge on the office server — or, more likely on a small team, you set it up yourself last week and now you're switching your own code to point at it. Either way, you want to switch your bot to use the local endpoint.
 
-You're not the operator. You don't care about GPU utilization or slot counts. You care about: does the API work the same way? How long will my requests take? What happens when the system is busy?
+Right now you're wearing the consumer hat, not the operator hat. You don't care about GPU utilization or slot counts. You care about: does the API work the same way? How long will my requests take? What happens when the system is busy?
 
 ### 6.1 The Drop-In Switch
 
@@ -503,6 +544,71 @@ On response headers:
 
 If your application displays a queue position ("You're #3 in line, ~4.5 seconds"), the user experience degrades gracefully instead of appearing broken.
 
+### 6.4 When It Goes Down — The Flaky CI Fear
+
+The API Consumer's deepest fear is that the CI pipeline breaks on a Friday afternoon because LlamaForge silently disappeared. This failure path shows what happens when it does — and why the API Consumer learns to trust LlamaForge more, not less, after the first outage.
+
+**What the API Consumer's code receives:**
+
+```
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+X-Retry-After: 12
+X-Queue-Depth: 47
+X-Reason: all-slots-busy
+
+{
+  "error": {
+    "type": "capacity_exhausted",
+    "message": "All inference slots are occupied. Retry after the suggested delay.",
+    "retry_after_seconds": 12,
+    "queue_depth": 47,
+    "estimated_wait_ms": 12000
+  }
+}
+```
+
+This is a machine-readable 503, not a generic timeout. The response tells the caller exactly why it failed, how long to wait, and how busy the system is. A well-written integration handles this without human intervention.
+
+**The Resilient CI Pattern:**
+
+```python
+import time
+from openai import OpenAI, APIStatusError
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="unused")
+
+def inference_with_backoff(messages, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return client.chat.completions.create(
+                model="qwen3-30b",
+                messages=messages,
+                extra_headers={"X-Queue-Timeout": "15"},
+            )
+        except APIStatusError as e:
+            if e.status_code == 503:
+                retry_after = int(e.response.headers.get("x-retry-after", 5))
+                time.sleep(retry_after)
+                continue
+            raise
+    raise RuntimeError("LlamaForge unavailable after retries")
+```
+
+After the first time this pattern saves a Friday deploy, the API Consumer stops worrying about LlamaForge reliability and starts worrying about their own retry logic — which is exactly the right shift in concern.
+
+```mermaid
+flowchart TD
+    A[CI job sends inference request] --> B{Response?}
+    B -->|200 OK| C[Parse result, continue pipeline]
+    B -->|503 + retry-after| D[Read X-Retry-After header]
+    D --> E[Sleep for suggested delay]
+    E --> F{Retries left?}
+    F -->|Yes| A
+    F -->|No| G[Fail CI job with clear message]
+    B -->|Other error| H[Fail immediately with error context]
+```
+
 ---
 
 ## 7. Journey 5 — Changing Configuration Without Breaking Things
@@ -565,6 +671,8 @@ Impact:
 ```
 
 If the change would cause problems — not enough VRAM, a syntax error, an invalid value — the preview catches it and explains the issue before anything changes. The user never has to wonder "what if I break it" because the preview answers that question.
+
+**The preview accuracy contract.** Every preview is a contract between the system and the person deciding whether to proceed. If the preview says "no impact" and something breaks, the user will never trust Propose → Preview → Confirm again — and they'll be right not to. This has engineering consequences: the preview must be conservative. When the system can't predict impact confidently (e.g., a config change that affects a model's generation quality rather than its resource usage), the preview should say "Impact unknown — proceed with caution" rather than showing a confident prediction it can't back up. A preview that admits uncertainty preserves trust. A preview that lies destroys it permanently.
 
 ### 7.3 What You Can Count On
 
@@ -982,29 +1090,50 @@ flowchart TD
     J --> K["You click Restart.<br/>It starts.<br/>You go back to your chat app."]
 ```
 
-### 13.2 Simple View — The Power User's Dashboard
+### 13.2 Simple View — The Model Switcher
 
-The Power User needs a different default view than the Operator-Developer. The dashboard has a **Simple View** toggle that hides operational metrics and shows only what the Power User cares about:
+The Power User's friend probably installed two or three models for different tasks. The Simple View isn't a mini-dashboard — it's a **model-switcher surface** organized around three questions: *Which model am I using? Is it working? How do I switch?*
 
 ```
 ┌───────────────────────────────────────────────────┐
 │  LlamaForge                        Simple View ✓  │
 ├───────────────────────────────────────────────────┤
 │                                                     │
-│  Your AI is running.                                │
+│  Your AI is running.                     2 models   │
 │                                                     │
 │  ┌────────────────────────────────────────┐        │
-│  │ mistral-7b                             │        │
+│  │ ● Qwen3 30B                    Active  │        │
 │  │                                         │        │
-│  │        ● Ready                          │        │
+│  │   Best for: Long conversations,         │        │
+│  │   code review, detailed writing         │        │
 │  │                                         │        │
-│  │  Running for 14 days                    │        │
-│  │  Responded to 847 requests              │        │
+│  │   Your chat app has connected           │        │
+│  │   23 times this week                    │        │
 │  │                                         │        │
-│  │  ┌───────────┐  ┌──────────────┐       │        │
-│  │  │  Restart   │  │    Stop     │       │        │
-│  │  └───────────┘  └──────────────┘       │        │
+│  │   Running for 14 days · Healthy         │        │
+│  │                        ┌───────────┐   │        │
+│  │                        │  Restart   │   │        │
 │  └────────────────────────────────────────┘        │
+│                                                     │
+│  ┌────────────────────────────────────────┐        │
+│  │ ● Mistral 7B                  Standby  │        │
+│  │                                         │        │
+│  │   Best for: Quick answers, chat,        │        │
+│  │   lightweight tasks                     │        │
+│  │                                         │        │
+│  │   Last used 3 days ago                  │        │
+│  │                                         │        │
+│  │   Stopped · Uses less memory when off   │        │
+│  │   ┌───────────┐                        │        │
+│  │   │   Start    │                        │        │
+│  └────────────────────────────────────────┘        │
+│                                                     │
+│  ┌─────────────────────────────────────────┐       │
+│  │ Switching models? Your apps auto-connect │       │
+│  │ to whichever model is running. Start     │       │
+│  │ Mistral above and your apps will use it  │       │
+│  │ within seconds.                          │       │
+│  └─────────────────────────────────────────┘       │
 │                                                     │
 │  Connect your apps to: http://localhost:8000/v1     │
 │  Compatible with: ChatGPT apps, Open WebUI,        │
@@ -1014,7 +1143,12 @@ The Power User needs a different default view than the Operator-Developer. The d
 └───────────────────────────────────────────────────┘
 ```
 
-No TPS. No TTFT histograms. No slot counts. No queue depth. Just: is it working, how long has it been working, and what do I do if it stops.
+**Design decisions:**
+
+- **No Stop button.** The Power User's friend configured this; stopping a model raises "did I break it?" anxiety. Restart is offered because it's a recovery action, not a state-change decision. Models can be stopped from Detailed View.
+- **"Best for" descriptions** are set by whoever configured the model (the Operator friend) via `model_description` in the config. They answer "which one should I use?" without requiring the Power User to understand parameter counts.
+- **Connection metrics, not request counts.** "Your chat app has connected 23 times this week" is a relationship metric — it tells the Power User their setup is working. "Responded to 847 requests" is an operational metric that means nothing to someone who doesn't think in requests.
+- **Model switching guidance** is inline, not buried in docs. The Power User shouldn't need to understand routing to switch models.
 
 ### 13.3 Error Messages for People Who Don't Read Logs
 
@@ -1024,8 +1158,98 @@ When something goes wrong, the Power User's error messages must be in plain lang
 |--------------|------------------------|
 | Server crashed (OOM) | "Your AI model stopped because it ran out of memory. Click Restart to try again. If this keeps happening, your model might be too large for your graphics card." |
 | Port conflict | "LlamaForge can't start because another program is using the same port. Close the other program and try again." |
-| Model file deleted | "The AI model file was moved or deleted. It was expected at: /models/mistral-7b.gguf. Put the file back or ask whoever set this up for you." |
-| Process won't start | "The AI couldn't start. This might be a hardware or software issue. If you're not sure what to do, try restarting your computer. If that doesn't work, ask the person who set this up for help." |
+| Model file deleted | "The AI model file was moved or deleted. It was expected at: /models/mistral-7b.gguf. Put the file back and restart, or switch to a different model above." |
+| Process won't start | "The AI couldn't start. This might be a hardware or driver problem. Try restarting your computer first. If that doesn't help, you may need help from someone with technical experience." |
+
+### 13.4 "It Stopped Working" — The Power User's Failure Path
+
+The Power User's deepest fear is that the AI stops and they can't fix it. This is what Simple View looks like when a model fails — the product must prove it cares by showing a clear path forward, not just an error.
+
+```
+┌───────────────────────────────────────────────────┐
+│  LlamaForge                        Simple View ✓  │
+├───────────────────────────────────────────────────┤
+│                                                     │
+│  ⚠ One of your models needs attention.              │
+│                                                     │
+│  ┌────────────────────────────────────────┐        │
+│  │ ✕ Qwen3 30B                   Stopped  │        │
+│  │                                         │        │
+│  │   Stopped 12 minutes ago because it     │        │
+│  │   ran out of memory.                    │        │
+│  │                                         │        │
+│  │   Your apps are now using Mistral 7B    │        │
+│  │   automatically.                        │        │
+│  │                                         │        │
+│  │   ┌───────────┐  ┌─────────────────┐   │        │
+│  │   │  Restart   │  │ What happened?  │   │        │
+│  │   └───────────┘  └─────────────────┘   │        │
+│  └────────────────────────────────────────┘        │
+│                                                     │
+│  ┌────────────────────────────────────────┐        │
+│  │ ● Mistral 7B              Now handling  │        │
+│  │                           all requests  │        │
+│  │   Best for: Quick answers, chat         │        │
+│  │   Picked up traffic automatically       │        │
+│  │   Running · Healthy                     │        │
+│  └────────────────────────────────────────┘        │
+│                                                     │
+│  Your apps still work. Mistral is handling          │
+│  requests while Qwen3 is down.                      │
+│                                                     │
+│                            Switch to Detailed View  │
+└───────────────────────────────────────────────────┘
+```
+
+The key message is at the bottom: **"Your apps still work."** The Power User's fear is that everything broke. The first thing they need to see is that it didn't. The failed model gets a clear restart action and a "What happened?" link to a plain-language explanation. The healthy model is highlighted as the active fallback.
+
+#### When There's No Fallback
+
+The wireframe above assumes a second model exists to catch traffic. Many Power Users run a single model — one GPU, one workflow, one need. For that user, the failure is worse and the product can't pretend otherwise. The apps actually stop working. The entire weight of "the AI broke and I can't fix it" lands on one person at 9pm before a client meeting.
+
+```
+┌───────────────────────────────────────────────────┐
+│  LlamaForge                        Simple View ✓  │
+├───────────────────────────────────────────────────┤
+│                                                     │
+│  ✕ Your AI has stopped.                             │
+│                                                     │
+│  ┌────────────────────────────────────────┐        │
+│  │ ✕ Qwen3 30B                   Stopped  │        │
+│  │                                         │        │
+│  │   Stopped 4 minutes ago because it      │        │
+│  │   ran out of memory.                    │        │
+│  │                                         │        │
+│  │   Apps that connect to LlamaForge       │        │
+│  │   will get errors until this is fixed.  │        │
+│  │                                         │        │
+│  │   ┌──────────────────────────────────┐  │        │
+│  │   │         Restart Qwen3            │  │        │
+│  │   └──────────────────────────────────┘  │        │
+│  │                                         │        │
+│  │   Restart usually takes about 15        │        │
+│  │   seconds. If it fails again, the       │        │
+│  │   model may be too large for your       │        │
+│  │   GPU's memory.                         │        │
+│  │                                         │        │
+│  │   ┌─────────────────┐                  │        │
+│  │   │  What happened?  │                  │        │
+│  │   └─────────────────┘                  │        │
+│  └────────────────────────────────────────┘        │
+│                                                     │
+│                            Switch to Detailed View  │
+└───────────────────────────────────────────────────┘
+```
+
+**Design decisions for the single-model case:**
+
+- **No false comfort.** The product doesn't say "everything is fine" because it isn't. "Your AI has stopped" is honest and immediate.
+- **"Apps that connect to LlamaForge will get errors"** tells the Power User the blast radius without making them guess. They know their chat app won't work right now.
+- **Restart is the only primary action**, and it's large and obvious. The Power User gets one button, not a decision tree.
+- **"Usually takes about 15 seconds"** gives the Power User a reason to wait instead of panicking. Uncertainty about duration amplifies anxiety; a concrete estimate — even an approximate one — provides a handhold.
+- **"If it fails again"** prepares them for the possibility without burying it. The Power User deserves to know what the second failure means before they hit Restart, not after.
+
+This is the harder design problem because the product can't solve it — it can only show care. Explain what happened, offer one clear action, tell them how long it takes. That's not magic, but it's respect, and respect is what the Power User came for.
 
 ---
 
@@ -1060,9 +1284,9 @@ flowchart TD
 
 ### 14.2 Surfaces That Help With Inheritance
 
-**Annotated Configuration Viewer**
+The product's superpower for inheritors is telemetry, not documentation. Nobody writes change logs ("Increased context for long PR reviews"), and even when they do, the logs rot within weeks. Instead, every annotation in the config viewer is **system-derived from actual usage data**. The system observes how the config is being used and surfaces evidence, not intentions.
 
-The config viewer doesn't just show the current values. It shows context:
+**Telemetry-Annotated Configuration Viewer**
 
 ```
 Configuration: servers.code-3
@@ -1070,60 +1294,177 @@ Configuration: servers.code-3
 model_path    = "/models/qwen3-30b-Q4_K_M.gguf"
 model_alias   = "qwen3-30b"
 gpu_id        = 2
-n_ctx         = 16384          ← default is 4096, this was increased
-n_parallel    = 4
+n_ctx         = 16384          ← default is 4096
+                                 Since this change, 23% of requests
+                                 use >8192 tokens. Before the change,
+                                 no requests could exceed 8192 tokens.
+n_parallel    = 4              ← 3.1 avg concurrent / 4 max (78%)
 flash_attn    = "auto"
 
-Last changed: 2026-03-15 (2 months ago)
-Changed from: n_ctx was 8192
-Context:      Change log entry: "Increased context for long PR reviews"
+Changed: 2026-03-15 (2 months ago)
+Previous value: n_ctx was 8192
+Impact since change: p95 TTFT dropped from 2.4s → 1.8s
+                     Token throughput +12%
 ──────────────────────────────────────────────────────────
 ```
 
-**Change History Timeline**
-
-Every config reload is logged with a diff. The Change History page shows these as a narrative:
-
-```
-Configuration History
-──────────────────────────────────────────────────────────
-2026-03-15  n_ctx increased to 16384 on server code-3
-2026-02-28  Server "fast" added (mistral-7b on GPU 1)
-2026-02-10  batch_summarize priority lowered from 400 to 250
-2026-01-15  Requestor limit for "batch-worker" set to 3
-2026-01-03  Initial configuration (3 servers, 2 GPUs)
-──────────────────────────────────────────────────────────
-```
+Every annotation shows evidence — what changed, what happened after. The inheritor draws the conclusion. The system never pronounces a verdict on whether a change was good, because it can't know the full context: that 23% of requests using large contexts might be one CI pipeline that's being deprecated next sprint, or a consumer misconfiguration that's wastefully padding prompts. The data is trustworthy. Interpretations aren't.
 
 **Usage-vs-Config Heatmap**
 
-A view that compares current config capacity against actual usage, so you can spot over-provisioned or under-provisioned servers:
+The heatmap compares config capacity against actual usage with a signal that tells you what to do — not just what the numbers are:
 
 ```
 Server Usage vs. Capacity (last 7 days)
 ──────────────────────────────────────────────────────────
-Server         Slots  Avg Used  Peak Used  Utilization
+Server          Slots  Avg   Peak  Signal
 ──────────────────────────────────────────────────────────
-qwen3-30b (1)    8      6.2        8         78%  ████████░░
-qwen3-30b (2)    8      5.8        8         73%  ████████░░
-qwen3-30b (3)    4      0.8        2         20%  ██░░░░░░░░  ← underused
-mistral-7b       8      7.1        8         89%  █████████░
-codellama-13b    4      1.2        3         30%  ███░░░░░░░  ← underused
+qwen3-30b (1)     8    6.2     8    ✓  Peaks at capacity
+qwen3-30b (2)     8    5.8     8    ✓  Headroom available
+qwen3-30b (3)     4    0.8     2    ⚠  20% utilized.
+                                        Only requestor: 'batch-worker'
+mistral-7b        8    7.1     8    ✕  89% avg, pegged at peak
+codellama-13b     4    1.2     3    ⚠  30% utilized.
+                                        Last request: 6 days ago
 ──────────────────────────────────────────────────────────
-
-Observation: server code-3 and codellama-13b are significantly
-underutilized. Review whether their capacity is still needed.
 ```
 
-This is how the new owner builds an understanding of a system that has no README. The data tells the story.
+The signals are: **✓** (healthy), **⚠** (worth investigating), **✕** (at or past capacity). The heatmap shows what's happening. What to do about it is the inheritor's call — they have context the system doesn't.
+
+**Impact-Annotated Change Timeline**
+
+Every config reload is logged with a diff. But instead of bare "what changed" entries, the timeline correlates each change with the metrics shift that followed:
+
+```
+Configuration Change Timeline
+──────────────────────────────────────────────────────────
+2026-03-15  n_ctx 8192 → 16384 on server code-3
+            Impact: p95 TTFT -25%, throughput +12%
+            Requestor 'ci-bot' p95 latency improved most
+
+2026-02-28  Server "fast" added (mistral-7b on GPU 1)
+            Impact: queue depth dropped 60% within 1 hour
+            Requestor 'chat-app' shifted 80% of traffic here
+
+2026-02-10  batch_summarize priority 400 → 250
+            Impact: 'interactive' p50 TTFT improved 40%
+            'batch_summarize' queue time increased 3x (expected)
+
+2026-01-15  Requestor limit for "batch-worker" set to 3
+            Impact: peak slot usage dropped from 8/8 to 5/8
+            Other requestors saw zero queuing after this
+
+2026-01-03  Initial configuration (3 servers, 2 GPUs)
+──────────────────────────────────────────────────────────
+```
+
+This is how the new owner builds an understanding of a system that has no README. The data tells the story — not because someone documented their reasoning, but because the system observed the consequences.
 
 ---
 
-## 15. Empty States Catalog
+## 15. Mobile-First Journey Designs
+
+Journey 3 says "you roll over and check" and Journey 7 says "you open the dashboard on your phone" — but the wireframes in those journeys are desktop layouts. These mobile-specific designs show what those moments actually look like on a phone screen: portrait orientation, one-thumb navigation, verdict-first.
+
+### 15.1 Mobile Morning Check-In (Journey 3)
+
+The Operator checks from bed. They have one thumb free and want a verdict in under two seconds.
+
+```
+┌─────────────────────────┐
+│  LlamaForge   7:14 AM   │
+├─────────────────────────┤
+│                           │
+│    ● Everything is fine   │
+│                           │
+│  3 models · 0 alerts      │
+│  Uptime: 14 days          │
+│                           │
+├─────────────────────────┤
+│  Qwen3 30B        ● OK   │
+│  Mistral 7B       ● OK   │
+│  CodeLlama 13B    ● OK   │
+├─────────────────────────┤
+│  Last 8 hours:            │
+│  1,247 requests           │
+│  p95 TTFT: 1.2s           │
+│  0 errors                 │
+├─────────────────────────┤
+│                           │
+│  [ View Full Dashboard ]  │
+│                           │
+└─────────────────────────┘
+```
+
+**Design decisions:**
+- **Verdict first.** "Everything is fine" is the entire first viewport. The Operator puts the phone down if that's green.
+- **No charts in the first viewport.** Sparklines and histograms are for investigation, not for a glance from bed.
+- **Model list is a flat stack, not cards.** Cards waste vertical space on mobile. One line per model with a status dot is enough.
+- **Numbers are last 8 hours, not 24.** The morning check-in cares about overnight, not yesterday.
+
+### 15.2 Mobile Incident Response (Journey 7)
+
+It's 11pm. The Operator gets a notification that something is wrong. They open the dashboard on their phone.
+
+```
+┌─────────────────────────┐
+│  LlamaForge  11:02 PM   │
+├─────────────────────────┤
+│                           │
+│  ⚠ 1 model needs help    │
+│                           │
+│  2 healthy · 1 down       │
+│                           │
+├─────────────────────────┤
+│  ✕ Qwen3 30B     DOWN    │
+│    OOM 8 min ago          │
+│    [ Restart ]            │
+│                           │
+│  ● Mistral 7B    OK      │
+│    Handling overflow       │
+│  ● CodeLlama     OK      │
+├─────────────────────────┤
+│                           │
+│  ✓ Still serving traffic  │
+│  ▁▂▃▃▂▃▃▂▃▂ req/min      │
+│  ───────┊                 │
+│     failure               │
+│  (the line didn't drop)   │
+│                           │
+│  Queue: 3 · Errors: 0    │
+│                           │
+├─────────────────────────┤
+│                           │
+│  [ Restart Qwen3 ]        │
+│  [ View Logs ]            │
+│                           │
+└─────────────────────────┘
+```
+
+**Design decisions:**
+- **Verdict first, again.** "1 model needs help" tells the Operator the severity before they scroll. Not "3 alerts" — that's a count, not a verdict.
+- **The failed model is at the top** with a restart button reachable by thumb. Healthy models are below, compressed.
+- **"Still serving traffic" gets visual dominance.** A green accent and a text sparkline showing the request rate continuing through the failure event. The Operator sees in two-tenths of a second that the line didn't drop to zero — that's the visual proof that lets them go back to bed. The verdict shouts at the top; the reassurance shouts in the middle. Both are doing critical emotional work.
+- **Two action buttons at the bottom**, reachable by thumb. "Restart Qwen3" is the primary action. "View Logs" is the investigation path.
+- **No charts.** At 11pm on a phone, the Operator needs actions, not histograms.
+
+### 15.3 Mobile Design Principles
+
+These principles apply to any future mobile surface in LlamaForge:
+
+1. **Verdict first, always.** The first viewport answers "Is everything OK?" with a single sentence. Details are below the fold.
+2. **One-thumb navigation.** Primary actions (restart, acknowledge alert) are within thumb reach at the bottom of the screen. No hamburger menus for critical actions.
+3. **No charts in the first viewport.** Charts are for investigation at a desk. Mobile is for triage and quick action.
+4. **Portrait only.** Don't design for landscape. Nobody rotates their phone to check server status at 11pm.
+5. **Flat stacks, not cards.** Cards waste vertical space on narrow screens. Use single-line entries with status indicators for lists of models, alerts, and requests.
+
+---
+
+## 16. Empty States Catalog
 
 Every UI surface needs a design for when it has zero data. Empty states are the first impression for every new user and deserve as much attention as the full-data views.
 
-### 15.1 Empty Dashboard (Just Installed, No Servers Configured)
+### 16.1 Empty Dashboard (Just Installed, No Servers Configured)
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
@@ -1150,7 +1491,7 @@ Every UI surface needs a design for when it has zero data. Empty states are the 
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### 15.2 Empty Queue (No Requests Currently Waiting)
+### 16.2 Empty Queue (No Requests Currently Waiting)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -1170,7 +1511,7 @@ Every UI surface needs a design for when it has zero data. Empty states are the 
 └────────────────────────────────────────────────────────┘
 ```
 
-### 15.3 Empty Request Explorer (No Historical Data)
+### 16.3 Empty Request Explorer (No Historical Data)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -1189,7 +1530,7 @@ Every UI surface needs a design for when it has zero data. Empty states are the 
 └────────────────────────────────────────────────────────┘
 ```
 
-### 15.4 Empty Metrics (System Just Started)
+### 16.4 Empty Metrics (System Just Started)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -1208,7 +1549,7 @@ Every UI surface needs a design for when it has zero data. Empty states are the 
 └────────────────────────────────────────────────────────┘
 ```
 
-### 15.5 Empty Server List After `--dry-run`
+### 16.5 Empty Server List After `--dry-run`
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -1235,11 +1576,11 @@ Every empty state follows the same pattern: tell you what you're looking at, tel
 
 ---
 
-## 16. Accessibility & State Encoding
+## 17. Accessibility & State Encoding
 
 Accessibility is structural, not polish. The decisions made here affect every screen in the product.
 
-### 16.1 State Encoding: Color + Shape + Label
+### 17.1 State Encoding: Color + Shape + Label
 
 Every state indicator in LlamaForge uses three redundant channels. Color alone is not sufficient — approximately 8% of men and 0.5% of women have color vision deficiency.
 
@@ -1255,27 +1596,27 @@ Every state indicator in LlamaForge uses three redundant channels. Color alone i
 
 A person who cannot distinguish green from red can still distinguish a filled circle from an X mark, and can always read the label.
 
-### 16.2 Contrast & Typography
+### 17.2 Contrast & Typography
 
 - All text meets WCAG 2.1 AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
 - Monospace font for all numerical data (prevents decimal alignment issues with proportional fonts)
 - Minimum touch target size of 44×44px for buttons and interactive elements
 
-### 16.3 Keyboard Navigation
+### 17.3 Keyboard Navigation
 
 - Every interactive element is reachable via Tab
 - Server cards, queue entries, and request rows are focusable with arrow key navigation
 - Modal dialogs (config preview, slot erase confirmation) trap focus and close on Escape
 - Skip-to-content link at the top of every page
 
-### 16.4 Screen Readers & Live Regions
+### 17.4 Screen Readers & Live Regions
 
 - Dashboard health strip values are in an ARIA live region (`aria-live="polite"`) so screen readers announce changes without requiring focus
 - Server state transitions trigger `aria-live` announcements: "qwen3-30b changed from Running to Draining"
 - Charts have text summaries as `aria-label`: "Throughput chart: 14.2 requests per minute, trending up 12% from yesterday"
 - Queue position updates use `aria-live="assertive"` only for the user's own requests, `polite` for the overview
 
-### 16.5 Reduced Motion
+### 17.5 Reduced Motion
 
 - All animations respect `prefers-reduced-motion: reduce`
 - The "Restarting" spinner becomes a static ⟳ icon
@@ -1284,11 +1625,11 @@ A person who cannot distinguish green from red can still distinguish a filled ci
 
 ---
 
-## 17. Cross-Cutting UX Principles
+## 18. Cross-Cutting UX Principles
 
 These principles apply across all journeys and surfaces.
 
-### 17.1 Progressive Disclosure by Intent
+### 18.1 Progressive Disclosure by Intent
 
 Every UI surface has three depth levels, organized not by hiding information but by what the user is trying to do:
 
@@ -1300,7 +1641,7 @@ Every UI surface has three depth levels, organized not by hiding information but
 
 The Simple View (Power User) stays permanently at the Glance level. The Detailed View (Operator) starts at Glance and lets you drill down.
 
-### 17.2 Actionable Alerts, Not Noise
+### 18.2 Actionable Alerts, Not Noise
 
 Every alert must contain:
 1. **What** is wrong (in words, not error codes)
@@ -1308,7 +1649,7 @@ Every alert must contain:
 3. **What to do** (specific action, or "this will resolve on its own")
 4. **A way to dig deeper** (link to the relevant detail page)
 
-### 17.3 CLI-Web Parity
+### 18.3 CLI-Web Parity
 
 Every action possible in the Web UI is also possible via CLI. The CLI is the automation and scripting interface, not a fallback:
 
@@ -1322,13 +1663,13 @@ Every action possible in the Web UI is also possible via CLI. The CLI is the aut
 | View logs | `llamaforge logs --follow --level info` |
 | Force maintenance | `llamaforge maintenance checkpoint` |
 
-### 17.4 Offline-First
+### 18.4 Offline-First
 
 The Web UI is embedded in the binary (`include_bytes!`). It works without internet. No CDN dependencies for core functionality. All JS and CSS are bundled.
 
 ---
 
-## 18. Vocabulary
+## 19. Vocabulary
 
 Consistent terms across CLI, Web UI, API, logs, and documentation. If two surfaces use different words for the same thing, one of them is wrong.
 
@@ -1347,11 +1688,11 @@ Consistent terms across CLI, Web UI, API, logs, and documentation. If two surfac
 
 ---
 
-## 19. Extensibility Framework
+## 20. Extensibility Framework
 
 The twelve journeys above cover LlamaForge v1. The UI architecture must accommodate future capabilities without redesigning the core navigation.
 
-### 19.1 Navigation Architecture
+### 20.1 Navigation Architecture
 
 The sidebar follows a hub-and-spoke model. New features add new entries without restructuring existing pages:
 
@@ -1369,7 +1710,7 @@ Primary Navigation (sidebar)
     └── Settings       (v2: auth, RBAC, API keys, user preferences)
 ```
 
-### 19.2 Extension Points by Version
+### 20.2 Extension Points by Version
 
 ```mermaid
 flowchart TD
@@ -1412,7 +1753,7 @@ flowchart TD
     A -..-> O
 ```
 
-### 19.3 Desktop Client Evolution
+### 20.3 Desktop Client Evolution
 
 The Tauri desktop client wraps the same Web UI with native enhancements:
 
@@ -1428,7 +1769,7 @@ The desktop client is a thin native shell, not a separate codebase.
 
 ---
 
-## 20. UI Surface Mapping
+## 21. UI Surface Mapping
 
 Which surfaces serve which journeys:
 
@@ -1447,7 +1788,7 @@ Which surfaces serve which journeys:
 | J11 Power User | Dashboard (Simple View) | — (never uses CLI) | — (via chat app) |
 | J12 Inheriting | Configuration > History | `config show` | GET /api/config |
 
-### 20.1 Information Architecture
+### 21.1 Information Architecture
 
 ```mermaid
 graph TD
@@ -1475,7 +1816,7 @@ graph TD
     Config --> Preview["Change Preview"]
 ```
 
-### 20.2 Page Priority for Implementation
+### 21.2 Page Priority for Implementation
 
 | Priority | Page | Why |
 |----------|------|-----|
@@ -1501,7 +1842,10 @@ graph TD
 8. **Propose, preview, confirm, observe, recover.** Every destructive or disruptive action follows this arc.
 9. **The Power User never needs a terminal.** If they do, the product failed them.
 10. **Inheritance is a first-class journey.** The person who inherits this system didn't build it and can't ask the person who did.
+11. **A preview that lies once is never trusted again.** Predict conservatively or admit uncertainty. "Impact unknown — proceed with caution" is a better preview than a confident prediction that turns out wrong.
+12. **Voice at the edges is where the product's personality lives.** Error messages, empty states, and loading screens are the moments when the user is most anxious or most bored. These are the surfaces where tone matters most — not the steady-state dashboard.
+13. **The system shows evidence; the human decides the verdict.** Telemetry annotations, heatmap signals, and impact timelines present data. They never pronounce whether a configuration decision was correct, because the system can't know the full context. A tired inheritor at 11pm will accept any judgment the UI offers — which is exactly why the UI must not offer one.
 
 ---
 
-*This is a living document. Update it after the first time a real user struggles with the setup wizard. Update it again after the first time someone inherits a running forge and can't figure out why a rule exists. Version 0.2.0 will become 1.0.0 not because it was polished, but because it learned from the world.*
+*This is a living document. Update it after the first time a real user struggles with the setup wizard. Update it again after the first time someone inherits a running forge and can't figure out why a rule exists. Version 0.3.0 will become 1.0.0 not because it was polished, but because it learned from the world.*
