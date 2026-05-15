@@ -1,4 +1,9 @@
-//! Smart Routing module for LlamaForge.
+//! Smart Routing — picks the best `llama-server` per request based on
+//! slot availability and KV-cache (prompt prefix) affinity.
+//!
+//! Implements design.md §10.2 (Routing Algorithm) and §10.3 (Prompt
+//! Cache Affinity). Component spec:
+//! `docs/component-designs/05_SMART_ROUTING.md`.
 //!
 //! Provides the core routing logic, constraint filtering, session affinity,
 //! and scoring algorithms for selecting the best server for a request.

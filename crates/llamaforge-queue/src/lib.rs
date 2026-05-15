@@ -1,4 +1,10 @@
-//! LlamaForge Request Queue & Scheduler crate.
+//! Request Queue & Scheduler — priority-aware FIFO with per-requestor
+//! limits, admission control, and queue-only preemption.
+//!
+//! Implements design.md §5.2 (Request Queue & Scheduler) and §9
+//! (Priority System & Eviction). Component spec:
+//! `docs/component-designs/04_REQUEST_QUEUE_AND_SCHEDULER.md`.
+//!
 //!
 //! **Contract Note for PR3 & PR4:**
 //! `Arc<AtomicU32>` for queue depth is created by the composition root (`main.rs`)

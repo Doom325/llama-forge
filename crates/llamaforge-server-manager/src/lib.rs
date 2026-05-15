@@ -1,6 +1,11 @@
-//! LlamaForge Server Manager.
-//! Supervises the lifecycle of llama-server processes.
-//! See design doc Section 03_SERVER_MANAGER.md.
+//! Server Manager — supervises the lifecycle of `llama-server`
+//! processes (spawn with the full flag surface, health-check,
+//! restart-with-backoff, graceful drain) and exposes the live fleet
+//! state to routing.
+//!
+//! Implements design.md §5.3 (Server Manager) and §10.1
+//! (`llama-server` Control Surfaces). Component spec:
+//! `docs/component-designs/03_SERVER_MANAGER.md`.
 
 pub(crate) mod error;
 pub(crate) mod health;

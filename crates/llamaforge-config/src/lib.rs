@@ -1,4 +1,8 @@
-//! Config Manager — see component-designs/01_CONFIG_MANAGER.md
+//! Config Manager — parses `llamaforge.toml`, arbitrates UI overrides,
+//! emits hot-reload diff events via `ArcSwap`.
+//!
+//! Implements design.md §5.5 (Config Manager & Web UI). Component
+//! spec: `docs/component-designs/01_CONFIG_MANAGER.md`.
 
 pub(crate) mod cached;
 pub(crate) mod diff;
