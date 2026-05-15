@@ -34,6 +34,12 @@ pub struct MockConfig {
     pub completion_chunks: u32,
     /// Per-chunk delay, simulating decode time. Default 1ms.
     pub chunk_delay: Duration,
+    /// Number of pre-populated idle slots exposed by `/slots` on
+    /// startup. Mirrors `llama-server --parallel N`, which initialises
+    /// the slot table with N idle entries. Default 1; orchestrator e2e
+    /// tests rely on this so admission control sees a routable server
+    /// before any `/completion` has populated the slot map.
+    pub parallel_slots: u32,
 }
 
 impl Default for MockConfig {
@@ -42,6 +48,7 @@ impl Default for MockConfig {
             model_alias: "mock".to_string(),
             completion_chunks: 3,
             chunk_delay: Duration::from_millis(1),
+            parallel_slots: 1,
         }
     }
 }
@@ -83,6 +90,16 @@ impl MockLlama {
         let listener = TcpListener::bind(("127.0.0.1", port)).await?;
         let addr = listener.local_addr()?;
         let state = Arc::new(MockState::default());
+        {
+            // Pre-populate idle slots to match real llama-server behavior:
+            // a fresh server exposes N idle slots via `/slots`, not an empty
+            // list. Orchestrator admission control reads idle_slots from
+            // here to decide whether a server is routable.
+            let mut slots = state.slots.lock();
+            for i in 0..config.parallel_slots {
+                slots.insert(i, SlotState { is_processing: false, n_decoded: 0 });
+            }
+        }
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let app = router(state.clone(), config.clone());
         let handle = tokio::spawn(async move {

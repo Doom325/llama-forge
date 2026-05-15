@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 description = "LlamaForge — orchestrator and gateway for fleets of llama.cpp servers."
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "llamaforge"
 path = "src/main.rs"

@@ -54,6 +54,8 @@ pub struct TransportHandles {
     http_handle: tokio::task::JoinHandle<()>,
     grpc_handle: tokio::task::JoinHandle<()>,
     shutdown_tx: tokio::sync::watch::Sender<()>,
+    pub http_addr: std::net::SocketAddr,
+    pub grpc_addr: std::net::SocketAddr,
 }
 
 impl TransportHandles {
@@ -61,8 +63,10 @@ impl TransportHandles {
         http_handle: tokio::task::JoinHandle<()>,
         grpc_handle: tokio::task::JoinHandle<()>,
         shutdown_tx: tokio::sync::watch::Sender<()>,
+        http_addr: std::net::SocketAddr,
+        grpc_addr: std::net::SocketAddr,
     ) -> Self {
-        Self { http_handle, grpc_handle, shutdown_tx }
+        Self { http_handle, grpc_handle, shutdown_tx, http_addr, grpc_addr }
     }
 
     pub fn shutdown(&self) {
@@ -114,10 +118,39 @@ where
 
     let grpc_state = http_state.clone();
 
+    // Bind both listeners up-front so we can expose the resolved (possibly
+    // ephemeral) ports on TransportHandles. http_port = 0 / grpc_port = 0
+    // in config means "let the OS pick", which the e2e harness relies on.
+    let snap = http_state.config_reader.snapshot();
+    let http_bind = std::net::SocketAddr::new(snap.global.bind_address, snap.global.http_port);
+    let grpc_bind = std::net::SocketAddr::new(snap.global.bind_address, snap.global.grpc_port);
+    drop(snap);
+
+    let http_listener = tokio::net::TcpListener::bind(&http_bind)
+        .await
+        .map_err(|e| TransportError::Bootstrap(format!("bind http {}: {}", http_bind, e)))?;
+    let http_addr = http_listener
+        .local_addr()
+        .map_err(|e| TransportError::Bootstrap(format!("http local_addr: {}", e)))?;
+
+    let grpc_listener = tokio::net::TcpListener::bind(&grpc_bind)
+        .await
+        .map_err(|e| TransportError::Bootstrap(format!("bind grpc {}: {}", grpc_bind, e)))?;
+    let grpc_addr = grpc_listener
+        .local_addr()
+        .map_err(|e| TransportError::Bootstrap(format!("grpc local_addr: {}", e)))?;
+
+    tracing::info!(
+        bind_address = %http_addr.ip(),
+        port = http_addr.port(),
+        tls = false,
+        "transport.started"
+    );
+
     // Start HTTP server
     let http_shutdown_rx = shutdown_rx.clone();
     let http_handle = tokio::spawn(async move {
-        if let Err(e) = http::start_http_server(http_state, http_shutdown_rx).await {
+        if let Err(e) = http::start_http_server(http_state, http_listener, http_shutdown_rx).await {
             tracing::error!(
                 error = %e,
                 "transport.http_server_failed"
@@ -128,7 +161,7 @@ where
     // Start gRPC server
     let grpc_shutdown_rx = shutdown_rx.clone();
     let grpc_handle = tokio::spawn(async move {
-        if let Err(e) = grpc::start_grpc_server(grpc_state, grpc_shutdown_rx).await {
+        if let Err(e) = grpc::start_grpc_server(grpc_state, grpc_listener, grpc_shutdown_rx).await {
             tracing::error!(
                 error = %e,
                 "transport.grpc_server_failed"
@@ -136,7 +169,7 @@ where
         }
     });
 
-    Ok(TransportHandles::new(http_handle, grpc_handle, shutdown_tx))
+    Ok(TransportHandles::new(http_handle, grpc_handle, shutdown_tx, http_addr, grpc_addr))
 }
 
 #[cfg(test)]

@@ -7,6 +7,13 @@ Cargo.lock.bak
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+# `MetricsConfig::default()` writes to `./llamaforge.db` if a test runs
+# without overriding the path; same for `ConfigPaths` lock files.
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.lock
 .env
 .env.local
 

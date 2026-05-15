@@ -8,6 +8,7 @@ use mock_llama::{MockConfig, MockLlama};
 async fn main() {
     let mut alias = "mock".to_string();
     let mut port: Option<u16> = None;
+    let mut parallel_slots: u32 = 1;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -21,11 +22,16 @@ async fn main() {
                     port = p.parse().ok();
                 }
             }
+            "--parallel" => {
+                if let Some(p) = args.next() {
+                    parallel_slots = p.parse().unwrap_or(1);
+                }
+            }
             _ => {}
         }
     }
 
-    let config = MockConfig { model_alias: alias, ..Default::default() };
+    let config = MockConfig { model_alias: alias, parallel_slots, ..Default::default() };
     let mock = if let Some(p) = port {
         MockLlama::start_on_port(p, config).await.expect("mock-llama bind failed")
     } else {

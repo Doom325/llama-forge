@@ -1327,10 +1327,13 @@ version = "0.1.0-draft"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures-util",
+ "llamaforge",
  "llamaforge-adapters",
  "llamaforge-config",
  "llamaforge-dispatch",
  "llamaforge-metrics",
+ "llamaforge-proto",
  "llamaforge-queue",
  "llamaforge-routing",
  "llamaforge-server-manager",
@@ -1342,7 +1345,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "tonic",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

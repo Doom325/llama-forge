@@ -264,6 +264,7 @@ where
 
 pub async fn start_grpc_server<CW, RMS, SM>(
     state: HttpAppState<CW, RMS, SM>, // Reuse HttpAppState or pass individual arcs
+    listener: tokio::net::TcpListener,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
 ) -> Result<(), TransportError>
 where
@@ -272,7 +273,6 @@ where
     SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
     let config = state.config_reader.snapshot();
-    let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.grpc_port);
 
     let grpc_config = &config.grpc;
     let max_message_size = (grpc_config.max_message_size_mb * 1024 * 1024) as usize;
@@ -305,13 +305,17 @@ where
 
     let auth_interceptor = AuthInterceptor { config_reader: state.config_reader.clone() };
 
+    let bound = listener
+        .local_addr()
+        .map_err(|e| TransportError::Bootstrap(format!("grpc local_addr: {}", e)))?;
     tracing::info!(
-        bind_address = %config.global.bind_address,
-        port = config.global.grpc_port,
+        bind_address = %bound.ip(),
+        port = bound.port(),
         tls = grpc_config.tls_enabled,
         "transport.started"
     );
 
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     let mut rx = shutdown_rx.clone();
 
     // Use builder
@@ -346,7 +350,7 @@ where
         .add_service(inference_service)
         .add_service(management_service)
         .add_service(health_service) // Health service might not need auth
-        .serve_with_shutdown(addr, async move {
+        .serve_with_incoming_shutdown(incoming, async move {
             let _ = rx.changed().await;
         })
         .await
@@ -535,22 +539,20 @@ mod tests {
             large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        // We need a specific port to connect to. We can just use a fixed port for this test or let it fail if in use.
-        // Or we can just start it and let it run.
-        let mut config2 = AppConfig::default();
-        config2.global.grpc_port = 50055;
-        let source2 = Arc::new(InMemoryConfigSource::new(config2));
-        let handle2 = Arc::new(ConfigHandle::load(source2).unwrap());
-        let state2 = HttpAppState { config_reader: handle2.clone(), ..state.clone() };
+        // Bind ephemeral port so the test isn't flaky on port-collisions.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let state2 = HttpAppState { config_reader: handle.clone(), ..state.clone() };
 
         let server_task = tokio::spawn(async move {
-            let _ = start_grpc_server(state2, rx).await;
+            let _ = start_grpc_server(state2, listener, rx).await;
         });
 
         // Give it a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let mut client = InferenceServiceClient::connect("http://127.0.0.1:50055").await.unwrap();
+        let url = format!("http://{}", bound);
+        let mut client = InferenceServiceClient::connect(url).await.unwrap();
 
         let payload = serde_json::json!({
             "model": "test",
@@ -582,7 +584,7 @@ mod tests {
     #[tokio::test]
     async fn test_grpc_health_check() {
         let (tx, rx) = tokio::sync::watch::channel(());
-        let global = GlobalConfig { api_key: None, grpc_port: 50056, ..Default::default() };
+        let global = GlobalConfig { api_key: None, grpc_port: 0, ..Default::default() };
         let config = AppConfig { global, ..Default::default() };
         let source = Arc::new(InMemoryConfigSource::new(config));
         let handle = Arc::new(ConfigHandle::load(source).unwrap());
@@ -600,13 +602,16 @@ mod tests {
             large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
         let server_task = tokio::spawn(async move {
-            let _ = start_grpc_server(state, rx).await;
+            let _ = start_grpc_server(state, listener, rx).await;
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        let channel = tonic::transport::Channel::from_static("http://127.0.0.1:50056")
+        let url = format!("http://{}", bound);
+        let channel = tonic::transport::Channel::from_static(Box::leak(url.into_boxed_str()))
             .connect()
             .await
             .unwrap();

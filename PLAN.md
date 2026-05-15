@@ -433,33 +433,233 @@ Build the first cross-component end-to-end test. Launches a `mock-llama` subproc
 
 ---
 
-## PR10 — Final v1 cleanup pass
+## PR10 — v1.0 substance gate: orchestrator e2e + PR9 protocol tests + cleanup
 
-**Branch:** `integration/10-v1-cleanup`
-**Depends on:** PR9 merged
-**Size:** Small (~150 lines)
-**Estimated Time:** 3–4 hours
+**Branch:** `integration/10-v1-substance-gate`
+**Depends on:** PR9b merged (✅ as of PR97 squash `cd0d710`)
+**Size:** Medium-Large (~600–800 LOC; split into PR10a + PR10b if it exceeds 800)
+**Estimated Time:** 8–12 hours
+
+> **Section rewritten 2026-05-15** to absorb three deferrals from earlier PRs. Original "small cleanup pass" framing is obsolete — PR10 is now the actual v1.0 substance gate per the PR97 review reframe.
 
 ### Purpose
 
-Address the remaining v1 papercuts surfaced by e2e testing and design doc reconciliation. Single PR for whatever falls out of PR9.
+Three deferrals from earlier PRs converge here, plus the original PR10 cleanup list:
 
-### Tasks (template — refine after PR9)
+1. **The 5 PLAN.md PR9 tests (9.4–9.8)** were deferred from PR97 because the e2e harness today only boots `mock-llama`, not the LlamaForge orchestrator. Lands here.
+2. **`llamaforge` bin → bin+lib refactor** to make `serve::run` reachable from outside the binary so `llamaforge-e2e` can build the composition root in-process (PLAN PR9 task 9.3a).
+3. **Audit-record translator** (`dispatch::AuditRecord` → `metrics::AuditEvent`) deferred from PR9a — fold in here.
+4. The original PR10 cleanup list (config-overlay decision, Anthropic usage tokens, tracing audit, hardcoded test ports, doc warnings, README).
 
-| # | Task |
-|---|------|
-| 10.1 | `ConfigOverlayStore` trait: either remove (if deferred to v1.1 per design doc §2.8) with a single `// removed during PR10` note, or land a minimal SQLite impl. Decision drives whether this is +50 or +500 lines. |
-| 10.2 | Anthropic `usage.output_tokens` — wire actual token-count threading from `InferenceEngineAdapter` through `ChatCompletionChunk::Stop` (extend the `Stop` variant with a `usage: Usage` field if needed). |
-| 10.3 | `tracing::error!` audit: every `tracing::error!` call in `crates/*/src/` uses structured fields, not interpolated strings. Replace any `tracing::error!("Foo: {}", e)` with `tracing::error!(error = %e, "lifecycle.foo_failed")`. |
-| 10.4 | Test port handling: replace any remaining hardcoded ports in tests (`50058`, `50060`, etc.) with `0`-bind and `TcpListener::local_addr()` readback. |
-| 10.5 | `cargo doc --no-deps --workspace` builds without warnings. Public-API audit: every `pub` type, trait, method has a `///` doc comment with a design doc cite. |
-| 10.6 | README update at workspace root: 10-line "what is llamaforge", build instructions, link to design doc, link to running e2e tests. |
+After PR10 lands, only PR11 (design.md ↔ impl reconciliation) remains before VC-C → `git tag v1.0.0`.
+
+### Splitting guidance
+
+If the diff exceeds **800 LOC**, split into two PRs:
+
+- **PR10a — orchestrator harness + protocol tests** (~500 LOC, tasks 10.1, 10.2, 10.3): bin/lib refactor, `OrchestratorHandle` in `Harness`, 5 protocol tests. The infrastructure pieces.
+- **PR10b — translator + cleanup list** (~300 LOC, tasks 10.4–10.10): audit translator, Anthropic usage, tracing audit, test ports, doc clean, README.
+
+Single PR is preferred if you can stay under 800 total. Branch `integration/10b-translator-cleanup` if splitting.
+
+### Tasks
+
+#### 10.1 — `llamaforge` bin/lib refactor
+
+**Purpose:** make `serve::run` and `build::build` reachable from `llamaforge-e2e` so the harness can construct the orchestrator in-process.
+
+Current state (`crates/llamaforge/`):
+- 6 source files: `main.rs`, `serve.rs`, `build.rs`, `tracing_init.rs`, `init.rs`, `validate.rs`
+- `Cargo.toml` has only `[[bin]]`
+- `serve::run` already `pub` at `serve.rs:11`
+- `BackgroundTasks` already `pub` at `build.rs:53`
+
+| # | Task | File(s) |
+|---|------|---------|
+| 10.1.a | Add `[lib]` target to `crates/llamaforge/Cargo.toml` alongside `[[bin]]`. Both targets share the same source tree. | `crates/llamaforge/Cargo.toml` |
+| 10.1.b | Create `crates/llamaforge/src/lib.rs` declaring `pub mod build;`, `pub mod serve;`, `pub mod tracing_init;`. Re-export `serve::run`, `build::build`, `build::BackgroundTasks` at the crate root for ergonomic e2e use. `init` and `validate` stay private to the bin — they're CLI subcommand handlers, not library API. | `crates/llamaforge/src/lib.rs` (new) |
+| 10.1.c | Update `crates/llamaforge/src/main.rs` to `use llamaforge::serve;` (was `use crate::serve;`). The `init`/`validate` modules stay reachable from `main.rs` via `mod init;` / `mod validate;` — they don't move to the lib. | `crates/llamaforge/src/main.rs` |
+| 10.1.d | Add `llamaforge = { workspace = true }` to root `[workspace.dependencies]` and to `llamaforge-e2e/Cargo.toml [dev-dependencies]`. | `Cargo.toml`, `crates/llamaforge-e2e/Cargo.toml` |
+
+**Acceptance:** `cargo build -p llamaforge --lib && cargo build -p llamaforge --bin llamaforge` both succeed; `cargo test -p llamaforge-e2e` can `use llamaforge::serve::run`.
+
+#### 10.2 — `OrchestratorHandle` in `Harness`
+
+Extend `crates/llamaforge-e2e/src/lib.rs`:
+
+| # | Task | File(s) |
+|---|------|---------|
+| 10.2.a | Add `pub struct OrchestratorHandle { pub http_url: String, pub grpc_url: String, pub shutdown: CancellationToken, _task: JoinHandle<anyhow::Result<()>> }`. | `crates/llamaforge-e2e/src/lib.rs` |
+| 10.2.b | Add `pub async fn start_full() -> anyhow::Result<(Self, OrchestratorHandle)>`. Builds the mock-llama harness as today, then constructs a `ConfigHandle` from the temp config and calls `tokio::spawn(llamaforge::serve::run(handle))`. | `crates/llamaforge-e2e/src/lib.rs` |
+| 10.2.c | **Port discovery wrinkle.** `start_servers` binds listeners but the bound ports are internal to the transport task. Choose (a) — extend `TransportHandles` with `pub http_addr: SocketAddr, pub grpc_addr: SocketAddr` so `serve::run` can return them up to `start_full`. Touches `start_http_server` and `start_grpc_server` to capture the bound `local_addr()` before serving. The temp config uses `http_port = 0` / `grpc_port = 0` so the OS picks ephemeral ports. | `crates/llamaforge-transport/src/lib.rs`, `crates/llamaforge-transport/src/http.rs`, `crates/llamaforge-transport/src/grpc.rs`, `crates/llamaforge/src/serve.rs` |
+| 10.2.d | `OrchestratorHandle::shutdown_and_wait()` method: cancels the shutdown token, then joins the task. Used by graceful-shutdown test (10.3.d). | `crates/llamaforge-e2e/src/lib.rs` |
+
+**Acceptance:** `Harness::start_full()` returns within 2s; `curl <http_url>/health` returns 200; `shutdown_and_wait()` drains cleanly without panic.
+
+#### 10.3 — The 5 PLAN.md PR9 tests against the orchestrator
+
+For each, a new file in `crates/llamaforge-e2e/tests/`. Each test:
+1. `let (harness, orch) = Harness::start_full().await?;`
+2. Drive the orchestrator via real HTTP/gRPC clients.
+3. Assert specific protocol invariants.
+4. `orch.shutdown_and_wait().await?;`
+
+| # | Test | File | Assertions |
+|---|------|------|-----------|
+| 10.3.a | `test_e2e_openai_chat_streaming` | `tests/openai_streaming.rs` | POST `<orch.http_url>/v1/chat/completions` with `{"model": "e2e-mock", "messages": [{"role":"user","content":"hi"}], "stream": true}`. Collect all `data: {...}` events. Assert: (1) every event's `id` field is identical (no `chatcmpl-q/-t/-s` regression from PR4); (2) terminal `data: [DONE]` present; (3) at least one `delta.content` chunk before stop; (4) final chunk has `finish_reason: "stop"`. |
+| 10.3.b | `test_e2e_anthropic_messages_streaming` | `tests/anthropic_streaming.rs` | POST `/v1/messages` with `stream: true`. Verify event ordering: `message_start` is event #0, `content_block_start` precedes every `content_block_delta`, `message_stop` is final. No `content_block_delta` before `content_block_start` (G-11 invariant). |
+| 10.3.c | `test_e2e_grpc_streaming` | `tests/grpc_streaming.rs` | Build `tonic` client against `<orch.grpc_url>`. Call `StreamInference` with the proto request. Stream `InferenceResponse` messages; assert at least one chunk before terminal status, all chunks parse cleanly, the final status is `OK`. |
+| 10.3.d | `test_e2e_graceful_shutdown` | `tests/graceful_shutdown.rs` | Spawn a streaming `chat_completion` request. After receiving ≥1 chunk, call `orch.shutdown_and_wait()`. Assert: (1) the in-flight stream completes (does not return error mid-stream); (2) a *new* POST to the same endpoint after shutdown fails with connection refused or 503. |
+| 10.3.e | `test_e2e_metrics_endpoint` | `tests/metrics_endpoint.rs` | After driving 3 chat-completion requests through `<orch.http_url>`, GET `<orch.http_url>/metrics`. Parse the Prometheus text. Assert: `llamaforge_http_requests_total{path="/v1/chat/completions",method="POST",status="200"} 3`; `llamaforge_active_connections` gauge present (value ≥ 0); `llamaforge_tokens_total` counter present and > 0. Label cardinality on `path` bounded to known routes. |
+
+The existing `e2e-mocklama` CI job already runs `cargo test -p llamaforge-e2e --tests`. These pick up automatically — no workflow changes needed.
+
+#### 10.4 — Audit-record translator
+
+**Background:** `InferenceEngineAdapter::chat_completion` (`crates/llamaforge-adapters/src/inference_engine.rs:186-188`) currently spawns a task that consumes the dispatch `audit_rx` channel and logs the count on exit but doesn't forward records. The `Arc<MetricsIngest>` field at `inference_engine.rs:41` is held but unused (marked `#[allow(dead_code)]`).
+
+Source types:
+
+- **Source** (`crates/llamaforge-dispatch/src/proxy.rs`):
+  ```rust
+  pub struct AuditRecord {
+      pub request_id: RequestId,
+      pub server_id: ServerId,
+      pub duration: Duration,
+      pub ttft: Option<Duration>,
+      pub tokens_predicted: u32,
+      pub success: bool,
+  }
+  ```
+- **Target** (`crates/llamaforge-metrics/src/types.rs`):
+  ```rust
+  pub struct AuditEvent {
+      pub event_id: String,
+      pub event_type: EventType,
+      pub event_kind: String,
+      pub server_id: Option<ServerId>,
+      pub request_id: Option<RequestId>,
+      pub created_at: DateTime<Utc>,
+      pub payload: serde_json::Value,
+  }
+  ```
+
+Mapping:
+
+| dispatch field | metrics field |
+|----------------|---------------|
+| `request_id` | `Some(request_id)` |
+| `server_id` | `Some(server_id)` |
+| (new) | `event_id = Uuid::now_v7().to_string()` |
+| (new) | `event_type = EventType::RequestDispatched` (add variant if missing) |
+| (new) | `event_kind = "request_dispatched"` |
+| (new) | `created_at = Utc::now()` |
+| `duration`, `ttft`, `tokens_predicted`, `success` | `payload = json!({"duration_ms": ..., "ttft_ms": ..., "tokens_predicted": ..., "success": ...})` |
+
+| # | Task | File(s) |
+|---|------|---------|
+| 10.4.a | If `EventType::RequestDispatched` doesn't exist on `llamaforge-metrics::types::EventType`, add it. Check `crates/llamaforge-metrics/src/types.rs` first; many variants likely already exist. | `crates/llamaforge-metrics/src/types.rs` |
+| 10.4.b | Add `pub(crate) fn translate_audit(record: AuditRecord) -> AuditEvent` in a new `crates/llamaforge-adapters/src/audit.rs` module. Pure function, unit-testable. | `crates/llamaforge-adapters/src/audit.rs` (new), `crates/llamaforge-adapters/src/lib.rs` |
+| 10.4.c | Replace the drain-and-log spawn at `inference_engine.rs:186-188` with a translate-and-record spawn: for each `audit_rx.recv().await`, call `translate_audit`, then `self.metrics.record_audit_event(event).await` (or whatever the existing API on `MetricsIngest` is — see `crates/llamaforge-metrics/src/ingest.rs`). Remove `#[allow(dead_code)]` on the `metrics` field. | `crates/llamaforge-adapters/src/inference_engine.rs` |
+| 10.4.d | Unit test for `translate_audit`: build an `AuditRecord`, translate, assert every field maps correctly (especially `event_id` is a valid UUID, `event_type` is the new variant, `payload` JSON has the four expected keys). | `crates/llamaforge-adapters/src/audit.rs::tests` |
+| 10.4.e | Extend `test_e2e_metrics_endpoint` (10.3.e) to also issue a `GET <orch.http_url>/api/metrics/requests` after the 3 chat completions and verify each request shows up in the persisted store. | `crates/llamaforge-e2e/tests/metrics_endpoint.rs` |
+
+#### 10.5 — Anthropic `usage.output_tokens` real threading
+
+**Site:** `crates/llamaforge-transport/src/anthropic.rs:240` — currently `"usage": {"output_tokens": 0}` hardcoded with a `// Placeholder for v1` comment.
+
+| # | Task | File(s) |
+|---|------|---------|
+| 10.5.a | Extend `ChatCompletionChunk::Stop` from `Stop(String)` to `Stop { finish_reason: String, output_tokens: u32 }`. Update all construction sites. | `crates/llamaforge-types/src/lib.rs`, `crates/llamaforge-adapters/src/inference_engine.rs`, `crates/llamaforge-transport/src/openai.rs`, `crates/llamaforge-transport/src/anthropic.rs` |
+| 10.5.b | `InferenceEngineAdapter` already has `parsed.tokens_predicted` at `inference_engine.rs:209` (value going into `tokens_total` counter). Thread into the new `Stop` variant. | `crates/llamaforge-adapters/src/inference_engine.rs` |
+| 10.5.c | Update `format_anthropic_event` at `anthropic.rs:240` to use the carried `output_tokens` instead of `0`. Delete the placeholder comment. | `crates/llamaforge-transport/src/anthropic.rs:240` |
+| 10.5.d | Update existing Anthropic streaming unit test to assert `usage.output_tokens > 0` on the stop event. | `crates/llamaforge-transport/src/anthropic.rs::tests` |
+
+#### 10.6 — Structured `tracing::error!` / `tracing::warn!` audit
+
+Run `git grep -nE 'tracing::(error|warn)!\("[^"]*\{[^}]*\}' crates/*/src/`. Each hit is a format-interpolated message that should become structured: `tracing::error!(error = %e, "lifecycle.event_name")`.
+
+Known clean sites (verified during PR10 planning):
+- `crates/llamaforge/src/serve.rs` — `lifecycle.shutdown.wait_error` ✅
+- `crates/llamaforge-transport/src/lib.rs` — `transport.http_server_failed` / `transport.grpc_server_failed` ✅
+
+If grep returns new sites introduced after PR6, rewrite.
+
+**Acceptance:** zero hits from `git grep -nE 'tracing::(error|warn)!\("[^"]*\{' crates/*/src/`.
+
+#### 10.7 — Hardcoded test ports
+
+Replace static port numbers in:
+- `crates/llamaforge-transport/tests/vc3_transport.rs:78,109,144,170,219,243,303,336` (8 sites)
+- Any others surfaced by `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/`
+
+Pattern: `setup_test_server` takes a port; either modify it to accept `0` and return the bound `SocketAddr`, or pre-bind a `TcpListener::bind("127.0.0.1:0")`, read `local_addr().port()`, drop the listener, pass the port in. The helper-modification path is cleaner — one change to the helper, ~zero change per test.
+
+**Acceptance:** `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/` returns 0 hits.
+
+#### 10.8 — `cargo doc --no-deps --workspace`
+
+**Status as of 2026-05-15 PR10 planning:** clean. No warnings. No action needed unless new doc-lint issues have appeared post-PR9b.
+
+Run once at the start of PR10 to confirm baseline, again before closure.
+
+#### 10.9 — `ConfigOverlayStore` decision
+
+**Status:** Trait at `crates/llamaforge-metrics/src/traits.rs:91-104` with sealed bound. No production impl. Doc comment cites design doc §2.8 (cleaned up in PR7).
+
+**Decision:** Keep deferred. Design doc explicitly marks per-server config overlays as v1.1.
+
+| # | Task | File(s) |
+|---|------|---------|
+| 10.9.a | Create `docs/v1.1-deferred.md` (if PR11 hasn't created it yet) with an entry: `ConfigOverlayStore` trait defined at `llamaforge-metrics/src/traits.rs:91`; no production impl in v1.0; deferral rationale per design doc §2.8 (per-server runtime config overlays — useful for A/B testing model parameters, out of v1 scope). | `docs/v1.1-deferred.md` |
+
+No code change — the trait stays, just documented as deferred.
+
+#### 10.10 — README at workspace root
+
+10-line workspace README:
+
+```markdown
+# LlamaForge
+
+Rust orchestrator and gateway for fleets of `llama.cpp` (`llama-server`) processes.
+[1-paragraph summary from CLAUDE.md §"What LlamaForge is"]
+
+## Build & run
+
+cargo build --release
+./target/release/llamaforge init                       # writes config/llamaforge.toml.example
+./target/release/llamaforge serve --config <path>      # starts the orchestrator
+
+## Documentation
+
+- Master design: `docs/design.md`
+- Component designs: `docs/component-designs/`
+- Phase plan: `PLAN.md`
+
+## End-to-end tests
+
+cargo test -p llamaforge-e2e --tests                   # requires `protoc` and `mold`
+```
 
 ### PR10 Acceptance Criteria
 
-- [ ] `cargo doc --no-deps --workspace` clean.
-- [ ] All v1 papercuts in the design-doc reconciliation checklist (see VC-C below) closed.
-- [ ] 5 local gates green + all CI checks SUCCESS.
+- [ ] `cargo build -p llamaforge --lib && cargo build -p llamaforge --bin llamaforge` both succeed (10.1)
+- [ ] `Harness::start_full()` builds the orchestrator in-process; `OrchestratorHandle` exposes `http_url` + `grpc_url` + `shutdown_and_wait` (10.2)
+- [ ] All 5 PR9 protocol tests (10.3.a–e) pass in the `e2e-mocklama` CI job
+- [ ] `git grep -n 'translate_audit' crates/` returns the new module + the call site replacing the drain-and-log spawn (10.4)
+- [ ] `crates/llamaforge-transport/src/anthropic.rs` no longer hardcodes `"output_tokens": 0` (10.5)
+- [ ] `git grep -nE 'tracing::(error|warn)!\("[^"]*\{' crates/*/src/` returns 0 hits (10.6)
+- [ ] `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/` returns 0 hits (10.7)
+- [ ] `cargo doc --no-deps --workspace` clean (10.8)
+- [ ] `docs/v1.1-deferred.md` has an entry for `ConfigOverlayStore` (10.9)
+- [ ] `README.md` at workspace root exists (10.10)
+- [ ] 5 local gates green + 4/4 CI green (Check & Lint, Test, E2E (mock-llama), Audit Dependencies)
+- [ ] No `unwrap()`/`expect()` in production paths outside the documented PR8/PR9a exception at `crates/llamaforge/src/build.rs` (UUID parse, infallible by load-time validation)
+
+### Splitting decision protocol
+
+After completing 10.1+10.2+10.3 (the harness + 5 tests), measure: `git diff origin/main HEAD --shortstat`. If `> 800` lines, open PR10a here and start PR10b on `integration/10b-translator-cleanup` from the new main. If `≤ 800`, continue with 10.4–10.10 in the same PR.
 
 ---
 

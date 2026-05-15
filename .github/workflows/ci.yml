@@ -79,8 +79,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build mock-llama and e2e harness
-        run: cargo build -p mock-llama -p llamaforge-e2e --tests
+      # `--tests` filters to test artifacts only, so it silently skips
+      # mock-llama's `[[bin]]`. Build the binary explicitly first —
+      # `Harness::start_full()` requires it on disk because the
+      # composition root's `ServerManager` spawns mock-llama as a
+      # subprocess via the configured `model_path`.
+      - name: Build mock-llama binary
+        run: cargo build --bin mock-llama
+      - name: Build e2e harness
+        run: cargo build -p llamaforge-e2e --tests
 
       - name: Run e2e tests
         run: cargo test -p llamaforge-e2e --tests -- --nocapture

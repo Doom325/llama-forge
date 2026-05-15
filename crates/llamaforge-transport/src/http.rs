@@ -144,23 +144,26 @@ where
     if stream {
         let qs = state.queue_submitter.clone();
         let req_id = request_id;
-        let sse_stream = response_stream.map(move |res| match res {
-            Ok(chunk) => {
-                let sse_data = format_openai_chunk(&req_id_str, &chunk);
-                Ok(Event::default().data(sse_data))
-            }
-            Err(_) => {
-                let sse_data = serde_json::json!({
-                    "error": {
-                        "message": "Stream error",
-                        "type": "internal_error",
-                        "param": null,
-                        "code": null
-                    }
-                })
-                .to_string();
-                Ok::<axum::response::sse::Event, axum::Error>(Event::default().data(sse_data))
-            }
+        let sse_stream = response_stream.flat_map(move |res| {
+            let events: Vec<Result<axum::response::sse::Event, axum::Error>> = match res {
+                Ok(chunk) => format_openai_chunk(&req_id_str, &chunk)
+                    .into_iter()
+                    .map(|data| Ok(Event::default().data(data)))
+                    .collect(),
+                Err(_) => {
+                    let sse_data = serde_json::json!({
+                        "error": {
+                            "message": "Stream error",
+                            "type": "internal_error",
+                            "param": null,
+                            "code": null
+                        }
+                    })
+                    .to_string();
+                    vec![Ok(Event::default().data(sse_data))]
+                }
+            };
+            futures_util::stream::iter(events)
         });
 
         struct StreamGuard<S> {
@@ -493,6 +496,7 @@ where
 
 pub async fn start_http_server<CW, RMS, SM>(
     state: HttpAppState<CW, RMS, SM>,
+    listener: tokio::net::TcpListener,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
 ) -> Result<(), TransportError>
 where
@@ -500,20 +504,7 @@ where
     RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
     SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
-    let config = state.config_reader.snapshot();
-    let addr = std::net::SocketAddr::new(config.global.bind_address, config.global.http_port);
     let router = build_router(state);
-
-    tracing::info!(
-        bind_address = %config.global.bind_address,
-        port = config.global.http_port,
-        tls = false,
-        "transport.started"
-    );
-
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .map_err(|e| TransportError::Bootstrap(e.to_string()))?;
 
     let mut rx = shutdown_rx.clone();
     axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
