@@ -4,7 +4,6 @@
 //!
 //! Implements design.md §4 (System Architecture Overview).
 //!
-//!
 //! The binary at `src/main.rs` is the production entry point. This lib
 //! target exists so workspace integration tests (`llamaforge-e2e`) can
 //! construct the same composition root in-process without shelling out
