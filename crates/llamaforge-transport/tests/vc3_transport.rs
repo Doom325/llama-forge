@@ -18,8 +18,11 @@ use llamaforge_types::{
     ChatCompletionChunk, ServerId, StreamError,
 };
 
+/// Bind the transport pair on ephemeral ports and return the handles
+/// (which carry the OS-assigned `http_addr` / `grpc_addr`) plus the
+/// config handle. Tests format URLs off `handles.http_addr` /
+/// `handles.grpc_addr` rather than hardcoding port numbers.
 async fn setup_test_server(
-    http_port: u16,
     config_modifier: impl FnOnce(&mut AppConfig),
     route_validator: Arc<dyn RouteValidator>,
     queue_submitter: Arc<dyn QueueSubmitter>,
@@ -27,8 +30,8 @@ async fn setup_test_server(
     server_control: Arc<dyn ServerControl>,
 ) -> (llamaforge_transport::TransportHandles, Arc<ConfigHandle>) {
     let mut config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
-    config.global.http_port = http_port;
-    config.global.grpc_port = http_port + 1000;
+    config.global.http_port = 0;
+    config.global.grpc_port = 0;
     config_modifier(&mut config);
 
     let source = Arc::new(InMemoryConfigSource::new(config));
@@ -51,6 +54,14 @@ async fn setup_test_server(
     (handles, handle)
 }
 
+fn http_url(handles: &llamaforge_transport::TransportHandles, path: &str) -> String {
+    format!("http://{}{}", handles.http_addr, path)
+}
+
+fn grpc_url(handles: &llamaforge_transport::TransportHandles) -> String {
+    format!("http://{}", handles.grpc_addr)
+}
+
 #[allow(clippy::type_complexity)] // This is a test helper returning multiple mocks
 fn default_deps() -> (
     Arc<dyn RouteValidator>,
@@ -71,15 +82,15 @@ async fn test_vc3_1_openai_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop("stop".into())),
+        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50200, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50200/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -102,15 +113,15 @@ async fn test_vc3_2_anthropic_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop("stop".into())),
+        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50201, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50201/v1/messages")
+        .post(http_url(&handles, "/v1/messages"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -137,14 +148,14 @@ async fn test_vc3_2_anthropic_streaming_lifecycle() {
 async fn test_vc3_3_grpc_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop("stop".into())),
+        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50202, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let channel =
-        tonic::transport::Channel::from_static("http://127.0.0.1:51202").connect().await.unwrap();
+        tonic::transport::Endpoint::new(grpc_url(&handles)).unwrap().connect().await.unwrap();
 
     let mut client =
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
@@ -166,12 +177,12 @@ async fn test_vc3_4_non_streaming_timeout() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 2000 });
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) =
-        setup_test_server(50203, |c| c.global.queue_default_timeout_secs = 0, rv, qs, ie, sc).await;
+    let (handles, _) =
+        setup_test_server(|c| c.global.queue_default_timeout_secs = 0, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50203/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -216,11 +227,11 @@ async fn test_vc3_5_queue_full_returns_429() {
     }
     let rv = Arc::new(MockRouteValidatorRejects);
 
-    let (_handles, _) = setup_test_server(50204, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50204/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -239,14 +250,13 @@ async fn test_vc3_5_queue_full_returns_429() {
 #[tokio::test]
 async fn test_vc3_6_auth_on_both_transports() {
     let (rv, qs, ie, sc) = default_deps();
-    let (_handles, _) =
-        setup_test_server(50205, |c| c.global.api_key = Some("secret".into()), rv, qs, ie, sc)
-            .await;
+    let (handles, _) =
+        setup_test_server(|c| c.global.api_key = Some("secret".into()), rv, qs, ie, sc).await;
 
     // HTTP
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50205/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -259,7 +269,7 @@ async fn test_vc3_6_auth_on_both_transports() {
 
     // gRPC
     let channel =
-        tonic::transport::Channel::from_static("http://127.0.0.1:51205").connect().await.unwrap();
+        tonic::transport::Endpoint::new(grpc_url(&handles)).unwrap().connect().await.unwrap();
     let mut grpc_client =
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
     let req = tonic::Request::new(llamaforge_proto::inference::InferenceRequest {
@@ -300,10 +310,10 @@ async fn test_vc3_7_client_disconnect_cleanup() {
 
     let qs = Arc::new(MockQueueSubmitterCancels(cancelled_clone));
     let (rv, _, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50206, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let req = reqwest::Client::new()
-        .post("http://127.0.0.1:50206/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -333,11 +343,11 @@ async fn test_vc3_8_mid_stream_backend_error() {
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50207, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50207/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -358,10 +368,10 @@ async fn test_vc3_8_mid_stream_backend_error() {
 #[tokio::test]
 async fn test_vc3_9_prometheus_always_200() {
     let (rv, qs, ie, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50208, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
-    let res = client.get("http://127.0.0.1:50208/metrics").send().await.unwrap();
+    let res = client.get(http_url(&handles, "/metrics")).send().await.unwrap();
 
     assert_eq!(res.status(), StatusCode::OK);
 }
@@ -384,17 +394,17 @@ async fn test_vc3_10_management_api_round_trip() {
 
     let sc = Arc::new(MockServerControlImpl);
     let (rv, qs, ie, _) = default_deps();
-    let (_handles, _) = setup_test_server(50209, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
 
     // List servers
-    let res = client.get("http://127.0.0.1:50209/api/servers").send().await.unwrap();
+    let res = client.get(http_url(&handles, "/api/servers")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
     // Start server
     let res = client
-        .post("http://127.0.0.1:50209/api/servers/00000000-0000-0000-0000-000000000001/start")
+        .post(http_url(&handles, "/api/servers/00000000-0000-0000-0000-000000000001/start"))
         .send()
         .await
         .unwrap();
@@ -402,14 +412,14 @@ async fn test_vc3_10_management_api_round_trip() {
 
     // Stop server
     let res = client
-        .post("http://127.0.0.1:50209/api/servers/00000000-0000-0000-0000-000000000001/stop")
+        .post(http_url(&handles, "/api/servers/00000000-0000-0000-0000-000000000001/stop"))
         .send()
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
     // Queue status
-    let res = client.get("http://127.0.0.1:50209/api/queue").send().await.unwrap();
+    let res = client.get(http_url(&handles, "/api/queue")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
 
@@ -420,7 +430,7 @@ async fn test_vc3_11_large_body_concurrency_limit() {
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 1000 }); // Slow to hold concurrency
     let (rv, qs, _, sc) = default_deps();
 
-    let (_handles, _) = setup_test_server(50210, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
     let client = Client::new();
     let base_payload = serde_json::json!({
@@ -430,12 +440,13 @@ async fn test_vc3_11_large_body_concurrency_limit() {
         "dummy": "x".repeat(2 * 1024 * 1024)
     });
     let payload = serde_json::to_string(&base_payload).unwrap();
+    let url = http_url(&handles, "/v1/chat/completions");
 
     let mut tasks = vec![];
     for _ in 0..10 {
         // Concurrency limit is hardcoded to 5
         let req = client
-            .post("http://127.0.0.1:50210/v1/chat/completions")
+            .post(&url)
             .header("content-type", "application/json")
             .header("content-length", payload.len())
             .body(payload.clone())
@@ -476,13 +487,14 @@ async fn test_vc3_12_graceful_shutdown_drain() {
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 1000 });
     let (rv, qs, _, sc) = default_deps();
-    let (handles, _) = setup_test_server(50211, |_| {}, rv, qs, ie, sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
 
+    let url = http_url(&handles, "/v1/chat/completions");
     let client = Client::new();
 
     let task = tokio::spawn(async move {
         client
-            .post("http://127.0.0.1:50211/v1/chat/completions")
+            .post(&url)
             .header("content-type", "application/json")
             .json(&serde_json::json!({
                 "model": "test",
@@ -522,11 +534,11 @@ async fn test_vc3_13_panic_recovery_http() {
     }
 
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50212, |_| {}, rv, qs, Arc::new(PanicEngine), sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, Arc::new(PanicEngine), sc).await;
 
     let client = Client::new();
     let res = client
-        .post("http://127.0.0.1:50212/v1/chat/completions")
+        .post(http_url(&handles, "/v1/chat/completions"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({
             "model": "test",
@@ -559,10 +571,10 @@ async fn test_vc3_14_panic_recovery_grpc() {
     }
 
     let (rv, qs, _, sc) = default_deps();
-    let (_handles, _) = setup_test_server(50213, |_| {}, rv, qs, Arc::new(PanicEngine), sc).await;
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, Arc::new(PanicEngine), sc).await;
 
     let channel =
-        tonic::transport::Channel::from_static("http://127.0.0.1:51213").connect().await.unwrap();
+        tonic::transport::Endpoint::new(grpc_url(&handles)).unwrap().connect().await.unwrap();
     let mut grpc_client =
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
     let req = tonic::Request::new(llamaforge_proto::inference::InferenceRequest {

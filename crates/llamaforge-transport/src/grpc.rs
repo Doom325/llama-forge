@@ -523,7 +523,7 @@ mod tests {
         let chunks = vec![
             Ok(ChatCompletionChunk::Token("Hel".into())),
             Ok(ChatCompletionChunk::Token("lo".into())),
-            Ok(ChatCompletionChunk::Stop("stop".into())),
+            Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
         ];
 
         let state = HttpAppState {

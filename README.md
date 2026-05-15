@@ -1,44 +1,27 @@
 # LlamaForge
 
-Rust orchestrator and gateway for fleets of `llama.cpp` (`llama-server`) processes — supervising lifecycles, multiplexing OpenAI- and Anthropic-compatible HTTP traffic over a typed gRPC core, and routing requests by slot/KV-cache awareness.
+Rust orchestrator and gateway for fleets of `llama.cpp` (`llama-server`) processes. Supervises process lifecycles, multiplexes OpenAI- and Anthropic-compatible HTTP traffic over a typed gRPC core, and routes requests by slot availability and KV-cache (prompt) affinity. SQLite-backed metrics and a `tracing`-based observability stack are wired throughout.
 
-> **Status:** Phase 0 skeleton. Workspace compiles; no business logic yet.
-
-## Source of truth
-
-Development is driven by the documents in [`docs/`](docs):
-
-- [`docs/design.md`](docs/design.md) — master design
-- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — phased plan with verification checkpoints
-- [`docs/component-designs/`](docs/component-designs) — component-by-component specifications:
-  - [`01_CONFIG_MANAGER.md`](docs/component-designs/01_CONFIG_MANAGER.md)
-  - [`02_METRICS_AND_STORAGE.md`](docs/component-designs/02_METRICS_AND_STORAGE.md)
-  - [`03_SERVER_MANAGER.md`](docs/component-designs/03_SERVER_MANAGER.md)
-  - [`04_REQUEST_QUEUE_AND_SCHEDULER.md`](docs/component-designs/04_REQUEST_QUEUE_AND_SCHEDULER.md)
-  - [`05_SMART_ROUTING.md`](docs/component-designs/05_SMART_ROUTING.md)
-  - [`06_DISPATCH_AND_PROXY.md`](docs/component-designs/06_DISPATCH_AND_PROXY.md)
-  - [`07_TRANSPORT_LAYER.md`](docs/component-designs/07_TRANSPORT_LAYER.md)
-
-Read the relevant component design before changing the corresponding module.
-
-## Workspace layout (per Plan Task 0.1)
-
-```
-llama-forge/
-├── Cargo.toml              # workspace
-├── rust-toolchain.toml     # stable, with rustfmt + clippy
-├── crates/
-│   ├── llamaforge/         # binary crate (the orchestrator)
-│   └── llamaforge-proto/   # generated tonic/prost bindings
-├── proto/                  # .proto definitions (Task 0.2)
-└── config/                 # example TOML configs
-```
-
-## Build
+## Build & run
 
 ```sh
-cargo build
-cargo test
+cargo build --release
+./target/release/llamaforge init                       # writes config/llamaforge.toml.example
+./target/release/llamaforge serve --config <path>      # starts the orchestrator
+```
+
+## Documentation
+
+- Master design: [`docs/design.md`](docs/design.md)
+- Component designs: [`docs/component-designs/`](docs/component-designs)
+- Phased plan + acceptance criteria: [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) and [`PLAN.md`](PLAN.md)
+- Deferred to v1.1: [`docs/v1.1-deferred.md`](docs/v1.1-deferred.md)
+
+## End-to-end tests
+
+```sh
+cargo build --bin mock-llama                           # required by the e2e harness
+cargo test -p llamaforge-e2e --tests                   # also needs `protoc` and `mold`
 ```
 
 ## License

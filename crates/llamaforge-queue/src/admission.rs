@@ -294,7 +294,7 @@ impl AdmissionAccounting for AdmissionController {
             usage.in_flight.fetch_sub(1, Ordering::SeqCst);
             metrics::gauge!("llamaforge_admission_inflight").decrement(1.0);
         } else {
-            tracing::warn!("record_completion called for unknown requestor: {}", requestor);
+            tracing::warn!(requestor = %requestor, "queue.record_completion_unknown_requestor");
         }
     }
 
@@ -313,7 +313,7 @@ impl AdmissionAccounting for AdmissionController {
                 metrics::gauge!("llamaforge_admission_inflight").increment(1.0);
             }
         } else {
-            tracing::warn!("record_dequeue called for unknown requestor: {}", requestor);
+            tracing::warn!(requestor = %requestor, "queue.record_dequeue_unknown_requestor");
         }
     }
 }

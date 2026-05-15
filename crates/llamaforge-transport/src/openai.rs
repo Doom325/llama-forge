@@ -133,7 +133,7 @@ pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> Vec<
             });
             vec![token_json.to_string()]
         }
-        ChatCompletionChunk::Stop(finish_reason) => {
+        ChatCompletionChunk::Stop { finish_reason, output_tokens } => {
             let stop_json = serde_json::json!({
                 "id": id,
                 "choices": [{
@@ -141,7 +141,9 @@ pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> Vec<
                     "index": 0,
                     "finish_reason": finish_reason
                 }],
-                "usage": null
+                "usage": {
+                    "completion_tokens": output_tokens,
+                }
             });
             vec![stop_json.to_string(), "[DONE]".to_string()]
         }
@@ -213,7 +215,8 @@ mod tests {
         assert!(formatted_token[0].contains("\"content\":\"Hello\""));
         assert!(formatted_token[0].contains("\"id\":\"req_123\""));
 
-        let stop = ChatCompletionChunk::Stop("stop".to_string());
+        let stop =
+            ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 };
         let formatted_stop = format_openai_chunk("req_123", &stop);
         assert_eq!(formatted_stop.len(), 2);
         assert!(formatted_stop[0].contains("\"finish_reason\":\"stop\""));

@@ -113,7 +113,7 @@ async fn starvation_boost_loop(
                             });
                         });
                         if let Err(e) = handle.await {
-                            tracing::error!("Starvation boost spawn_blocking panicked: {:?}", e);
+                            tracing::error!(error = ?e, "queue.starvation_boost_panicked");
                         }
                     } else {
                         span.in_scope(|| {

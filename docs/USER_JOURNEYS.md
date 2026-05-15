@@ -1,8 +1,8 @@
 # LlamaForge — User Journeys & UX Design
 
-**Version:** 0.1.0-draft  
+**Version:** 0.2.0-draft  
 **Author:** Sumanth Gottipati  
-**Date:** 2026-05-14  
+**Date:** 2026-05-15  
 **Status:** Design Phase  
 
 ---
@@ -11,25 +11,30 @@
 
 1. [User Personas](#1-user-personas)
 2. [Journey Map Overview](#2-journey-map-overview)
-3. [Journey 1 — First Install & Bootstrap](#3-journey-1--first-install--bootstrap)
-4. [Journey 2 — Model Onboarding & Server Setup](#4-journey-2--model-onboarding--server-setup)
-5. [Journey 3 — Daily Operations & Monitoring](#5-journey-3--daily-operations--monitoring)
-6. [Journey 4 — API Integration & Client Development](#6-journey-4--api-integration--client-development)
-7. [Journey 5 — Configuration Tuning & Hot-Reload](#7-journey-5--configuration-tuning--hot-reload)
-8. [Journey 6 — Priority & Scheduling Management](#8-journey-6--priority--scheduling-management)
-9. [Journey 7 — Troubleshooting & Debugging](#9-journey-7--troubleshooting--debugging)
-10. [Journey 8 — Scaling & Multi-Model Orchestration](#10-journey-8--scaling--multi-model-orchestration)
-11. [Journey 9 — Observability & Capacity Planning](#11-journey-9--observability--capacity-planning)
-12. [Journey 10 — Maintenance & Lifecycle Operations](#12-journey-10--maintenance--lifecycle-operations)
-13. [Cross-Cutting UX Principles](#13-cross-cutting-ux-principles)
-14. [Extensibility Framework](#14-extensibility-framework)
-15. [UI Surface Mapping](#15-ui-surface-mapping)
+3. [Journey 1 — First Contact](#3-journey-1--first-contact)
+4. [Journey 2 — Adding a Model to a Running System](#4-journey-2--adding-a-model-to-a-running-system)
+5. [Journey 3 — The Morning Check-In](#5-journey-3--the-morning-check-in)
+6. [Journey 4 — Plugging In from an Application](#6-journey-4--plugging-in-from-an-application)
+7. [Journey 5 — Changing Configuration Without Breaking Things](#7-journey-5--changing-configuration-without-breaking-things)
+8. [Journey 6 — "Why Is My Code Review Slow?"](#8-journey-6--why-is-my-code-review-slow)
+9. [Journey 7 — Something Is Wrong](#9-journey-7--something-is-wrong)
+10. [Journey 8 — Outgrowing a Single Model](#10-journey-8--outgrowing-a-single-model)
+11. [Journey 9 — Planning for Next Month](#11-journey-9--planning-for-next-month)
+12. [Journey 10 — Planned Downtime](#12-journey-10--planned-downtime)
+13. [Journey 11 — The Power User](#13-journey-11--the-power-user)
+14. [Journey 12 — Inheriting Someone Else's Forge](#14-journey-12--inheriting-someone-elses-forge)
+15. [Empty States Catalog](#15-empty-states-catalog)
+16. [Accessibility & State Encoding](#16-accessibility--state-encoding)
+17. [Cross-Cutting UX Principles](#17-cross-cutting-ux-principles)
+18. [Vocabulary](#18-vocabulary)
+19. [Extensibility Framework](#19-extensibility-framework)
+20. [UI Surface Mapping](#20-ui-surface-mapping)
 
 ---
 
 ## 1. User Personas
 
-LlamaForge serves three distinct user tiers. The system architecture — gRPC-primary API, priority task types like `CodeReview` and `CodeGen`, per-requestor quotas, TTFT/throughput metrics — reveals who the system is built for. The OpenAI/Anthropic shim layer and the planned Web UI signal intent to make it accessible beyond the terminal-native crowd.
+LlamaForge serves three user tiers. The gRPC-primary API, priority task types like `CodeReview` and `CodeGen`, per-requestor quotas, and TTFT/throughput metrics reveal who the system is built for. The OpenAI/Anthropic shim and Web UI extend the reach beyond the terminal-native crowd.
 
 ### Persona 1: The Operator-Developer (Primary)
 
@@ -46,6 +51,8 @@ LlamaForge serves three distinct user tiers. The system architecture — gRPC-pr
 
 **Success metric:** Inference infrastructure that self-manages — they check the dashboard, not babysit processes.
 
+**Fear:** This is the only inference infrastructure the team has. If it goes down during a sprint, the code review bot dies, CI stalls, and they're the one getting Slack messages at 11pm. They've been burned before by tools that gave no warning and no recovery path. They need to trust the system before they'll stop watching it.
+
 ### Persona 2: The API Consumer (Secondary)
 
 **Who:** Developer on the same team (or the same person wearing a different hat) who writes code that calls the LlamaForge endpoint. They treat it like a local OpenAI API.
@@ -61,6 +68,8 @@ LlamaForge serves three distinct user tiers. The system architecture — gRPC-pr
 
 **Success metric:** `openai.ChatCompletion.create(model="qwen3:30b", ...)` just works, with predictable latency.
 
+**Fear:** A flaky inference endpoint makes their CI flaky, and CI flakiness erodes trust in everything they build on top of it. If the endpoint is unreliable, they'll route around it — back to a hosted API — and the Operator-Developer's whole infrastructure investment loses its reason to exist.
+
 ### Persona 3: The Power User (Tertiary)
 
 **Who:** Tech-savvy enthusiast running local AI for privacy, hobby projects, or cost avoidance. Less infrastructure experience than Persona 1, but motivated and willing to learn.
@@ -72,16 +81,18 @@ LlamaForge serves three distinct user tiers. The system architecture — gRPC-pr
 - Likely runs a single machine, maybe 1–2 models
 - Values the Web UI more than any other surface
 
-**Primary surfaces:** Web UI (exclusively for management), chat application as the API consumer
+**Primary surfaces:** Web UI (for management), a chat application or local app (as the client)
 
-**Success metric:** Click "Start," see a green status light, and use their models through a chat UI or local app.
+**Success metric:** Click "Start," see a green status light, talk to their models through a chat UI. Never need to open a terminal.
+
+**Fear:** The moment it breaks and the error message is a stack trace or a log file they don't know how to read, they'll decide local AI is too much trouble and go back to ChatGPT. Their tolerance for debugging is measured in minutes, not hours. Every error message that assumes infra knowledge is a potential exit point.
 
 ```mermaid
 graph LR
     subgraph "User Personas"
-        P1["🔧 Operator-Developer<br/><i>Runs the forge</i>"]
-        P2["💻 API Consumer<br/><i>Calls the endpoint</i>"]
-        P3["👤 Power User<br/><i>Uses local AI</i>"]
+        P1["Operator-Developer<br/><i>Runs the forge</i>"]
+        P2["API Consumer<br/><i>Calls the endpoint</i>"]
+        P3["Power User<br/><i>Uses local AI</i>"]
     end
 
     subgraph "Primary Surfaces"
@@ -101,100 +112,84 @@ graph LR
     P2 --> S6
     P3 --> S1
     P3 --> S4
-
-    style P1 fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style P2 fill:#1a4a6e,stroke:#2980b9,color:#fff
-    style P3 fill:#6e3a1a,stroke:#b97329,color:#fff
 ```
 
 ---
 
 ## 2. Journey Map Overview
 
-The ten journeys below trace the complete user lifecycle from first contact through mature operations. They are ordered by temporal sequence (when a user first encounters each workflow), not by importance.
+The twelve journeys below trace the complete user lifecycle from first contact through mature operations and succession. They are ordered by the time at which a user first encounters each workflow.
 
 ```mermaid
 journey
     title LlamaForge User Lifecycle
-    section Discovery & Setup
-      Install LlamaForge: 3: Operator, Power User
-      Configure first model: 4: Operator, Power User
-      Start first server: 5: Operator, Power User
-    section Integration
-      Connect application: 4: API Consumer, Operator
-      Send first request: 5: API Consumer
-      Set up monitoring: 3: Operator
-    section Daily Operations
-      Monitor dashboard: 5: Operator, Power User
-      Tune configuration: 3: Operator
-      Manage priorities: 3: Operator
-    section Growth
-      Add models/servers: 4: Operator
-      Scale workloads: 3: Operator
-    section Troubleshooting
-      Diagnose slow requests: 2: Operator, API Consumer
-      Debug stuck server: 2: Operator
-      Recover from failure: 2: Operator
+    section First Hour
+      Install and first request: 3: Operator, Power User
+      Point an app at the endpoint: 4: API Consumer
+    section First Week
+      Morning check-in ritual: 5: Operator, Power User
+      Add a second model: 4: Operator
+      Tune a config value: 3: Operator
+    section First Month
+      Diagnose a slow request: 2: Operator, API Consumer
+      Set up priority rules: 3: Operator
+      Scale to multi-model fleet: 3: Operator
+    section Ongoing
+      Capacity planning: 4: Operator
+      Planned maintenance: 3: Operator
+    section Succession
+      New person inherits the system: 2: Operator
 ```
 
 ---
 
-## 3. Journey 1 — First Install & Bootstrap
+## 3. Journey 1 — First Contact
 
-**Persona:** Operator-Developer, Power User  
-**Trigger:** User has `llama-server` binary and GGUF models already available; wants orchestration.  
-**Goal:** Go from zero to a running LlamaForge instance serving inference requests.
+It's Saturday afternoon. You've been running bare `llama-server` for a few months, and it's fine for one model and one user, but you've started running two models on two GPUs and managing them is getting annoying. You restart one and forget to restart the other. You have no idea which one is slower. Someone on Hacker News mentioned LlamaForge and the single-binary pitch caught your eye.
 
-### 3.1 Journey Flow
+You've downloaded the binary. You have two GGUF models sitting in `~/models/`. You have maybe twenty minutes before you lose interest.
+
+### 3.1 The First Sixty Seconds
+
+The hardest UX problem in this entire product is what happens between downloading the binary and seeing a response from a model. Every second of friction here is a potential exit point.
 
 ```mermaid
 flowchart TD
-    A["Download LlamaForge binary<br/><i>Single binary, no deps</i>"] --> B{"First run?"}
-    B -->|"Yes"| C["llamaforge init"]
-    B -->|"Config exists"| G
+    A["Run llamaforge for the first time"] --> B{"Config file exists?"}
 
-    C --> D["Interactive setup wizard<br/>• Detect GPUs / Metal<br/>• Scan for llama-server binary<br/>• Scan for .gguf model files"]
-    D --> E["Generate llamaforge.toml<br/>with detected hardware"]
-    E --> F["Generate priority_rules.toml<br/>with sensible defaults"]
-    F --> G["llamaforge start"]
+    B -->|"No"| C["llamaforge init<br/>Interactive setup wizard"]
+    B -->|"Yes"| H
 
-    G --> H{"Both ports bind?<br/>:50051 gRPC<br/>:8000 HTTP"}
-    H -->|"No"| I["Error: port conflict<br/>Show what's using the port<br/>Suggest alternative ports"]
-    I --> J["Edit config or<br/>--http-port / --grpc-port"]
-    J --> G
+    C --> D["Wizard detects hardware<br/>'Found: NVIDIA RTX 3090 (24 GB)<br/> Found: NVIDIA RTX 3060 (12 GB)'"]
+    D --> E["Wizard finds llama-server<br/>'Found: /usr/local/bin/llama-server v1.2.3'"]
+    E --> F["Wizard scans for models<br/>'Found 3 .gguf files in ~/models/'"]
+    F --> G["Wizard generates config<br/>'Wrote llamaforge.toml — edit anytime'"]
+    G --> H["llamaforge start"]
 
-    H -->|"Yes"| K["Health check passes"]
-    K --> L{"Servers configured?"}
-    L -->|"Yes"| M["Spawn llama-server instances"]
-    L -->|"No / dry-run"| N["Gateway running,<br/>no inference servers"]
+    H --> I{"Everything starts?"}
+    I -->|"Yes"| J["Ready banner appears<br/>with copy-pasteable curl command"]
+    I -->|"No"| K["Error message tells you<br/>what went wrong and<br/>what to do about it"]
 
-    M --> O{"Health checks pass?"}
-    O -->|"Yes"| P["✅ Ready<br/>Web UI: http://localhost:8000/ui<br/>API: http://localhost:8000/v1"]
-    O -->|"No"| Q["Log: server failed health check<br/>Show: binary path, model path,<br/>GPU detection results"]
+    J --> L["You paste the curl command.<br/>Tokens stream back.<br/>You smile."]
 
-    N --> R["Web UI available<br/>for config exploration"]
-
-    style P fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style I fill:#6e1a1a,stroke:#b92929,color:#fff
-    style Q fill:#6e4a1a,stroke:#b97329,color:#fff
+    K --> M["You fix the one thing<br/>and try again."]
+    M --> H
 ```
 
-### 3.2 Key UX Moments
+### 3.2 The Setup Wizard
 
-**Moment 1: `llamaforge init` — The Setup Wizard**
+The `llamaforge init` wizard has one job: get you to a working config file without reading documentation. It must:
 
-This is the most critical UX moment in the entire product. The user has just downloaded a binary and has no config file. The wizard must:
+1. **Detect hardware.** Enumerate GPUs (CUDA via `nvidia-smi`, Metal via `system_profiler`, CPU-only fallback). Show what was found with VRAM amounts in plain language, not device IDs.
+2. **Find llama-server.** Search `$PATH` and common locations. Validate by running `llama-server --version`. If not found, say where to get it — don't just say "not found."
+3. **Scan for models.** Look in common directories (`~/models/`, `~/.cache/huggingface/`, paths from environment variables). List found `.gguf` files with human-readable sizes and detected quantization.
+4. **Generate config.** Produce a `llamaforge.toml` with sensible defaults matched to detected hardware. For each model, estimate `n_ctx`, `n_gpu_layers`, and `n_parallel` based on VRAM. Include comments explaining each setting so the file teaches you as you read it.
 
-1. **Detect hardware** — enumerate GPUs (CUDA `nvidia-smi`, Metal via `system_profiler SPDisplaysDataType`, CPU-only fallback). Display what was found with VRAM amounts.
-2. **Find `llama-server`** — search `$PATH`, common locations (`/usr/local/bin`, `~/.local/bin`, Homebrew paths), and ask if not found. Validate the binary by running `llama-server --version`.
-3. **Scan for models** — look in common model directories (`~/.cache/huggingface`, `~/models`, paths from environment variables). List found `.gguf` files with sizes and detected quantization levels.
-4. **Generate config** — produce a `llamaforge.toml` with sensible defaults based on detected hardware. For each model found, estimate reasonable `n_ctx`, `n_gpu_layers`, and `n_parallel` based on VRAM. Include comments explaining each setting.
+For the Power User, the wizard IS the product experience. If it feels magical — "it found my GPUs, it found my models, it just works" — they'll trust the tool. If it asks them questions they can't answer ("What cache type do you want for the KV store?"), they'll close the terminal.
 
-The CLI version outputs structured, progressive text. The future desktop client version would present this as a multi-step form.
+### 3.3 The Ready Banner
 
-**Moment 2: First Successful Request**
-
-After `llamaforge start`, the system should print a ready banner with copy-pasteable commands:
+This is a moment of care. After a successful start, the system prints everything you need to verify it works:
 
 ```
 ══════════════════════════════════════════════════════════
@@ -215,107 +210,95 @@ After `llamaforge start`, the system should print a ready banner with copy-paste
 ══════════════════════════════════════════════════════════
 ```
 
-### 3.3 Error Recovery Paths
+The curl command is not documentation. It's an invitation. You paste it, tokens stream back, and the product has earned ten more minutes of your attention.
 
-| Error | Display | Recovery |
-|-------|---------|----------|
-| Port already in use | "Port 8000 is in use by process `ollama` (PID 12345)" | Suggest `--http-port 8001` or show how to change config |
-| `llama-server` not found | "Could not find llama-server binary. Searched: ..." | Link to llama.cpp build instructions; suggest `--llama-server-path` |
-| Model file not found | "Model path `/path/to/model.gguf` does not exist" | List found models; suggest correcting path |
-| Insufficient VRAM | "Model requires ~18GB VRAM but GPU 0 has 12GB available" | Suggest reducing `n_gpu_layers`, using a smaller quant, or offloading to CPU |
-| Permission denied | "Cannot bind to port 50051: Permission denied" | Suggest using ports > 1024, or running with appropriate permissions |
+### 3.4 When Things Go Wrong in the First Five Minutes
 
-### 3.4 CLI Surface
+Every error in the first five minutes must be self-contained: what happened, why, and what to do. The user has no context yet — they haven't read your docs, they don't know your config format, they don't know your port numbers.
+
+| Error | What the user sees | What the user does |
+|-------|-------------------|-------------------|
+| Port in use | "Port 8000 is in use by process `ollama` (PID 12345). Try: `llamaforge start --http-port 8001`" | Copy-paste the suggested command |
+| llama-server not found | "Could not find llama-server. Searched: /usr/local/bin, ~/.local/bin, /opt/homebrew/bin. Install: https://github.com/ggml-org/llama.cpp#build" | Follow the link |
+| Model file missing | "Model path `/home/you/models/qwen3.gguf` does not exist. Found these models instead: ..." | Pick from the list |
+| Not enough VRAM | "qwen3-30b needs ~18 GB but GPU 0 has 12 GB. Try: reduce `n_gpu_layers` to 20, or use the Q4_K_S quant (~10 GB)" | Edit one number in the config |
+| Permission denied | "Cannot bind port 50051: permission denied. Use a port above 1024, or run with appropriate permissions." | Change the port |
+
+### 3.5 CLI Surface
 
 ```
-llamaforge init              # Interactive first-time setup
-llamaforge init --non-interactive --detect  # Auto-detect and generate config
-llamaforge start             # Start gateway + spawn servers
-llamaforge start --dry-run   # Start gateway only, no inference servers
-llamaforge start --config /path/to/llamaforge.toml  # Explicit config
-llamaforge status            # Quick health summary
-llamaforge stop              # Graceful shutdown (drain + SIGTERM)
+llamaforge init                  # Interactive first-time setup
+llamaforge init --detect         # Auto-detect and generate config non-interactively
+llamaforge start                 # Start gateway + spawn servers
+llamaforge start --dry-run       # Start gateway only, no inference servers
+llamaforge start --config /path  # Explicit config path
+llamaforge status                # Quick health summary
+llamaforge stop                  # Graceful shutdown (drain + stop)
 ```
 
 ---
 
-## 4. Journey 2 — Model Onboarding & Server Setup
+## 4. Journey 2 — Adding a Model to a Running System
 
-**Persona:** Operator-Developer  
-**Trigger:** User has a new GGUF model file and wants to add it to their running LlamaForge instance.  
-**Goal:** Configure a new `llama-server` instance for the model without disrupting existing traffic.
+It's Tuesday afternoon. A new model dropped on HuggingFace this morning that everyone on the team is excited about. You've already downloaded the Q4 quant. Now you want to add it to your running LlamaForge instance without taking down the code review bot, which is mid-PR. Three developers are waiting on reviews right now. You have maybe fifteen minutes before someone Slacks you asking why reviews are slow.
 
-### 4.1 Journey Flow
+### 4.1 The Journey
 
 ```mermaid
 flowchart TD
-    A["New model available<br/>e.g. downloaded .gguf"] --> B{"Approach?"}
+    A["You have a new .gguf file<br/>and a running system you<br/>don't want to disrupt"] --> B{"How do you<br/>want to do this?"}
 
-    B -->|"Web UI"| C["Navigate to<br/>Server Management"]
-    B -->|"Config file"| D["Edit llamaforge.toml"]
-    B -->|"CLI"| E["llamaforge server add"]
+    B -->|"Web UI"| C["Server Management ><br/>click 'Add Server'"]
+    B -->|"Config file"| D["Add a section<br/>to llamaforge.toml"]
+    B -->|"CLI"| E["llamaforge server add ..."]
 
-    C --> F["Click 'Add Server'<br/>Fill form:<br/>• Model path<br/>• Context size<br/>• GPU assignment<br/>• Slot count"]
+    C --> F["Fill the form:<br/>model path, GPU, context size"]
+    D --> G["Write the TOML, then reload"]
+    E --> F
 
-    D --> G["Add [servers.new-server]<br/>section to TOML"]
+    F --> H["Before starting, you see<br/>a resource check"]
+    G --> H
 
-    E --> H["llamaforge server add \<br/>  --model /path/to.gguf \<br/>  --gpu 0 --ctx 8192 \<br/>  --slots 4"]
+    H --> I["GPU 1 (RTX 3090) — 24 GB<br/>Current: codellama (8.4 GB used)<br/>Requested: new model (~5.1 GB)<br/>Remaining: 10.5 GB<br/>Verdict: fits comfortably"]
 
-    F --> I["Server validates config<br/>• Model file exists?<br/>• GPU available?<br/>• VRAM sufficient?"]
-    G --> J["SIGHUP or<br/>llamaforge config reload"]
-    H --> I
+    I --> J{"Confident?"}
+    J -->|"Yes"| K["Start the server"]
+    J -->|"No, tight on VRAM"| L["Adjust settings —<br/>fewer slots, lower context,<br/>different GPU"]
+    L --> H
 
-    J --> I
+    K --> M["Watch it come online:<br/>Loading model... Health check...<br/>Running."]
 
-    I -->|"Invalid"| K["Show validation errors<br/>with fix suggestions"]
-    I -->|"Valid"| L["Reserve VRAM in ledger"]
-
-    L --> M["Spawn llama-server process<br/>with computed flags"]
-    M --> N{"Health check<br/>within timeout?"}
-
-    N -->|"Yes"| O["Server enters Running state<br/>Available for routing"]
-    N -->|"No"| P["Server enters Failed state<br/>Show: startup logs,<br/>last health check error"]
-
-    O --> Q["✅ Model available<br/>Appears in /v1/models<br/>Accepts requests"]
-
-    P --> R{"Retry?"}
-    R -->|"Auto"| S["Backoff restart<br/>(configurable attempts)"]
-    R -->|"Manual"| T["Operator investigates logs"]
-
-    style Q fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style K fill:#6e1a1a,stroke:#b92929,color:#fff
-    style P fill:#6e4a1a,stroke:#b97329,color:#fff
+    M --> N["The new model appears<br/>in /v1/models.<br/>Existing servers untouched.<br/>Reviews still flowing."]
 ```
 
-### 4.2 Key UX Moments
+### 4.2 The VRAM Check — The Moment of Confidence
 
-**Moment 1: VRAM Estimation & Guidance**
-
-When the user specifies a model + GPU assignment, the UI should proactively compute and display:
-- Estimated VRAM usage based on model size, quantization, context length, and slot count
-- Current VRAM usage on the target GPU from existing servers
-- Whether the allocation will fit, and if not, what to adjust
+Before any server starts, the user sees a resource check. This is the moment where they decide whether to proceed. The check must be honest and specific:
 
 ```
-GPU 0 (NVIDIA RTX 3090 — 24 GB)
-├── Current: qwen3-30b (Q4_K_M) — 17.2 GB reserved
-├── Remaining: 6.8 GB available
-└── Requested: codellama-7b (Q5_K_S) — estimated 5.1 GB
-    ✅ Fits with 1.7 GB headroom
+GPU 1 (NVIDIA RTX 3090 — 24 GB)
+├── Current: codellama-13b (Q5_K_S) — 8.4 GB
+├── Available: 15.6 GB
+├── Requested: deepseek-r1-14b (Q4_K_M) — estimated 9.2 GB
+│   (model: 7.8 GB + context 4096×4 slots: ~1.4 GB)
+└── After: 6.4 GB remaining
+    Verdict: Fits. Headroom is moderate — if you need more context later, consider GPU 0.
 ```
 
-**Moment 2: Live Server Lifecycle in the Web UI**
+If the model doesn't fit, the check says so and suggests specific fixes — not "insufficient VRAM" but "needs 18 GB, you have 12 GB, try reducing `n_gpu_layers` to 24 (offloads 8 layers to CPU, estimated 11.5 GB)."
 
-The Server Management page shows each server as a card with a real-time state machine indicator:
+### 4.3 What the Web UI Server Card Looks Like
+
+Each server in the management view is a card that shows you everything you need at a glance, with detail available on click:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ codellama-13b                          ● Running │
+│ deepseek-r1-14b                   ● Running     │
 │                                                   │
-│ Model:  /models/codellama-13b-Q5_K_S.gguf        │
-│ GPU:    GPU 0 (RTX 3090)   VRAM: 8.4 / 24 GB    │
-│ Slots:  3/4 active   Context: 8192 tokens        │
-│ Uptime: 2d 14h                                    │
+│ Model:  deepseek-r1-14b-Q4_K_M.gguf             │
+│ GPU:    GPU 1 (RTX 3090)   VRAM: 9.2 / 24 GB   │
+│ Slots:  2/4 active   Context: 4096 tokens        │
+│ Uptime: 14 min                                    │
 │                                                   │
 │ ┌─────────┐ ┌──────────┐ ┌───────┐ ┌──────────┐ │
 │ │  Stop   │ │ Restart  │ │ Drain │ │  Slots   │ │
@@ -323,167 +306,134 @@ The Server Management page shows each server as a card with a real-time state ma
 └─────────────────────────────────────────────────┘
 ```
 
-### 4.3 Server Configuration Parameters
-
-The Web UI "Add Server" form (and corresponding TOML section) exposes the full `llama-server` flag surface grouped by category:
-
-| Category | Parameters | Notes |
-|----------|-----------|-------|
-| **Model** | `model_path`, `model_alias` | Path to GGUF file; alias for API routing |
-| **Compute** | `n_gpu_layers`, `gpu_id`, `use_mmap`, `use_mlock` | GPU offloading and memory mapping |
-| **Context** | `n_ctx`, `n_batch`, `n_ubatch` | Context window and batch sizing |
-| **Parallelism** | `n_parallel` (slot count) | Concurrent request capacity |
-| **Cache** | `cache_type_k`, `cache_type_v`, `flash_attn` | KV cache quantization and flash attention |
-| **LoRA** | `lora_adapters[]` | Hot-loadable LoRA adapters |
-| **Network** | `port` (auto-assigned), `host` | Managed by LlamaForge |
+State is encoded with **color + shape + label** (see [Section 16: Accessibility](#16-accessibility--state-encoding)):
+- **● Running** (green circle + word "Running")
+- **◐ Draining** (half-filled circle + word "Draining")
+- **○ Stopped** (empty circle + word "Stopped")
+- **⟳ Restarting** (rotating arrow + word "Restarting")
+- **✕ Failed** (X mark + word "Failed")
 
 ---
 
-## 5. Journey 3 — Daily Operations & Monitoring
+## 5. Journey 3 — The Morning Check-In
 
-**Persona:** Operator-Developer, Power User  
-**Trigger:** User checks in on their running LlamaForge instance.  
-**Goal:** Quickly assess system health and identify any issues requiring attention.
+It's 9:15am. You sit down with coffee. LlamaForge has been running overnight — the batch summarization pipeline runs from 2am to 6am, and you want to know if anything went sideways. You don't want to investigate anything; you want to glance at a screen and know whether you need to investigate.
 
-### 5.1 Journey Flow
+This is the most common journey in LlamaForge. It happens every day, sometimes multiple times. The entire dashboard design should optimize for the case where everything is fine and you leave in under ten seconds.
+
+### 5.1 The Ten-Second Check
 
 ```mermaid
 flowchart TD
-    A["Open Web UI Dashboard<br/>localhost:8000/ui"] --> B["Dashboard Overview"]
+    A["Open the dashboard<br/>(or run llamaforge status)"] --> B["Health strip at the top:<br/>all green? one number each"]
 
-    B --> C["Health Strip<br/>• All servers green?<br/>• Queue depth normal?<br/>• Error rate acceptable?"]
+    B -->|"All green"| C["Glance at throughput chart —<br/>does the shape look normal?"]
+    B -->|"Something yellow or red"| D["Alert card tells you:<br/>what's wrong, why it matters,<br/>what to do"]
 
-    C -->|"All green"| D["Glance at key metrics<br/>• Throughput (req/s)<br/>• Avg TTFT<br/>• Active slots"]
-    C -->|"Warning/Error"| E["Alert card visible<br/>with actionable details"]
+    C -->|"Normal"| E["Close the tab.<br/>Go back to work.<br/>Total time: 8 seconds."]
+    C -->|"Unusual shape"| F["Click into the chart<br/>for detail"]
 
-    D --> F{"Deep dive?"}
-    F -->|"No"| G["Done — system healthy"]
-    F -->|"Yes"| H["Click into specific view"]
-
-    E --> I{"What type?"}
-    I -->|"Server unhealthy"| J["Server Management →<br/>see lifecycle state,<br/>recent health checks"]
-    I -->|"Queue backing up"| K["Queue Inspector →<br/>see depth, priorities,<br/>head-of-line blocking"]
-    I -->|"High error rate"| L["Request Explorer →<br/>filter failed requests,<br/>examine error payloads"]
-    I -->|"Stuck slot"| M["Slot Inspector →<br/>see decode progress,<br/>erase stuck slot"]
-
-    H --> N["Server Metrics<br/>per-server TPS,<br/>TTFT distributions"]
-    H --> O["Request Explorer<br/>query historical data"]
-    H --> P["Configuration Viewer<br/>current TOML state"]
-
-    style G fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style E fill:#6e4a1a,stroke:#b97329,color:#fff
+    D --> G["Follow the suggested action<br/>or click through to the<br/>relevant detail page"]
 ```
 
-### 5.2 Dashboard Layout
+### 5.2 Dashboard Layout — The Glance Layer
 
-The dashboard follows an information hierarchy: critical alerts first, then aggregate health, then detail views on demand.
+The dashboard is organized by the speed at which you need information. The top of the page answers "is everything OK?" The bottom answers "tell me more."
 
 ```
 ┌───────────────────────────────────────────────────────────────┐
-│  LlamaForge Dashboard                          ⟳ Auto-refresh │
+│  LlamaForge                                     ⟳ Auto-refresh │
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
-│  HEALTH STRIP                                                 │
+│  HEALTH STRIP (the ten-second answer)                        │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │
 │  │ ● Servers │ │ ● Queue  │ │ ● Errors │ │ ● Throughput     │ │
 │  │ 3/3 up   │ │ depth: 2 │ │ 0.1%     │ │ 14.2 req/min     │ │
 │  └──────────┘ └──────────┘ └──────────┘ └──────────────────┘ │
 │                                                               │
+│  ALERTS (only visible when something needs attention)         │
 │  ┌────────────────────────────────────────────────────────┐   │
-│  │ ALERTS (if any)                                        │   │
-│  │ ⚠ Server "codellama-7b" restarted 3 times in 10 min  │   │
-│  │ ⚠ Queue depth exceeded 80% for > 30s (degraded)      │   │
+│  │ ◐ Server "codellama-7b" has restarted 3 times in the  │   │
+│  │   last 10 minutes. The system is backing off restarts. │   │
+│  │   This model is still serving requests via the other   │   │
+│  │   instance (codellama-7b-2).                           │   │
+│  │                                                [View]  │   │
 │  └────────────────────────────────────────────────────────┘   │
 │                                                               │
 │  ┌──────────────────────┐  ┌──────────────────────────────┐  │
-│  │ THROUGHPUT (chart)    │  │ TTFT DISTRIBUTION (chart)    │  │
-│  │                       │  │                              │  │
-│  │  ╭─╮   ╭───╮         │  │  P50: 180ms                  │  │
-│  │ ╭╯ ╰───╯   ╰──╮      │  │  P95: 420ms                  │  │
-│  │╭╯              ╰──    │  │  P99: 890ms                  │  │
-│  │ ─────────────────     │  │                              │  │
-│  │ 1h  30m  15m  5m now  │  │  [histogram visualization]   │  │
+│  │ THROUGHPUT (1h chart) │  │ TTFT DISTRIBUTION            │  │
+│  │  The overnight batch  │  │  P50: 180ms                  │  │
+│  │  shows as a plateau   │  │  P95: 420ms                  │  │
+│  │  from 2am–6am.        │  │  P99: 890ms                  │  │
 │  └──────────────────────┘  └──────────────────────────────┘  │
 │                                                               │
-│  SERVER CARDS                                                 │
+│  SERVER CARDS (one per running server)                        │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐ │
 │  │ qwen3-30b       │ │ codellama-13b   │ │ mistral-7b      │ │
-│  │ ● Running       │ │ ● Running       │ │ ● Draining      │ │
+│  │ ● Running       │ │ ● Running       │ │ ◐ Draining      │ │
 │  │ Slots: 6/8      │ │ Slots: 3/4      │ │ Slots: 1/4      │ │
-│  │ TPS: 22.4       │ │ TPS: 38.1       │ │ TPS: 0 (drain)  │ │
-│  │ TTFT: 210ms     │ │ TTFT: 140ms     │ │                  │ │
+│  │ TPS: 22.4       │ │ TPS: 38.1       │ │ TPS: —          │ │
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘ │
 └───────────────────────────────────────────────────────────────┘
 ```
 
-### 5.3 CLI Equivalent
+### 5.3 Alerts Are Sentences, Not Codes
+
+Every alert in the dashboard must be a complete thought: what happened, what the impact is, and what (if anything) the user should do. Compare:
+
+**Bad:** "Server health check failed (3x)"  
+**Good:** "codellama-7b has failed 3 consecutive health checks. Requests to this model are still being served by the other instance (codellama-7b-2). If this persists, the server will be marked as Failed and removed from routing. [View server details]"
+
+The alert tells you the state, the impact, the prognosis, and gives you a way to dig deeper if you choose. Most mornings, you'll read the alert and close the tab — and that's fine.
+
+### 5.4 CLI Equivalent
 
 ```
 $ llamaforge status
-LlamaForge v0.1.0 — up 3d 7h
+LlamaForge v0.1.0 — running for 3d 7h
 
-Servers (3):
-  qwen3-30b     ● Running   GPU 0   Slots: 6/8   TTFT: 210ms   TPS: 22.4
-  codellama-13b  ● Running   GPU 1   Slots: 3/4   TTFT: 140ms   TPS: 38.1
-  mistral-7b    ● Draining  GPU 2   Slots: 1/4   TPS: —
+Servers:
+  qwen3-30b      ● Running   GPU 0   Slots: 6/8   TTFT: 210ms   TPS: 22.4
+  codellama-13b   ● Running   GPU 1   Slots: 3/4   TTFT: 140ms   TPS: 38.1
+  mistral-7b     ◐ Draining  GPU 2   Slots: 1/4   TPS: —
 
-Queue: depth 2 / max 100   |   Throughput: 14.2 req/min   |   Error rate: 0.1%
+Queue: depth 2 / max 100   Throughput: 14.2 req/min   Errors: 0.1%
 
 Alerts:
-  ⚠  codellama-7b restarted 3× in 10 min (backoff active)
+  ◐  codellama-7b restarted 3× in 10 min — backing off, other instance handling traffic
 ```
 
 ---
 
-## 6. Journey 4 — API Integration & Client Development
+## 6. Journey 4 — Plugging In from an Application
 
-**Persona:** API Consumer  
-**Trigger:** Developer wants to connect their application to LlamaForge.  
-**Goal:** Send inference requests using familiar SDKs with minimal configuration.
+You're building a code review bot. You've been using the OpenAI API, and it works, but it costs $400/month and you're sending proprietary code to a third party. Your teammate just set up LlamaForge on the office server. You want to switch your bot to use the local endpoint.
 
-### 6.1 Journey Flow
+You're not the operator. You don't care about GPU utilization or slot counts. You care about: does the API work the same way? How long will my requests take? What happens when the system is busy?
+
+### 6.1 The Drop-In Switch
 
 ```mermaid
 flowchart TD
-    A["Developer has an app<br/>that needs LLM inference"] --> B{"Which SDK?"}
+    A["You have an app that<br/>calls the OpenAI API"] --> B["Change one line:<br/>base_url = localhost:8000/v1"]
 
-    B -->|"OpenAI Python"| C["from openai import OpenAI<br/>client = OpenAI(<br/>  base_url='http://localhost:8000/v1',<br/>  api_key='not-needed'<br/>)"]
-    B -->|"Anthropic Python"| D["from anthropic import Anthropic<br/>client = Anthropic(<br/>  base_url='http://localhost:8000',<br/>  api_key='not-needed'<br/>)"]
-    B -->|"gRPC"| E["Use generated proto stubs<br/>Connect to localhost:50051"]
-    B -->|"curl / HTTP"| F["POST /v1/chat/completions<br/>with JSON body"]
+    B --> C["Run your app"]
+    C --> D{"Does it work?"}
 
-    C --> G["client.chat.completions.create(<br/>  model='qwen3-30b',<br/>  messages=[...],<br/>  stream=True<br/>)"]
-    D --> G2["client.messages.create(<br/>  model='qwen3-30b',<br/>  messages=[...],<br/>  stream=True<br/>)"]
-    E --> G3["InferenceService.StreamInference(<br/>  InferenceRequest{...}<br/>)"]
-    F --> G4["curl -X POST ... -d '{...}'"]
+    D -->|"Yes — tokens stream back"| E["Done. That was it.<br/>Total effort: one line changed."]
+    D -->|"No — model not found"| F["GET /v1/models<br/>to see what's available"]
 
-    G --> H{"Need priority<br/>or metadata?"}
-    G2 --> H
-    G3 --> H2["Native protobuf fields:<br/>task_type, priority,<br/>requestor, queue_timeout"]
-    G4 --> H
+    F --> G["Pick a model name<br/>that matches what's loaded"]
+    G --> C
 
-    H -->|"Yes"| I["Add headers:<br/>X-Task-Type: code_review<br/>X-Priority: 600<br/>X-Requestor: ci-pipeline"]
-    H -->|"No"| J["Defaults apply:<br/>task_type=general<br/>priority=auto-computed"]
-
-    I --> K["Request enters queue"]
-    J --> K
-
-    K --> L["Routed to optimal server<br/>based on model match,<br/>slot availability, cache affinity"]
-
-    L --> M["Tokens stream back<br/>via SSE or gRPC stream"]
-
-    M --> N{"Monitor queue<br/>position?"}
-    N -->|"Yes"| O["GET /api/queue/{request_id}<br/>or WatchQueue gRPC stream"]
-    N -->|"No"| P["✅ Response complete"]
-
-    style P fill:#2d5a27,stroke:#4a8c3f,color:#fff
+    E --> H{"Want priority<br/>for your requests?"}
+    H -->|"No"| I["Keep using it.<br/>Defaults are fine."]
+    H -->|"Yes"| J["Add headers:<br/>X-Task-Type, X-Priority"]
 ```
 
-### 6.2 SDK Integration Patterns
+### 6.2 Code Samples
 
-**Pattern 1: Drop-in OpenAI Replacement**
-
-The simplest integration — change `base_url` and it works:
+**The simplest integration — one line changes:**
 
 ```python
 # Before (OpenAI cloud)
@@ -495,754 +445,935 @@ client = OpenAI(
     api_key="unused"  # LlamaForge v1 doesn't enforce auth
 )
 
-# Same API, same streaming, same response format
+# Everything else stays the same
 for chunk in client.chat.completions.create(
     model="qwen3-30b",
-    messages=[{"role": "user", "content": "Explain KV caching"}],
+    messages=[{"role": "user", "content": "Review this PR..."}],
     stream=True,
 ):
     print(chunk.choices[0].delta.content, end="")
 ```
 
-**Pattern 2: Priority-Aware Requests**
-
-For workloads where some requests matter more than others:
+**When you want your requests to be prioritized:**
 
 ```python
 response = client.chat.completions.create(
     model="qwen3-30b",
     messages=messages,
     extra_headers={
-        "X-Task-Type": "code_review",
-        "X-Requestor": "ci-pipeline",
-        "X-Priority": "800",
-        "X-Queue-Timeout": "30",
+        "X-Task-Type": "code_review",    # Tells LlamaForge what kind of work this is
+        "X-Requestor": "ci-pipeline",     # Identifies your application for quota tracking
+        "X-Priority": "800",              # Higher number = served first
+        "X-Queue-Timeout": "30",          # Give up after 30 seconds if not served
     },
 )
 ```
 
-**Pattern 3: gRPC Native Client**
-
-For maximum control and type safety:
+**Anthropic SDK works the same way:**
 
 ```python
-import grpc
-from llamaforge.proto import inference_pb2, inference_pb2_grpc
-
-channel = grpc.insecure_channel("localhost:50051")
-stub = inference_pb2_grpc.InferenceServiceStub(channel)
-
-request = inference_pb2.InferenceRequest(
-    model="qwen3-30b",
-    payload=json.dumps({"messages": messages}),
+client = Anthropic(
+    base_url="http://localhost:8000",
+    api_key="unused"
 )
 
-for response in stub.StreamInference(request):
-    print(response.payload, end="")
+response = client.messages.create(
+    model="qwen3-30b",
+    messages=[{"role": "user", "content": "Hello!"}],
+    stream=True,
+)
 ```
 
-### 6.3 Queue Position Feedback
+### 6.3 When the System Is Busy
 
-When the system is busy, API consumers need visibility into their queue position. LlamaForge provides this through multiple channels:
+The API Consumer's worst experience is sending a request and waiting in silence. LlamaForge provides queue position feedback so your application can tell the user what's happening:
 
 ```
-Queue Position Feedback Channels
-────────────────────────────────
-HTTP SSE:  GET /api/queue/{request_id}/watch
-           → data: {"position": 3, "estimated_wait_ms": 4500}
-           → data: {"position": 1, "estimated_wait_ms": 1200}
-           → data: {"status": "dispatched", "server": "qwen3-30b"}
+Queue Position Feedback
+───────────────────────
+HTTP:  GET /api/queue/{request_id}/watch (SSE)
+       → data: {"position": 3, "estimated_wait_ms": 4500}
+       → data: {"position": 1, "estimated_wait_ms": 1200}
+       → data: {"status": "dispatched"}
 
-gRPC:      QueueService.WatchQueue(request_id)
-           → stream QueuePositionUpdate
-
-Response:  X-Queue-Wait-Ms: 3200   (header on completed response)
-           X-Server-Id: qwen3-30b  (which server handled it)
+On response headers:
+       X-Queue-Wait-Ms: 3200       (how long you waited)
+       X-Server-Id: qwen3-30b      (which server handled it)
 ```
+
+If your application displays a queue position ("You're #3 in line, ~4.5 seconds"), the user experience degrades gracefully instead of appearing broken.
 
 ---
 
-## 7. Journey 5 — Configuration Tuning & Hot-Reload
+## 7. Journey 5 — Changing Configuration Without Breaking Things
 
-**Persona:** Operator-Developer  
-**Trigger:** Operator wants to adjust system behavior without downtime — change context sizes, slot counts, priority rules, or GPU assignments.  
-**Goal:** Apply configuration changes with zero dropped requests and predictable rollout.
+It's 2pm and the team's code-review bot is running slower than it should. You've been watching TTFT creep up all morning. You suspect the context window on the qwen3-30b server is too small — prompts are getting truncated and the model is spending cycles on partial context. You want to bump `n_ctx` from 4096 to 8192.
 
-### 7.1 Journey Flow
+But the code-review bot is mid-sprint. Three developers are waiting on reviews right now. You can't afford to drop those in-flight requests, and you definitely can't afford to break the config and take the whole system down because you fat-fingered a TOML value. You've done that before with another tool and you still remember the Slack messages.
+
+What you need: a way to make the change, see what's going to happen before it happens, confirm you're comfortable, watch it roll out, and have a way back if you were wrong.
+
+### 7.1 The Journey: Propose, Preview, Confirm, Observe, Recover
 
 ```mermaid
 flowchart TD
-    A["Want to change config"] --> B{"What kind<br/>of change?"}
+    A["You want to change<br/>a config value"] --> B["PROPOSE<br/>Edit the TOML file or<br/>use the Web UI config editor"]
 
-    B -->|"Tuning params<br/>(ctx, slots, batch)"| C["Edit llamaforge.toml"]
-    B -->|"Priority rules"| D["Edit priority_rules.toml"]
-    B -->|"LoRA adapters"| E["Web UI or API<br/>POST /api/servers/{id}/lora-adapters"]
-    B -->|"Quick experiment"| F["CLI override flags"]
+    B --> C["PREVIEW<br/>'Show me what will change<br/>before you change it'"]
 
-    C --> G["Trigger reload"]
-    D --> G
+    C --> D["You see:<br/>• What values change<br/>• Which servers will restart<br/>• Whether in-flight requests<br/>  will be affected<br/>• VRAM impact of the change"]
 
-    G --> G1{"How?"}
-    G1 -->|"Signal"| G2["kill -HUP $(pidof llamaforge)<br/>or llamaforge config reload"]
-    G1 -->|"Web UI"| G3["Click 'Reload Config' button"]
-    G1 -->|"API"| G4["POST /api/config/reload"]
+    D --> E{"Comfortable?"}
+    E -->|"No — too risky<br/>right now"| F["Close the preview.<br/>Nothing happened.<br/>Come back later."]
+    E -->|"Yes"| G["CONFIRM<br/>Click 'Apply' or run<br/>llamaforge config reload"]
 
-    G2 --> H["Config Manager acquires reload mutex"]
-    G3 --> H
-    G4 --> H
+    G --> H["OBSERVE<br/>Watch the rollout:<br/>server draining...<br/>restarting...<br/>health check passing..."]
 
-    H --> I["Read TOML from disk<br/>(spawn_blocking to avoid<br/>reactor starvation)"]
-    I --> J["Diff against current config"]
+    H --> I{"Did it work?"}
+    I -->|"Yes — TTFT dropped,<br/>servers healthy"| J["Done. Close the dashboard.<br/>The team doesn't even know<br/>anything changed."]
+    I -->|"No — something<br/>went wrong"| K["RECOVER<br/>Click 'Revert to previous'<br/>or: llamaforge config revert"]
 
-    J --> K{"Changes detected?"}
-    K -->|"No"| L["Log: no changes, skip"]
-    K -->|"Yes"| M["Validate new config"]
-
-    M -->|"Invalid"| N["Log validation errors<br/>Keep running config<br/>Web UI shows warning banner"]
-    M -->|"Valid"| O["Atomic ArcSwap publish"]
-
-    O --> P["For changed servers:<br/>drain → stop → restart"]
-    O --> Q["For new servers:<br/>validate → start"]
-    O --> R["For removed servers:<br/>drain → stop"]
-
-    P --> S["✅ New config active<br/>In-flight requests complete<br/>on old config snapshot"]
-
-    E --> T["API applies runtime change<br/>to llama-server"]
-    T --> U["Writeback to TOML<br/>(atomic rename or truncate)"]
-    U --> S
-
-    style S fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style N fill:#6e1a1a,stroke:#b92929,color:#fff
+    K --> L["System restores the<br/>last known-good config.<br/>Servers restart with<br/>the old values."]
 ```
 
-### 7.2 Hot-Reload Contract
+### 7.2 The Preview — The Moment of Confidence
 
-The hot-reload system guarantees:
-
-1. **Atomic config snapshots** — Request-processing code calls `ArcSwap::load()` once per request. The returned `Arc<AppConfig>` is a consistent snapshot. No request ever sees a mix of old and new config values.
-2. **Serialized reloads** — A `tokio::sync::Mutex<()>` ensures only one reload processes at a time. Rapid SIGHUPs queue, they don't interleave.
-3. **Graceful server transitions** — Changed servers drain active requests before restarting. New config parameters take effect only after the restart completes.
-4. **No silent config loss** — If the TOML file is read-only (Kubernetes ConfigMap), writeback fails gracefully with a logged warning and a Web UI banner showing divergence.
-
-### 7.3 Configuration Diff in the Web UI
-
-After a reload, the Web UI Configuration Viewer shows what changed:
+The preview is the centerpiece of this journey. It's where the user decides whether to proceed. It must answer every question they have before they commit:
 
 ```
-Config Reload — 2026-05-14 10:32:15
-────────────────────────────────────
-Changes applied:
+Config Change Preview
+─────────────────────────────────────────────────
+Changes:
   servers.qwen3-30b.n_ctx:      4096 → 8192
   servers.qwen3-30b.n_parallel: 4 → 8
-  servers.codellama-13b:        (removed)
-  servers.deepseek-r1-14b:      (added)
 
-Server actions:
-  qwen3-30b:       drain → restart (config changed)
-  codellama-13b:   drain → stop (removed)
-  deepseek-r1-14b: starting (new)
+Impact:
+  qwen3-30b (server-1):
+    Will restart (config changed)
+    3 active requests will complete before restart
+    Estimated restart time: ~8 seconds (model reload)
+    VRAM: 17.2 GB → 19.8 GB (fits within 24 GB)
+
+  codellama-13b (server-2):
+    Not affected
+
+  Queue:
+    During restart, qwen3-30b requests will queue
+    (codellama-13b continues serving its model)
+
+                        [Cancel]  [Apply Changes]
 ```
+
+If the change would cause problems — not enough VRAM, a syntax error, an invalid value — the preview catches it and explains the issue before anything changes. The user never has to wonder "what if I break it" because the preview answers that question.
+
+### 7.3 What You Can Count On
+
+When you apply a config change, LlamaForge guarantees:
+
+- **No dropped requests.** In-flight requests finish before their server restarts. New requests queue until the server is back.
+- **No half-applied state.** The config change is all-or-nothing. Either every server gets the new values, or none do. You won't end up with server-1 on the new config and server-2 on the old one.
+- **The file on disk is always valid.** Config writes use atomic file replacement. Even if the process crashes mid-write, the config file is never corrupted.
+- **You can always go back.** LlamaForge keeps the previous config. One click or one command to restore it.
+
+### 7.4 The Revert — The Safety Net
+
+Even if you never use it, knowing the revert exists changes how confidently you make changes. The revert is:
+
+- **Web UI:** A "Revert to previous configuration" button on the config page, visible after any change.
+- **CLI:** `llamaforge config revert` — restores the previous config and triggers a reload.
+- **Automatic on failure:** If a config reload causes all servers to fail health checks, LlamaForge offers to auto-revert (with a prompt — it won't silently undo your change).
 
 ---
 
-## 8. Journey 6 — Priority & Scheduling Management
+## 8. Journey 6 — "Why Is My Code Review Slow?"
 
-**Persona:** Operator-Developer  
-**Trigger:** Different workloads compete for inference capacity — interactive coding gets slow because batch summarization jobs are consuming all slots.  
-**Goal:** Configure priority rules so critical workloads get served first without starving background tasks.
+It's Thursday afternoon. You're an operator, and someone on the team just Slacked you: "The code review bot is taking forever. It used to respond in 5 seconds, now it's 30+." You don't know why yet. Maybe the system is overloaded. Maybe a batch job is hogging the queue. Maybe a server is degraded. You need to figure this out in the next five minutes before more people start asking.
 
-### 8.1 Journey Flow
+This journey starts in confusion and ends in clarity. The priority system is a tool you discover along the way, not a feature list you're shopping for.
+
+### 8.1 The Investigation
 
 ```mermaid
 flowchart TD
-    A["Interactive requests<br/>feel slow"] --> B["Check Queue Inspector"]
+    A["Someone says:<br/>'Why is everything slow?'"] --> B["Open the dashboard"]
 
-    B --> C["See: 40 batch_summarize<br/>requests ahead of<br/>2 code_review requests"]
+    B --> C["Health strip shows:<br/>servers all green,<br/>but queue depth is 28/100"]
 
-    C --> D["Understand the<br/>priority system"]
+    C --> D["That's unusual.<br/>Click into Queue Inspector"]
 
-    D --> E["Edit priority_rules.toml"]
+    D --> E["You see: 25 batch_summarize<br/>requests ahead of<br/>3 code_review requests"]
 
-    E --> F["Define task types<br/>with base priorities:<br/>• emergency: 1000<br/>• code_review: 600<br/>• code_gen: 500<br/>• batch_summarize: 250<br/>• backfill: 100"]
+    E --> F["Now you understand.<br/>The batch pipeline is flooding<br/>the queue and code reviews<br/>are stuck behind it."]
 
-    F --> G["Set per-requestor limits<br/>• ci-pipeline: max 5 concurrent<br/>• batch-worker: max 3 concurrent"]
+    F --> G{"What do you do?"}
 
-    G --> H["Configure starvation prevention<br/>• boost_interval: 5s<br/>• boost_scale: 50<br/>• max_boost: 300"]
+    G -->|"Quick fix now"| H["Boost the stuck code_review<br/>requests to jump the queue"]
+    G -->|"Permanent fix"| I["Set up priority rules<br/>so code_review always<br/>goes before batch work"]
+    G -->|"Both"| J["Boost now,<br/>then set rules for next time"]
 
-    H --> I["Reload config"]
-    I --> J["Queue reorders:<br/>code_review jumps ahead<br/>of batch_summarize"]
+    H --> K["Requests jump ahead.<br/>Reviews flow again.<br/>Reply to Slack: 'Fixed, should<br/>be fast now.'"]
 
-    J --> K["Monitor: batch jobs<br/>still complete via<br/>starvation boost"]
+    I --> L["Edit priority_rules.toml:<br/>code_review gets priority 600<br/>batch_summarize gets 250"]
+    L --> M["Reload config.<br/>Queue reorders instantly."]
+    M --> N["But will batch jobs<br/>ever complete?"]
+    N --> O["Yes — starvation prevention<br/>gradually boosts their priority.<br/>They complete, just not instantly."]
 
-    K --> L["✅ Interactive latency<br/>improved, batch jobs<br/>complete within SLA"]
-
-    style L fill:#2d5a27,stroke:#4a8c3f,color:#fff
+    J --> K
+    J --> L
 ```
 
-### 8.2 Priority System Visualization (Web UI)
+### 8.2 The Queue Inspector — What You See
 
-The Queue Inspector should visualize priority ordering:
+The Queue Inspector is the tool that turns "the system is slow" into "I know exactly why and what to do about it."
 
 ```
-Queue Inspector                                      Depth: 8 / 100
+Queue Inspector                                      Depth: 28 / 100
 ─────────────────────────────────────────────────────────────────────
-Pos │ Request ID  │ Task Type      │ Base │ Boost │ Effective │ Wait
-────┼─────────────┼────────────────┼──────┼───────┼───────────┼──────
-  1 │ req-a3f2... │ emergency      │ 1000 │     0 │      1000 │   0s
-  2 │ req-b1c4... │ code_review    │  600 │    12 │       612 │   6s
-  3 │ req-d7e8... │ code_gen       │  500 │    45 │       545 │  22s
-  4 │ req-f9a0... │ code_gen       │  500 │    38 │       538 │  18s
-  5 │ req-c2d3... │ batch_summary  │  250 │   142 │       392 │  85s
-  6 │ req-e4f5... │ batch_summary  │  250 │   128 │       378 │  72s
-  7 │ req-g6h7... │ backfill       │  100 │   189 │       289 │ 120s
-  8 │ req-i8j9... │ backfill       │  100 │   176 │       276 │ 110s
+Pos  Request ID     Task Type       Priority  Wait    Status
 ─────────────────────────────────────────────────────────────────────
-                                          [Cancel] [Boost] [Details]
+  1  req-a3f2...    code_review        612      6s    Next up
+  2  req-b1c4...    code_review        600      3s    Waiting
+  3  req-d7e8...    code_review        600      2s    Waiting
+  4  req-c2d3...    batch_summarize    392     85s    Waiting
+  5  req-e4f5...    batch_summarize    378     72s    Waiting
+  6  req-g6h7...    batch_summarize    355     60s    Waiting
+ ...
+ 28  req-z9y8...    batch_summarize    258      4s    Waiting
+─────────────────────────────────────────────────────────────────────
+                                                 [Cancel] [Boost]
 
-Starvation boost formula: boost = min(50 × ln(1 + intervals), 300)
-  where intervals = wait_time / 5s
+Explanation shown on hover:
+  "code_review has base priority 600. batch_summarize has base
+   priority 250, but some have been boosted to ~390 because they've
+   been waiting over a minute. The queue is serving code reviews
+   first because their priority is higher."
 ```
 
-### 8.3 Admission Control View
+The priority numbers are visible but the system also explains them in words. A user who doesn't know the priority formula can still understand the queue ordering from the explanation.
 
-The Web UI also surfaces admission control state:
+### 8.3 Admission Control — Who's Using How Much
+
+For recurring problems, the admission control view shows per-requestor usage:
 
 ```
-Admission Control
+Requestor Limits
 ─────────────────────────────────────────────────
-Requestor         │ Active │ Limit │ Queued │ Status
-──────────────────┼────────┼───────┼────────┼──────
-ci-pipeline       │    4   │   5   │    2   │ ✅
-batch-worker      │    3   │   3   │    6   │ ⚠ At limit
-ide-plugin        │    1   │  10   │    0   │ ✅
-anonymous         │    2   │  20   │    0   │ ✅
-──────────────────┼────────┼───────┼────────┼──────
-Total             │   10   │       │    8   │
+Requestor         Active  Limit  Queued  Status
+──────────────────────────────────────────────────
+ci-pipeline          4      5       2    OK
+batch-worker         3      3       6    At limit — queuing
+ide-plugin           1     10       0    OK
+anonymous            2     20       0    OK
 ```
+
+If `batch-worker` is at its limit, it can't flood the queue further. This is the permanent fix that prevents the Thursday afternoon Slack message from happening again.
 
 ---
 
-## 9. Journey 7 — Troubleshooting & Debugging
+## 9. Journey 7 — Something Is Wrong
 
-**Persona:** Operator-Developer  
-**Trigger:** Something is wrong — requests are slow, failing, or servers are misbehaving.  
-**Goal:** Quickly identify the root cause and resolve the issue.
+It's 11pm. Your monitoring fires an alert: error rate on LlamaForge jumped from 0.1% to 12% in the last five minutes. You open the dashboard on your phone. You're tired and you want to figure out whether this needs immediate action or can wait until morning.
 
-### 9.1 Diagnostic Decision Tree
+This is the journey that tests whether the product respects the operator's time under stress. Every screen in this flow should answer one question and point to the next question, forming a breadcrumb trail from symptom to cause.
+
+### 9.1 The Diagnostic Path
 
 ```mermaid
 flowchart TD
-    A["Something is wrong"] --> B{"What symptom?"}
+    A["Alert: error rate spiked"] --> B["Dashboard health strip:<br/>Servers 2/3 up<br/>Errors: 12%<br/>Queue: 45/100"]
 
-    B -->|"Requests slow"| C["High TTFT?<br/>or low TPS?"]
-    B -->|"Requests failing"| D["Check error type"]
-    B -->|"Server not responding"| E["Check server state"]
-    B -->|"Queue building up"| F["Check admission<br/>and dispatch"]
+    B --> C["One server card is red:<br/>'qwen3-30b (server-1)<br/>✕ Failed — restarting'"]
 
-    C -->|"High TTFT<br/>(> 1s)"| C1["Large prompt?<br/>Many GPU layers?<br/>Flash attention off?"]
-    C -->|"Low TPS<br/>(< expected)"| C2["Context too large?<br/>Too many parallel slots?<br/>Thermal throttling?"]
+    C --> D["Click the server card"]
 
-    C1 --> C3["Request Explorer:<br/>filter by TTFT > 1000ms<br/>examine prompt sizes"]
-    C2 --> C4["Server metrics:<br/>check GPU utilization,<br/>per-server TPS trends"]
+    D --> E["Server detail page shows:<br/>'Health check failed 5× in a row.<br/> Last error: connection refused.<br/> Process exited with signal 9 (OOM killed).<br/> Restart attempt 3 of 5 — next in 30s.'"]
 
-    D -->|"Queue timeout"| D1["Queue Inspector:<br/>• Are high-priority jobs blocking?<br/>• Is admission rejecting?<br/>• Is queue at capacity?"]
-    D -->|"Server error"| D2["Request Explorer:<br/>• Which server failed?<br/>• Error payload?<br/>• Is it recurring on one server?"]
-    D -->|"Connection refused"| D3["Server Manager:<br/>• Is process running?<br/>• Did it crash?<br/>• Check PID and port"]
+    E --> F["Now you know:<br/>The server was OOM-killed.<br/>Probably context too large<br/>for available VRAM."]
 
-    E -->|"State: Failed"| E1["View server logs<br/>• OOM kill?<br/>• CUDA error?<br/>• Model load failure?"]
-    E -->|"State: Restarting"| E2["Check restart count<br/>and backoff status"]
-    E -->|"State: Running<br/>but unresponsive"| E3["Deadlock detection:<br/>• Active work signal?<br/>• Decode stall?<br/>• GPU utilization?"]
-
-    E3 --> E4{"Stuck slot<br/>detected?"}
-    E4 -->|"Yes"| E5["Erase stuck slot<br/>POST /api/servers/{id}/slots/{slot}/erase"]
-    E4 -->|"Deadlock confirmed"| E6["Server Manager:<br/>auto-SIGKILL + restart<br/>(4-signal classifier)"]
-
-    F --> F1["Check head-of-line blocking:<br/>• Model mismatch at queue head?<br/>• All servers for that model busy?"]
-    F1 --> F2["Check routing scores:<br/>• Server selection weights<br/>• Cache affinity hits/misses"]
-
-    style E5 fill:#6e4a1a,stroke:#b97329,color:#fff
-    style E6 fill:#6e1a1a,stroke:#b92929,color:#fff
+    F --> G{"Needs action tonight?"}
+    G -->|"No — other servers<br/>are handling traffic"| H["Check queue depth is stable.<br/>It is. Go back to bed.<br/>Fix the VRAM issue tomorrow."]
+    G -->|"Yes — this model has<br/>no backup instance"| I["Quick fix: reduce n_ctx<br/>or n_parallel, reload config,<br/>server restarts with less VRAM"]
 ```
 
-### 9.2 Troubleshooting Surfaces
+### 9.2 The Request Explorer — Post-Incident Investigation
 
-**Request Explorer — The Primary Debugging Tool**
-
-The Request Explorer queries the SQLite audit log. It is the operator's main tool for answering "what happened?"
+The next morning, you want to understand the full impact. The Request Explorer queries the SQLite audit log:
 
 ```
-Request Explorer                                    [Filter ▾] [Export CSV]
+Request Explorer                                    [Filter] [Export CSV]
 ─────────────────────────────────────────────────────────────────────────────
-Filter: status=failed  model=qwen3-30b  last 1h
+Filter: status=failed  model=qwen3-30b  last 12h
 ─────────────────────────────────────────────────────────────────────────────
-Time       │ Request ID    │ Model     │ Status │ TTFT  │ TPS  │ Error
-───────────┼───────────────┼───────────┼────────┼───────┼──────┼───────────
-10:32:14   │ req-a3f2...   │ qwen3-30b │ Failed │ —     │ —    │ ServerError
-10:31:58   │ req-b1c4...   │ qwen3-30b │ Failed │ 180ms │ 2.1  │ StreamReset
-10:31:42   │ req-d7e8...   │ qwen3-30b │ Failed │ —     │ —    │ QueueTimeout
-─────────────────────────────────────────────────────────────────────────────
-
-[Click row to expand details:]
-┌─────────────────────────────────────────────────────────────────────┐
-│ Request req-a3f2...                                                 │
-│                                                                     │
-│ Timeline:                                                           │
-│   10:32:14.001  Admitted (priority: 500, task: code_gen)            │
-│   10:32:14.003  Queued at position 0                                │
-│   10:32:14.005  Routed to qwen3-30b (server-1, slot 3)             │
-│   10:32:14.012  Dispatched to llama-server :8081                    │
-│   10:32:14.450  Error: upstream connection reset                    │
-│                                                                     │
-│ Prompt: 2,340 tokens (truncated)                                    │
-│ Server: qwen3-30b (server-1)  State at time: Running               │
-│ Slot: 3  Cache hit: no                                              │
-│ Queue wait: 2ms  Total time: 449ms                                  │
-│                                                                     │
-│ Error details:                                                      │
-│   reqwest::Error { kind: Request, source: hyper::Error(             │
-│     IncompleteMessage) }                                            │
-│   → Upstream llama-server closed connection mid-response.           │
-│   → Likely cause: OOM during generation or process crash.           │
-│   → Check: llamaforge logs for server-1 health status at 10:32:14  │
-└─────────────────────────────────────────────────────────────────────┘
+Time       Request ID     Model      Status   TTFT   Error
+───────────────────────────────────────────────────────────────────────────
+23:14:02   req-a3f2...    qwen3-30b  Failed   —      ServerDown
+23:13:58   req-b1c4...    qwen3-30b  Failed   180ms  StreamReset
+23:13:42   req-d7e8...    qwen3-30b  Failed   —      QueueTimeout
+23:13:30   req-f9a0...    qwen3-30b  Failed   —      ServerDown
+───────────────────────────────────────────────────────────────────────────
+47 failed requests between 23:08 and 23:22 (14 min outage window)
+All requests to codellama-13b succeeded during this period.
 ```
 
-**Structured Log Explorer**
+Click a row to see the full timeline of that request — when it was admitted, when it was queued, when it was dispatched, and what went wrong. This is how you build a post-incident narrative, not by reading log files.
 
-For operators who prefer logs over UI, LlamaForge's structured JSON logging enables powerful filtering:
+### 9.3 Common Scenarios and What the UI Shows
 
-```bash
-# Find all requests that waited > 5s in queue
-llamaforge logs --filter 'queue_wait_ms > 5000' --last 1h
+| What you notice | Where you look | What you learn | What you do |
+|----------------|---------------|---------------|-------------|
+| Everything slow | Queue Inspector | Queue depth is 45, batch jobs are ahead of interactive work | Set up priority rules (Journey 6) |
+| One model failing | Server Management | Server is in Failed/Restarting state, OOM killed | Reduce context or slots, or add VRAM |
+| Intermittent errors | Request Explorer | Errors cluster on one server, others are fine | That server has a problem — check its logs |
+| Slots stuck | Server detail > Slot Inspector | One slot has been "active" for 5 minutes with no decode progress | Click "Erase Slot" to free it |
+| Requests timing out | Queue Inspector + Admission | Per-requestor limit reached, or queue at capacity | Increase limits, add capacity, or adjust priorities |
+| Config change broke things | Dashboard alert banner | "Config reload failed: validation error on line 42" | Fix the syntax error; the previous config is still running |
 
-# Trace a specific request through the system
-llamaforge logs --request-id req-a3f2... --follow
+### 9.4 Health Signals — What the Colors Mean
 
-# Watch server lifecycle events
-llamaforge logs --filter 'component=server_manager' --level warn --follow
+LlamaForge has three health signals. Each maps to a specific operational question:
 
-# Find starvation boost events
-llamaforge logs --filter 'event=starvation_boost' --last 30m
-```
-
-### 9.3 Common Troubleshooting Scenarios
-
-| Symptom | First Check | Likely Cause | Resolution |
-|---------|------------|--------------|------------|
-| All requests timing out | `llamaforge status` | All servers in Failed state | Check model paths, GPU availability, VRAM |
-| Intermittent slow TTFT | Request Explorer, sort by TTFT | Large prompt hitting cold cache | Enable `cache_prompt: true`, check affinity routing |
-| One model's requests always queued | Queue Inspector | Only one server for that model, slots saturated | Add another server instance for the model |
-| Server restart loop | Server Management, view restart history | OOM, CUDA error, corrupt model | Check server logs, reduce `n_ctx` or `n_parallel` |
-| Stuck slot (no decode progress) | Slot Inspector, stuck detection | llama-server internal deadlock | Erase the slot; if recurring, restart server |
-| Config reload does nothing | Web UI config diff | TOML parse error, or no actual changes | Check reload log for validation errors |
-| High error rate from one requestor | Request Explorer, filter by requestor | Malformed requests or hitting limits | Check admission control; review requestor's request format |
-
-### 9.4 Health Signal Reference
-
-LlamaForge exposes three health signals that the Web UI and CLI surface prominently:
-
-```mermaid
-flowchart LR
-    subgraph "Health Signals"
-        R["ready()"]
-        L["live()"]
-        D["degraded()"]
-    end
-
-    R -->|"True when"| R1["Admission initialized<br/>AND scheduler running"]
-    L -->|"True when"| L1["Scheduler heartbeat<br/>within last 10s"]
-    D -->|"True when"| D1["Queue > 80% capacity<br/>for > 30 seconds"]
-
-    R1 -->|"Used by"| R2["Load balancers<br/>Kubernetes readiness probe"]
-    L1 -->|"Used by"| L2["Kubernetes liveness probe<br/>Process monitor"]
-    D1 -->|"Used by"| D2["Dashboard alert<br/>Prometheus alert rule"]
-
-    style R fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style L fill:#1a4a6e,stroke:#2980b9,color:#fff
-    style D fill:#6e4a1a,stroke:#b97329,color:#fff
-```
+| Signal | Question it answers | True when | Used by |
+|--------|-------------------|-----------|---------|
+| **Ready** | "Can I send requests?" | Queue is accepting and scheduler is running | Load balancers, Kubernetes readiness probe |
+| **Live** | "Is the process healthy?" | Scheduler heartbeat within last 10 seconds | Kubernetes liveness probe, process monitors |
+| **Degraded** | "Should I worry?" | Queue over 80% for more than 30 seconds | Dashboard alerts, Prometheus alert rules |
 
 ---
 
-## 10. Journey 8 — Scaling & Multi-Model Orchestration
+## 10. Journey 8 — Outgrowing a Single Model
 
-**Persona:** Operator-Developer  
-**Trigger:** Workload has grown. User needs to serve multiple models, distribute load across GPUs, or handle more concurrent requests.  
-**Goal:** Scale from a single model/server setup to a multi-model fleet without redesigning the config.
+You've been running LlamaForge for three weeks with one model on one GPU. It works well, but the team has started using it for more things — code reviews, documentation drafts, commit message generation, ad-hoc questions. The queue is backing up during peak hours. You need more capacity, and you also want to run a smaller, faster model for the quick tasks that don't need the full 30B.
 
-### 10.1 Journey Flow
+This isn't a dramatic scaling moment. It's the gradual realization that what worked for one use case doesn't work for five.
+
+### 10.1 The Thinking Process
 
 ```mermaid
 flowchart TD
-    A["Growing workload"] --> B{"Scaling need?"}
+    A["Queue backs up<br/>during peak hours"] --> B["You look at the dashboard:<br/>one model, all slots busy,<br/>requests queuing for 10+ seconds"]
 
-    B -->|"More capacity<br/>for same model"| C["Add another server<br/>for the same model<br/>on a different GPU"]
-    B -->|"New model<br/>needed"| D["Add server with<br/>new model + GPU"]
-    B -->|"Better utilization"| E["Tune routing weights<br/>and slot counts"]
+    B --> C["You think about<br/>your workloads"]
 
-    C --> F["Config: add server entry<br/>with same model_path,<br/>different gpu_id"]
-    D --> G["Config: add server entry<br/>with new model_path,<br/>assigned gpu_id"]
-    E --> H["Adjust routing weights:<br/>w_slots, w_kv, w_queue"]
+    C --> D["Code reviews need<br/>the big model (30B).<br/>Commit messages don't —<br/>a 7B model is fine and 3× faster."]
 
-    F --> I["Reload config"]
-    G --> I
-    H --> I
+    D --> E["You look at your hardware:<br/>GPU 0 has the 30B model.<br/>GPU 1 is empty."]
 
-    I --> J["Router now has<br/>more targets"]
+    E --> F["Plan:<br/>1. Put mistral-7b on GPU 1<br/>   for quick tasks<br/>2. Add a second qwen3-30b<br/>   instance if GPU 1 has room"]
 
-    J --> K["Requests distribute<br/>across servers via<br/>routing score formula"]
+    F --> G["Add the servers via<br/>config or Web UI<br/>(same as Journey 2)"]
 
-    K --> L{"Verify balance"}
-    L -->|"Web UI"| M["Dashboard: per-server<br/>TPS and slot utilization"]
-    L -->|"Prometheus"| N["Grafana: request distribution<br/>heatmap by server"]
+    G --> H["Clients now specify<br/>which model they want"]
 
-    M --> O{"Balanced?"}
-    N --> O
+    H --> I{"How do clients<br/>choose?"}
+    I -->|"By model name"| J["model='mistral-7b' for quick tasks<br/>model='qwen3-30b' for code review"]
+    I -->|"Operator assigns<br/>via task types"| K["Quick tasks route to fast model<br/>Code review routes to big model<br/>(future: routing rules in config)"]
 
-    O -->|"Yes"| P["✅ Scaled successfully"]
-    O -->|"No"| Q["Tune routing weights<br/>or adjust slot counts"]
-    Q --> H
-
-    style P fill:#2d5a27,stroke:#4a8c3f,color:#fff
+    J --> L["Queue distributes naturally.<br/>Quick tasks get fast responses.<br/>Code reviews get full context."]
+    K --> L
 ```
 
-### 10.2 Multi-Model Configuration Example
-
-A mature deployment might look like this:
+### 10.2 Multi-Model Config — What It Looks Like
 
 ```toml
-# llamaforge.toml — Multi-model fleet
+# llamaforge.toml — evolved from single-model to fleet
 
 [global]
 queue_capacity = 200
-starvation_boost_interval_secs = 5
 
-# Primary code model — two instances for capacity
+# Big model for code review — two instances for capacity
 [servers.code-1]
 model_path = "/models/qwen3-30b-Q4_K_M.gguf"
 model_alias = "qwen3-30b"
 gpu_id = 0
 n_ctx = 8192
 n_parallel = 8
-flash_attn = "auto"
 
 [servers.code-2]
 model_path = "/models/qwen3-30b-Q4_K_M.gguf"
 model_alias = "qwen3-30b"
 gpu_id = 1
 n_ctx = 8192
-n_parallel = 8
-flash_attn = "auto"
+n_parallel = 4    # Shares GPU 1 with the fast model
 
-# Fast small model for quick tasks
+# Fast model for quick tasks
 [servers.fast]
 model_path = "/models/mistral-7b-Q5_K_S.gguf"
 model_alias = "mistral-7b"
-gpu_id = 2
+gpu_id = 1        # Shares GPU 1 with code-2
 n_ctx = 4096
-n_parallel = 12
-flash_attn = "auto"
-
-# Specialized model with LoRA
-[servers.review]
-model_path = "/models/codellama-13b-Q5_K_S.gguf"
-model_alias = "codellama-13b"
-gpu_id = 3
-n_ctx = 16384
-n_parallel = 4
-flash_attn = "auto"
-
-[[servers.review.lora_adapters]]
-name = "code-review-v2"
-path = "/models/lora/code-review-v2.gguf"
-scale = 1.0
+n_parallel = 8
 ```
 
-### 10.3 Routing Score Visualization (Web UI)
+### 10.3 Verifying Balance
 
-When an operator is tuning routing, the Web UI should show how the routing score formula evaluates for each server:
+After adding servers, the operator watches the dashboard to see if traffic distributes well. The server cards now show utilization per model:
 
 ```
-Routing Score Breakdown for: model=qwen3-30b
-─────────────────────────────────────────────────────────────────
-Server   │ Free Slots │ KV Usage │ Queue │ Affinity │ TOTAL
-─────────┼────────────┼──────────┼───────┼──────────┼──────
-code-1   │  0.35 ×0.4 │ 0.72 ×0.3│ 0.9×0.2│ 0.0 ×0.1│ 0.554
-code-2   │  0.62 ×0.4 │ 0.45 ×0.3│ 1.0×0.2│ 0.0 ×0.1│ 0.683 ★
-─────────────────────────────────────────────────────────────────
-Score = w_slots×free_ratio + w_kv×(1-kv_usage) + w_queue×(1-deferred) + w_affinity×0
+SERVER CARDS (dashboard)
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│ qwen3-30b       │ │ qwen3-30b       │ │ mistral-7b      │
+│ (code-1)        │ │ (code-2)        │ │ (fast)          │
+│ ● Running       │ │ ● Running       │ │ ● Running       │
+│ Slots: 6/8      │ │ Slots: 2/4      │ │ Slots: 3/8      │
+│ TPS: 22.4       │ │ TPS: 21.8       │ │ TPS: 45.2       │
+│ TTFT: 210ms     │ │ TTFT: 220ms     │ │ TTFT: 80ms      │
+│ GPU 0           │ │ GPU 1 (shared)  │ │ GPU 1 (shared)  │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
 
-★ = Selected server for next request
+Traffic is balanced: code-1 and code-2 are sharing qwen3-30b requests.
+Fast model is handling quick tasks at 3× the throughput.
+Queue depth dropped from peak 28 to steady 4.
 ```
+
+If the balance is wrong — one server getting all the traffic while another idles — the routing section of the Web UI shows why. But most operators will never need to look at routing scores. The system's defaults should be correct for the common case.
 
 ---
 
-## 11. Journey 9 — Observability & Capacity Planning
+## 11. Journey 9 — Planning for Next Month
 
-**Persona:** Operator-Developer  
-**Trigger:** Operator wants to understand usage patterns, plan capacity, or set up alerting.  
-**Goal:** Build a monitoring stack that provides proactive visibility into system health and usage trends.
+It's the end of the month. Usage has been growing — you can feel it in the queue depth during peak hours, and you can see it in the metrics. Your manager asked if you'll need more hardware next quarter. You need to turn a vague sense of "it's getting busier" into a specific answer.
 
-### 11.1 Observability Stack
+This journey is different from the others because it's not about reacting to a problem. It's about anticipating one.
 
-```mermaid
-flowchart LR
-    subgraph "LlamaForge"
-        A["Metrics Ring Buffer<br/>(5 min hot)"]
-        B["SQLite Audit Log<br/>(30 day warm)"]
-        C["Prometheus /metrics<br/>(counter/gauge/histogram)"]
-        D["Structured Logs<br/>(JSON tracing)"]
-    end
-
-    subgraph "External Stack"
-        E["Prometheus Server"]
-        F["Grafana Dashboards"]
-        G["AlertManager"]
-        H["Loki (optional)"]
-    end
-
-    subgraph "LlamaForge UI"
-        I["Dashboard<br/>(real-time)"]
-        J["Request Explorer<br/>(historical)"]
-        K["Alert Cards<br/>(actionable)"]
-    end
-
-    C --> E --> F
-    E --> G
-    D --> H --> F
-    A --> I
-    B --> J
-    A --> K
-
-    style I fill:#1a4a6e,stroke:#2980b9,color:#fff
-    style F fill:#1a4a6e,stroke:#2980b9,color:#fff
-```
-
-### 11.2 Key Metrics for Capacity Planning
-
-The Web UI and Prometheus export these metrics. The capacity planning view surfaces trends and projections:
-
-```
-Capacity Planning View (Web UI)
-─────────────────────────────────────────────────────────────
-                    Current     7d Avg    30d Avg    Trend
-─────────────────────────────────────────────────────────────
-Requests/hour       142         128       98         ↑ 45%
-Peak queue depth    12          8         4          ↑ 200%
-Avg TTFT (P50)      180ms       165ms     150ms      ↑ 20%
-Avg TTFT (P99)      890ms       720ms     580ms      ↑ 53%
-Slot utilization    72%         65%       52%        ↑ 38%
-GPU memory used     68%         62%       55%        ↑ 24%
-Error rate          0.1%        0.08%     0.05%      ↑ 100%
-─────────────────────────────────────────────────────────────
-
-Projection: At current growth rate, queue capacity will become
-a bottleneck in approximately 3 weeks. Consider:
-  • Adding a server instance for qwen3-30b (highest demand model)
-  • Increasing queue_capacity from 100 to 200
-  • Reviewing batch_summarize requestor limits
-```
-
-### 11.3 Prometheus Metrics Reference
-
-Key metrics exported at `/metrics`:
-
-| Metric | Type | Labels | Purpose |
-|--------|------|--------|---------|
-| `llamaforge_requests_total` | counter | `model`, `task_type`, `status` | Total request count |
-| `llamaforge_tokens_total` | counter | `model`, `direction` (prompt/completion) | Token throughput |
-| `llamaforge_ttft_seconds` | histogram | `model` | Time-to-first-token distribution |
-| `llamaforge_queue_depth` | gauge | — | Current queue depth |
-| `llamaforge_queue_wait_seconds` | histogram | `task_type` | Queue wait time distribution |
-| `llamaforge_server_slots_active` | gauge | `server_id` | Slots currently processing |
-| `llamaforge_server_slots_total` | gauge | `server_id` | Total configured slots |
-| `llamaforge_dispatch_duration_seconds` | histogram | `model` | Time from dequeue to first byte |
-| `llamaforge_server_restarts_total` | counter | `server_id` | Server restart count |
-| `llamaforge_events_dropped_total` | counter | — | Telemetry events dropped (back-pressure) |
-
----
-
-## 12. Journey 10 — Maintenance & Lifecycle Operations
-
-**Persona:** Operator-Developer  
-**Trigger:** Planned maintenance — upgrading llama-server, swapping models, upgrading LlamaForge itself, or database maintenance.  
-**Goal:** Perform maintenance with minimal disruption.
-
-### 12.1 Journey Flow
+### 11.1 The Capacity Planning View
 
 ```mermaid
 flowchart TD
-    A["Maintenance needed"] --> B{"What type?"}
+    A["You need to answer:<br/>'Will we need more hardware<br/>next quarter?'"] --> B["Open Metrics > Capacity"]
 
-    B -->|"Upgrade<br/>llama-server"| C["Update binary path<br/>in config"]
-    B -->|"Swap model<br/>(new quant)"| D["Update model_path<br/>in config"]
-    B -->|"Upgrade<br/>LlamaForge"| E["Replace binary,<br/>restart process"]
-    B -->|"Database<br/>maintenance"| F["WAL checkpoint<br/>or backup"]
+    B --> C["See trend lines for<br/>the last 30 days"]
 
-    C --> G["Drain target server<br/>POST /api/servers/{id}/stop"]
-    D --> G
+    C --> D["Key numbers:<br/>• Requests/hour: up 45% month-over-month<br/>• Peak queue depth: 4 → 12<br/>• Slot utilization: 52% → 72%<br/>• P99 TTFT: 580ms → 890ms"]
 
-    G --> H["Active requests complete<br/>No new requests routed"]
-    H --> I["Server enters Stopped state"]
-    I --> J["Apply change<br/>(new binary/model path)"]
-    J --> K["Restart server<br/>POST /api/servers/{id}/start"]
-    K --> L["Health check passes"]
-    L --> M["Server enters Running<br/>Available for routing"]
+    D --> E["The system surfaces<br/>a projection"]
 
-    E --> N["llamaforge stop<br/>(graceful drain all)"]
-    N --> O["All in-flight<br/>requests complete"]
-    O --> P["llama-server orphans<br/>survive (by design)"]
-    P --> Q["Replace LlamaForge binary"]
-    Q --> R["llamaforge start"]
-    R --> S["Orphan recovery:<br/>reclaim running<br/>llama-server processes"]
-    S --> M
+    E --> F["'At current growth, queue<br/>will regularly exceed 80%<br/>in about 3 weeks. Consider:<br/>• Adding a server for qwen3-30b<br/>• Increasing queue_capacity<br/>• Reviewing batch job limits'"]
 
-    F --> T{"Which operation?"}
-    T -->|"Checkpoint"| U["POST /api/maintenance/wal-checkpoint"]
-    T -->|"Backup"| V["VACUUM INTO via<br/>cron/systemd timer"]
-
-    M --> W["✅ Maintenance complete"]
-    U --> W
-    V --> W
-
-    style W fill:#2d5a27,stroke:#4a8c3f,color:#fff
+    F --> G{"What do you do?"}
+    G -->|"Forward this to manager<br/>with hardware request"| H["Export the chart<br/>as image or CSV"]
+    G -->|"Optimize first"| I["Check if batch jobs<br/>can run off-peak<br/>or at lower priority"]
+    G -->|"Add capacity now"| J["Add another GPU<br/>or another server instance"]
 ```
 
-### 12.2 Graceful Shutdown Sequence
+### 11.2 The Numbers That Matter
 
 ```
-llamaforge stop
-──────────────────────────────────────────────────
-1. Stop accepting new connections (close listeners)
-2. Signal all servers to drain:
-   - No new requests dispatched to draining servers
-   - In-flight requests continue until completion
-3. Wait for drain timeout (configurable, default 30s)
-4. For each server:
-   - SIGTERM to llama-server process
-   - Wait for graceful exit (5s)
-   - SIGKILL if still alive
-5. Flush metrics ring buffer to SQLite
-6. Checkpoint WAL
-7. Exit 0
+Capacity Trends (last 30 days)
+──────────────────────────────────────────────────────────
+                    Now       7d Avg    30d Avg    Trend
+──────────────────────────────────────────────────────────
+Requests/hour       142       128       98         ↑ 45%
+Peak queue depth    12        8         4          ↑ 200%
+Slot utilization    72%       65%       52%        ↑ 38%
+P50 TTFT            180ms     165ms     150ms      ↑ 20%
+P99 TTFT            890ms     720ms     580ms      ↑ 53%
+Error rate          0.1%      0.08%     0.05%      ↑ 100%
+──────────────────────────────────────────────────────────
 ```
 
-### 12.3 Rolling Restart (Zero-Downtime for Multi-Instance Models)
+### 11.3 Prometheus Metrics for External Monitoring
 
-When a model has multiple server instances, LlamaForge can perform rolling restarts:
+For operators who use Prometheus + Grafana, LlamaForge exports metrics at `/metrics`. Key metrics:
 
-```
-Rolling Restart: qwen3-30b (2 instances)
-──────────────────────────────────────────────────
-Phase 1: Drain code-1
-  code-1: ● Draining (finishing 3 active requests)
-  code-2: ● Running  (absorbing new requests)
-
-Phase 2: Restart code-1
-  code-1: ● Starting (loading model...)
-  code-2: ● Running  (handling all traffic)
-
-Phase 3: Health check code-1
-  code-1: ● Running  (health check passed ✅)
-  code-2: ● Running  (traffic rebalancing)
-
-Phase 4: Drain code-2
-  code-1: ● Running  (absorbing new requests)
-  code-2: ● Draining (finishing 5 active requests)
-
-Phase 5: Restart code-2
-  code-1: ● Running  (handling all traffic)
-  code-2: ● Starting (loading model...)
-
-Phase 6: Complete
-  code-1: ● Running  ✅
-  code-2: ● Running  ✅
-  Zero requests dropped.
-```
+| Metric | Type | What it tells you |
+|--------|------|------------------|
+| `llamaforge_requests_total` | counter | Total request volume by model, task type, and status |
+| `llamaforge_tokens_total` | counter | Token throughput (prompt and completion separately) |
+| `llamaforge_ttft_seconds` | histogram | Time-to-first-token distribution by model |
+| `llamaforge_queue_depth` | gauge | Current queue depth |
+| `llamaforge_queue_wait_seconds` | histogram | How long requests wait before being served |
+| `llamaforge_server_slots_active` | gauge | Active slots per server |
+| `llamaforge_server_restarts_total` | counter | How often servers are restarting |
 
 ---
 
-## 13. Cross-Cutting UX Principles
+## 12. Journey 10 — Planned Downtime
 
-These principles apply across all journeys and UI surfaces. They define the "feel" of LlamaForge.
+It's Friday at 5pm. You need to upgrade `llama-server` to a new version that fixes a memory leak you've been hitting. You want to do it now, before the weekend, because Monday morning is peak usage. The system currently has three servers running across two GPUs. You have 30 minutes.
 
-### 13.1 Progressive Disclosure
+The question isn't "how does the upgrade work technically." The question is: "Can I do this without anyone noticing?"
 
-Show the minimum information needed at each level. Each UI surface has three depths:
+### 12.1 The Upgrade Path
 
-| Depth | What's Shown | Who Uses It | Example |
-|-------|-------------|-------------|---------|
-| **Glance** | Status color + one number | Everyone, every visit | "● 3/3 servers up, 14 req/min" |
-| **Inspect** | Key metrics + recent events | Operator checking in | Server cards with TPS, TTFT, slot usage |
-| **Investigate** | Full detail, query tools | Operator debugging | Request Explorer with filters, log correlation |
+```mermaid
+flowchart TD
+    A["You want to upgrade<br/>llama-server to a new version"] --> B{"Do you have multiple<br/>instances of the<br/>same model?"}
 
-### 13.2 Actionable Alerts, Not Noise
+    B -->|"Yes"| C["Rolling upgrade:<br/>one at a time,<br/>zero downtime"]
+    B -->|"No"| D["Brief downtime:<br/>drain, upgrade, restart"]
 
-Every alert displayed in the UI must include:
-1. **What** is wrong (symptom, not internal error code)
-2. **Why** it matters (impact on users)
-3. **What to do** (specific action or investigation step)
+    C --> E["Step 1: Drain server-1<br/>Active requests finish.<br/>New requests go to server-2."]
+    E --> F["Step 2: Stop server-1.<br/>Update llama-server binary path<br/>in config."]
+    F --> G["Step 3: Restart server-1.<br/>It loads the new version.<br/>Health check passes."]
+    G --> H["Step 4: Repeat for server-2.<br/>server-1 handles traffic while<br/>server-2 upgrades."]
+    H --> I["Done. Zero dropped requests.<br/>Nobody noticed."]
 
-Bad: "Server health check failed"  
-Good: "qwen3-30b (server-1) failed 3 consecutive health checks. Requests to this model are being routed to server-2 (code-2). Check if the llama-server process is running: `ps aux | grep llama-server`"
+    D --> J["Step 1: Drain the server.<br/>Wait for active requests."]
+    J --> K["Step 2: Stop, update config,<br/>restart."]
+    K --> L["Step 3: Health check passes.<br/>Requests resume."]
+    L --> M["Done. Downtime was<br/>~10 seconds (model reload)."]
+```
 
-### 13.3 Consistent Vocabulary
+### 12.2 What You See During a Rolling Upgrade
 
-Use consistent terms across CLI, Web UI, API, logs, and documentation:
+The dashboard shows the upgrade in progress without you having to guess:
 
-| Concept | Term to Use | NOT |
-|---------|------------|-----|
-| A llama-server process | "server" or "server instance" | "worker", "node", "backend" |
-| A model loaded in a server | "model" | "deployment", "endpoint" |
-| A concurrent processing unit | "slot" | "thread", "worker", "connection" |
-| A client's inference call | "request" | "job", "task", "query" |
-| Shutting down while finishing work | "drain" | "graceful stop", "wind down" |
-| The priority class of work | "task type" | "job class", "priority tier" |
-| The entity sending requests | "requestor" | "client", "user", "tenant" |
+```
+Rolling Upgrade: qwen3-30b
+──────────────────────────────────────────────────────────
+Phase 1 of 4: Draining server-1
+  server-1: ◐ Draining (2 requests finishing)
+  server-2: ● Running  (handling all new qwen3-30b requests)
 
-### 13.4 CLI-Web UI Parity
+[Progress bar: ████░░░░░░░░░░░░ 25%]
 
-Every action possible in the Web UI should also be possible via CLI. The CLI is not a second-class citizen — it is the scripting and automation interface:
+Estimated time remaining: ~2 minutes
+No requests have been dropped.
+```
+
+### 12.3 LlamaForge Upgrade (Itself)
+
+Upgrading LlamaForge itself is straightforward because `llama-server` processes survive a gateway restart:
+
+1. `llamaforge stop` — gateway shuts down, `llama-server` processes keep running as orphans
+2. Replace the binary
+3. `llamaforge start` — gateway starts, discovers the orphan `llama-server` processes, reclaims them
+4. Full service restored in seconds, no model reload required
+
+The orphan recovery is invisible to the user — they just see "stop, replace binary, start, everything's back."
+
+### 12.4 Database Maintenance
+
+SQLite WAL files grow over time. The system handles this automatically, but if you want to force maintenance:
+
+- **Web UI:** Settings > Maintenance > "Checkpoint Database"
+- **CLI:** `llamaforge maintenance checkpoint`
+- **Scheduled:** Set up a cron job or systemd timer to run `VACUUM INTO` for periodic backups
+
+---
+
+## 13. Journey 11 — The Power User
+
+You're not a developer. You run a consulting practice and you want to use AI for drafting proposals and analyzing client documents, but you're not comfortable sending confidential client data to ChatGPT. A friend told you about running models locally and helped you build a PC with a good GPU. They installed `llama-server` and LlamaForge for you, and now they've gone home.
+
+You're sitting in front of a terminal you didn't want to open. You want to talk to an AI that runs on your machine, and you want to never think about GPUs or TOML files again.
+
+### 13.1 The Power User's Entire Journey
+
+```mermaid
+flowchart TD
+    A["Friend installed<br/>LlamaForge for you"] --> B["Open the Web UI<br/>in your browser"]
+
+    B --> C["You see the dashboard<br/>in Simple View:<br/>'Your AI is running. 1 model loaded.'"]
+
+    C --> D["You see a card:<br/>'mistral-7b — Ready'<br/>with a green circle<br/>and the word Ready"]
+
+    D --> E["You open your chat app<br/>(Open WebUI, LibreChat, etc.)<br/>pointed at localhost:8000"]
+
+    E --> F["You type a message.<br/>The AI responds.<br/>It works."]
+
+    F --> G["Months pass.<br/>You never open the<br/>dashboard again."]
+
+    G --> H{"One day it stops working"}
+    H --> I["You open the dashboard.<br/>The card says:<br/>'mistral-7b — Stopped'<br/>with a red X and the<br/>word Stopped"]
+
+    I --> J["Below the card,<br/>a message says:<br/>'This model stopped unexpectedly.<br/> Click Restart to start it again.'"]
+
+    J --> K["You click Restart.<br/>It starts.<br/>You go back to your chat app."]
+```
+
+### 13.2 Simple View — The Power User's Dashboard
+
+The Power User needs a different default view than the Operator-Developer. The dashboard has a **Simple View** toggle that hides operational metrics and shows only what the Power User cares about:
+
+```
+┌───────────────────────────────────────────────────┐
+│  LlamaForge                        Simple View ✓  │
+├───────────────────────────────────────────────────┤
+│                                                     │
+│  Your AI is running.                                │
+│                                                     │
+│  ┌────────────────────────────────────────┐        │
+│  │ mistral-7b                             │        │
+│  │                                         │        │
+│  │        ● Ready                          │        │
+│  │                                         │        │
+│  │  Running for 14 days                    │        │
+│  │  Responded to 847 requests              │        │
+│  │                                         │        │
+│  │  ┌───────────┐  ┌──────────────┐       │        │
+│  │  │  Restart   │  │    Stop     │       │        │
+│  │  └───────────┘  └──────────────┘       │        │
+│  └────────────────────────────────────────┘        │
+│                                                     │
+│  Connect your apps to: http://localhost:8000/v1     │
+│  Compatible with: ChatGPT apps, Open WebUI,        │
+│  LibreChat, or any OpenAI-compatible app.           │
+│                                                     │
+│                            Switch to Detailed View  │
+└───────────────────────────────────────────────────┘
+```
+
+No TPS. No TTFT histograms. No slot counts. No queue depth. Just: is it working, how long has it been working, and what do I do if it stops.
+
+### 13.3 Error Messages for People Who Don't Read Logs
+
+When something goes wrong, the Power User's error messages must be in plain language:
+
+| What happened | What the Power User sees |
+|--------------|------------------------|
+| Server crashed (OOM) | "Your AI model stopped because it ran out of memory. Click Restart to try again. If this keeps happening, your model might be too large for your graphics card." |
+| Port conflict | "LlamaForge can't start because another program is using the same port. Close the other program and try again." |
+| Model file deleted | "The AI model file was moved or deleted. It was expected at: /models/mistral-7b.gguf. Put the file back or ask whoever set this up for you." |
+| Process won't start | "The AI couldn't start. This might be a hardware or software issue. If you're not sure what to do, try restarting your computer. If that doesn't work, ask the person who set this up for help." |
+
+---
+
+## 14. Journey 12 — Inheriting Someone Else's Forge
+
+A senior engineer left the team two weeks ago. They set up LlamaForge six months ago and it's been running fine — you've been using it as an API consumer and never looked at the internals. Now you're responsible for it. You open the config for the first time and see seven servers, four GPU assignments, a priority_rules.toml with twelve task types, and requestor limits you don't understand. No documentation was left behind, because there never is.
+
+You need to answer three questions before you can responsibly own this system: What is it doing? Why is it configured this way? What will break if I change something?
+
+### 14.1 The Discovery Journey
+
+```mermaid
+flowchart TD
+    A["You're now responsible<br/>for a system you<br/>didn't build"] --> B["Open the dashboard"]
+
+    B --> C["The system is running.<br/>Everything is green.<br/>But you don't know why<br/>anything is the way it is."]
+
+    C --> D["Go to Configuration Viewer"]
+
+    D --> E["You see the current config<br/>with annotations:<br/>what each value does,<br/>what the default would be,<br/>and when it was last changed"]
+
+    E --> F["You see Change History:<br/>a timeline of every config<br/>change with diffs and dates"]
+
+    F --> G["You start to understand:<br/>'Oh, they added server-3<br/>in March because queue depth<br/>was spiking during the release.'"]
+
+    G --> H["You check Metrics > Trends<br/>to see if the current config<br/>still matches current usage"]
+
+    H --> I{"Config matches usage?"}
+    I -->|"Yes — nothing to change"| J["You now understand<br/>the system. Confidence grows.<br/>You don't change anything yet."]
+    I -->|"No — some servers idle,<br/>some overloaded"| K["You have enough context<br/>to make informed changes"]
+```
+
+### 14.2 Surfaces That Help With Inheritance
+
+**Annotated Configuration Viewer**
+
+The config viewer doesn't just show the current values. It shows context:
+
+```
+Configuration: servers.code-3
+──────────────────────────────────────────────────────────
+model_path    = "/models/qwen3-30b-Q4_K_M.gguf"
+model_alias   = "qwen3-30b"
+gpu_id        = 2
+n_ctx         = 16384          ← default is 4096, this was increased
+n_parallel    = 4
+flash_attn    = "auto"
+
+Last changed: 2026-03-15 (2 months ago)
+Changed from: n_ctx was 8192
+Context:      Change log entry: "Increased context for long PR reviews"
+──────────────────────────────────────────────────────────
+```
+
+**Change History Timeline**
+
+Every config reload is logged with a diff. The Change History page shows these as a narrative:
+
+```
+Configuration History
+──────────────────────────────────────────────────────────
+2026-03-15  n_ctx increased to 16384 on server code-3
+2026-02-28  Server "fast" added (mistral-7b on GPU 1)
+2026-02-10  batch_summarize priority lowered from 400 to 250
+2026-01-15  Requestor limit for "batch-worker" set to 3
+2026-01-03  Initial configuration (3 servers, 2 GPUs)
+──────────────────────────────────────────────────────────
+```
+
+**Usage-vs-Config Heatmap**
+
+A view that compares current config capacity against actual usage, so you can spot over-provisioned or under-provisioned servers:
+
+```
+Server Usage vs. Capacity (last 7 days)
+──────────────────────────────────────────────────────────
+Server         Slots  Avg Used  Peak Used  Utilization
+──────────────────────────────────────────────────────────
+qwen3-30b (1)    8      6.2        8         78%  ████████░░
+qwen3-30b (2)    8      5.8        8         73%  ████████░░
+qwen3-30b (3)    4      0.8        2         20%  ██░░░░░░░░  ← underused
+mistral-7b       8      7.1        8         89%  █████████░
+codellama-13b    4      1.2        3         30%  ███░░░░░░░  ← underused
+──────────────────────────────────────────────────────────
+
+Observation: server code-3 and codellama-13b are significantly
+underutilized. Review whether their capacity is still needed.
+```
+
+This is how the new owner builds an understanding of a system that has no README. The data tells the story.
+
+---
+
+## 15. Empty States Catalog
+
+Every UI surface needs a design for when it has zero data. Empty states are the first impression for every new user and deserve as much attention as the full-data views.
+
+### 15.1 Empty Dashboard (Just Installed, No Servers Configured)
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│  LlamaForge                                                     │
+├───────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                    Welcome to LlamaForge                        │
+│                                                                 │
+│  Your gateway is running, but no inference servers              │
+│  are configured yet.                                            │
+│                                                                 │
+│  To get started:                                                │
+│                                                                 │
+│  1. Add a server with a model                                   │
+│     [Add Your First Server]                                     │
+│                                                                 │
+│  2. Or edit your config file:                                   │
+│     /home/you/.config/llamaforge/llamaforge.toml                │
+│     then reload:  llamaforge config reload                      │
+│                                                                 │
+│  Need help? The setup wizard can detect your hardware           │
+│  and suggest a configuration:  llamaforge init                  │
+│                                                                 │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### 15.2 Empty Queue (No Requests Currently Waiting)
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Queue Inspector                                        │
+├────────────────────────────────────────────────────────┤
+│                                                          │
+│  The queue is empty. All requests are being served       │
+│  immediately.                                            │
+│                                                          │
+│  This is normal when traffic is low. If you're testing,  │
+│  try sending a request:                                  │
+│                                                          │
+│    curl http://localhost:8000/v1/chat/completions \      │
+│      -H "Content-Type: application/json" \               │
+│      -d '{"model": "qwen3-30b", "messages": [...]}'     │
+│                                                          │
+└────────────────────────────────────────────────────────┘
+```
+
+### 15.3 Empty Request Explorer (No Historical Data)
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Request Explorer                                       │
+├────────────────────────────────────────────────────────┤
+│                                                          │
+│  No requests recorded yet.                               │
+│                                                          │
+│  Request history appears here after the first inference  │
+│  request completes. You'll be able to search and filter  │
+│  by model, task type, requestor, status, and time range. │
+│                                                          │
+│  Recent requests are kept for 30 days (configurable      │
+│  via metrics.retention_days in your config file).        │
+│                                                          │
+└────────────────────────────────────────────────────────┘
+```
+
+### 15.4 Empty Metrics (System Just Started)
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Metrics & Trends                                       │
+├────────────────────────────────────────────────────────┤
+│                                                          │
+│  Not enough data for trends yet.                         │
+│                                                          │
+│  Metrics will appear after a few minutes of traffic.     │
+│  Trend comparisons (7-day, 30-day) require at least      │
+│  that much history.                                      │
+│                                                          │
+│  In the meantime, real-time metrics are available on     │
+│  the Dashboard and at /metrics (Prometheus format).      │
+│                                                          │
+└────────────────────────────────────────────────────────┘
+```
+
+### 15.5 Empty Server List After `--dry-run`
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Server Management                                      │
+├────────────────────────────────────────────────────────┤
+│                                                          │
+│  LlamaForge is running in dry-run mode.                  │
+│  The gateway is accepting connections, but no inference   │
+│  servers have been started.                               │
+│                                                          │
+│  This is useful for testing your config, API endpoints,  │
+│  and Web UI without needing GPUs.                        │
+│                                                          │
+│  Your config defines 3 servers. Start them:              │
+│    llamaforge start   (restarts without --dry-run)       │
+│                                                          │
+│  Or add servers individually from here:                  │
+│    [Start All Configured Servers]                        │
+│                                                          │
+└────────────────────────────────────────────────────────┘
+```
+
+Every empty state follows the same pattern: tell you what you're looking at, tell you it's normal, and invite you to take the next action.
+
+---
+
+## 16. Accessibility & State Encoding
+
+Accessibility is structural, not polish. The decisions made here affect every screen in the product.
+
+### 16.1 State Encoding: Color + Shape + Label
+
+Every state indicator in LlamaForge uses three redundant channels. Color alone is not sufficient — approximately 8% of men and 0.5% of women have color vision deficiency.
+
+| State | Color | Shape | Label | Example |
+|-------|-------|-------|-------|---------|
+| Running / Healthy | Green | Filled circle ● | "Running" or "Healthy" | ● Running |
+| Draining | Amber | Half-filled circle ◐ | "Draining" | ◐ Draining |
+| Stopped | Gray | Empty circle ○ | "Stopped" | ○ Stopped |
+| Restarting | Blue | Rotating arrow ⟳ | "Restarting" | ⟳ Restarting |
+| Failed | Red | X mark ✕ | "Failed" | ✕ Failed |
+| Degraded | Amber | Warning triangle △ | "Degraded" | △ Degraded |
+| At Limit | Amber | Equals sign ═ | "At limit" | ═ At limit |
+
+A person who cannot distinguish green from red can still distinguish a filled circle from an X mark, and can always read the label.
+
+### 16.2 Contrast & Typography
+
+- All text meets WCAG 2.1 AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
+- Monospace font for all numerical data (prevents decimal alignment issues with proportional fonts)
+- Minimum touch target size of 44×44px for buttons and interactive elements
+
+### 16.3 Keyboard Navigation
+
+- Every interactive element is reachable via Tab
+- Server cards, queue entries, and request rows are focusable with arrow key navigation
+- Modal dialogs (config preview, slot erase confirmation) trap focus and close on Escape
+- Skip-to-content link at the top of every page
+
+### 16.4 Screen Readers & Live Regions
+
+- Dashboard health strip values are in an ARIA live region (`aria-live="polite"`) so screen readers announce changes without requiring focus
+- Server state transitions trigger `aria-live` announcements: "qwen3-30b changed from Running to Draining"
+- Charts have text summaries as `aria-label`: "Throughput chart: 14.2 requests per minute, trending up 12% from yesterday"
+- Queue position updates use `aria-live="assertive"` only for the user's own requests, `polite` for the overview
+
+### 16.5 Reduced Motion
+
+- All animations respect `prefers-reduced-motion: reduce`
+- The "Restarting" spinner becomes a static ⟳ icon
+- Chart transitions become instant
+- Auto-refresh indicators use text ("Updated 2s ago") instead of animated spinners
+
+---
+
+## 17. Cross-Cutting UX Principles
+
+These principles apply across all journeys and surfaces.
+
+### 17.1 Progressive Disclosure by Intent
+
+Every UI surface has three depth levels, organized not by hiding information but by what the user is trying to do:
+
+| Level | Intent | What's shown | Who | Time spent |
+|-------|--------|-------------|-----|-----------|
+| **Glance** | "Is everything OK?" | Status color + shape + label, one key number | Everyone, every visit | < 10 seconds |
+| **Inspect** | "Tell me more about this" | Per-server metrics, queue breakdown, recent events | Operator checking in | 1–3 minutes |
+| **Investigate** | "I need to find something specific" | Full query tools, request timelines, log correlation | Operator debugging | 5–30 minutes |
+
+The Simple View (Power User) stays permanently at the Glance level. The Detailed View (Operator) starts at Glance and lets you drill down.
+
+### 17.2 Actionable Alerts, Not Noise
+
+Every alert must contain:
+1. **What** is wrong (in words, not error codes)
+2. **What's the impact** (are requests being affected? which ones?)
+3. **What to do** (specific action, or "this will resolve on its own")
+4. **A way to dig deeper** (link to the relevant detail page)
+
+### 17.3 CLI-Web Parity
+
+Every action possible in the Web UI is also possible via CLI. The CLI is the automation and scripting interface, not a fallback:
 
 | Web UI Action | CLI Equivalent |
 |--------------|---------------|
 | Dashboard overview | `llamaforge status` |
-| Start server | `llamaforge server start <id>` |
-| Stop server | `llamaforge server stop <id>` |
-| View queue | `llamaforge queue list` |
-| Cancel request | `llamaforge queue cancel <request-id>` |
-| Boost priority | `llamaforge queue boost <request-id> --priority 900` |
-| Reload config | `llamaforge config reload` |
-| View config | `llamaforge config show` |
-| Export config | `llamaforge config export > backup.toml` |
-| Query metrics | `llamaforge metrics query --model qwen3-30b --last 1h` |
+| Add/start/stop server | `llamaforge server {add,start,stop,drain} <id>` |
+| View/cancel/boost queue | `llamaforge queue {list,cancel,boost} [id]` |
+| Reload/revert config | `llamaforge config {reload,revert,show,export}` |
+| Query metrics | `llamaforge metrics query --model X --last 1h` |
 | View logs | `llamaforge logs --follow --level info` |
-| WAL checkpoint | `llamaforge maintenance checkpoint` |
+| Force maintenance | `llamaforge maintenance checkpoint` |
 
-### 13.5 Real-Time Without Polling
+### 17.4 Offline-First
 
-The Web UI uses htmx with SSE or WebSocket polling for real-time updates. Key requirements:
-
-- **Dashboard metrics:** Update every 2 seconds (matches health check interval)
-- **Queue state:** Update on every enqueue/dequeue event via SSE
-- **Server state:** Update on lifecycle transitions (not polling — event-driven via htmx `hx-trigger="sse:server-state"`)
-- **Alert cards:** Appear/disappear as conditions are met/resolved
-
-### 13.6 Offline-First Design
-
-The Web UI is embedded in the binary (static files via `include_bytes!`). It works without internet access. No CDN dependencies for core functionality. ECharts and Alpine.js are bundled.
+The Web UI is embedded in the binary (`include_bytes!`). It works without internet. No CDN dependencies for core functionality. All JS and CSS are bundled.
 
 ---
 
-## 14. Extensibility Framework
+## 18. Vocabulary
 
-The user journeys above cover LlamaForge v1. The UI/UX architecture must accommodate future capabilities without redesigning the core navigation or information hierarchy.
+Consistent terms across CLI, Web UI, API, logs, and documentation. If two surfaces use different words for the same thing, one of them is wrong.
 
-### 14.1 Extension Points
+| Concept | Use this | Not this |
+|---------|---------|---------|
+| A `llama-server` process | **server** or **server instance** | worker, node, backend |
+| A model loaded in a server | **model** | deployment, endpoint |
+| A concurrent processing unit | **slot** | thread, worker, connection |
+| A client's inference call | **request** | job, task, query |
+| Shutting down while finishing work | **drain** | graceful stop, wind down |
+| The priority class of work | **task type** | job class, priority tier |
+| The entity sending requests | **requestor** | client, user, tenant |
+| The config change lifecycle | **propose, preview, confirm** | submit, validate, apply |
+| Reverting a change | **revert** | rollback, undo, restore |
+| The Web UI's stripped-down mode | **Simple View** | basic mode, lite mode, easy mode |
+
+---
+
+## 19. Extensibility Framework
+
+The twelve journeys above cover LlamaForge v1. The UI architecture must accommodate future capabilities without redesigning the core navigation.
+
+### 19.1 Navigation Architecture
+
+The sidebar follows a hub-and-spoke model. New features add new entries without restructuring existing pages:
+
+```
+Primary Navigation (sidebar)
+├── Dashboard          (the overview hub — always first)
+├── Servers            (lifecycle, slots, LoRA, per-server metrics)
+├── Queue              (inspector, admission control, priorities)
+├── Requests           (explorer, per-request detail, audit trail)
+├── Metrics            (charts, trends, capacity planning)
+├── Configuration      (viewer, change history, preview, revert)
+└── ─── future ─────────────────────────────────────────
+    ├── Cluster        (v2: multi-node topology, node health)
+    ├── Models         (v2: model registry, download manager)
+    └── Settings       (v2: auth, RBAC, API keys, user preferences)
+```
+
+### 19.2 Extension Points by Version
 
 ```mermaid
 flowchart TD
-    subgraph "v1 Core (Solid)"
+    subgraph "v1 Core"
         A["Dashboard"]
         B["Server Management"]
         C["Queue Inspector"]
@@ -1251,281 +1382,126 @@ flowchart TD
         F["Metrics"]
     end
 
-    subgraph "v1.x Extensions (Planned)"
+    subgraph "v1.x"
         G["LoRA Adapter Manager"]
         H["Cache Lifecycle UI"]
         I["Session Affinity Viewer"]
-        J["Prompt Cache Analytics"]
     end
 
-    subgraph "v2 Extensions (Future)"
-        K["Multi-Node Cluster View"]
-        L["Node Health Map"]
-        M["Cross-Node Routing"]
-        N["Model Marketplace"]
+    subgraph "v2"
+        K["Multi-Node Cluster"]
+        L["Model Registry"]
+        M["Auth & RBAC"]
     end
 
-    subgraph "Possible Future"
-        O["Desktop Client (Tauri)"]
-        P["System Tray Status"]
-        Q["Model Download Manager"]
-        R["Fine-Tuning UI"]
+    subgraph "Desktop Client"
+        O["Tauri shell around Web UI"]
+        P["System tray status"]
+        Q["Native file picker for models"]
+        R["Auto-start on boot"]
     end
 
     A --> G
-    B --> G
     B --> H
     C --> I
-    D --> J
-    F --> J
 
     A -.-> K
     B -.-> L
-    C -.-> M
-    E -.-> N
+    E -.-> M
 
     A -..-> O
-    O -..-> P
-    N -..-> Q
-    B -..-> R
-
-    style A fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style B fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style C fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style D fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style E fill:#2d5a27,stroke:#4a8c3f,color:#fff
-    style F fill:#2d5a27,stroke:#4a8c3f,color:#fff
 ```
 
-### 14.2 Navigation Architecture
+### 19.3 Desktop Client Evolution
 
-The Web UI navigation should follow a hub-and-spoke model that naturally accommodates new sections:
-
-```
-Primary Navigation (sidebar or top bar)
-├── Dashboard          (always first — the overview hub)
-├── Servers            (server lifecycle, slots, LoRA adapters)
-├── Queue              (queue inspector, admission control)
-├── Requests           (request explorer, per-request detail)
-├── Metrics            (charts, trends, capacity planning)
-├── Configuration      (TOML viewer, reload, diff)
-└── ─── future ────
-    ├── Cluster        (v2: multi-node view)
-    ├── Models         (v2: marketplace, download manager)
-    └── Settings       (v2: auth, RBAC, API keys)
-```
-
-Each navigation item is a self-contained "page" with its own URL route (`/ui/servers`, `/ui/queue`, etc.). New features add new routes and sidebar entries without restructuring existing pages.
-
-### 14.3 Desktop Client Evolution Path
-
-When a Tauri-based desktop client is built, it should wrap the same Web UI with native enhancements:
+The Tauri desktop client wraps the same Web UI with native enhancements:
 
 | Feature | Web UI | Desktop Client |
 |---------|--------|---------------|
 | Dashboard | Same | Same, in native window |
-| System tray | Not available | ● Green/Yellow/Red status indicator |
-| Notifications | Not available | Native OS notifications for alerts |
-| Auto-start | Not available | Start LlamaForge on system boot |
-| Menu bar | Not available | Quick actions: start/stop, open dashboard |
-| Model files | Manual path entry | Native file picker for model selection |
-| GPU detection | Requires CLI | Automatic, displayed in setup wizard |
+| System tray | Not available | Status indicator (● / △ / ✕) |
+| Notifications | Not available | Native OS alerts for failures |
+| Auto-start | Not available | Launch on boot |
+| Model files | Path entry | Native file picker |
 
-The desktop client is a thin native shell around the Web UI, not a separate codebase. The htmx + Alpine.js stack works in a Tauri webview without modification.
-
-### 14.4 Plugin Architecture Hooks (Future)
-
-The UI should eventually support plugins that add:
-- New dashboard widgets (custom metric visualizations)
-- Custom alert rules (beyond the built-in health signals)
-- Integration panels (e.g., a HuggingFace model browser)
-- Custom API endpoint registration (for domain-specific tooling)
-
-These are achieved via the existing extension points: new `/ui/partials/*` routes for htmx fragments, new `/api/*` endpoints for data, and new sidebar entries.
+The desktop client is a thin native shell, not a separate codebase.
 
 ---
 
-## 15. UI Surface Mapping
+## 20. UI Surface Mapping
 
-A consolidated view of which UI surfaces serve which journeys and personas:
+Which surfaces serve which journeys:
+
+| Journey | Primary UI | Primary CLI | Primary API |
+|---------|-----------|------------|-------------|
+| J1 First Contact | — (terminal) | `llamaforge init`, `start` | — |
+| J2 Add a Model | Server Management | `server add` | POST /api/servers |
+| J3 Morning Check-In | Dashboard | `status` | GET /api/servers, /api/queue |
+| J4 Plug In an App | — | — | /v1/chat/completions, /v1/messages |
+| J5 Change Config | Configuration | `config reload`, `revert` | POST /api/config/reload |
+| J6 Why Is It Slow? | Queue Inspector | `queue list` | GET /api/queue |
+| J7 Something Is Wrong | Dashboard + Request Explorer | `status`, `logs` | GET /api/metrics |
+| J8 Outgrow One Model | Server Management | `server add` | POST /api/servers |
+| J9 Plan for Next Month | Metrics > Capacity | `metrics query` | /metrics (Prometheus) |
+| J10 Planned Downtime | Server Management | `server drain`, `stop`, `start` | POST /api/servers/{id}/stop |
+| J11 Power User | Dashboard (Simple View) | — (never uses CLI) | — (via chat app) |
+| J12 Inheriting | Configuration > History | `config show` | GET /api/config |
+
+### 20.1 Information Architecture
 
 ```mermaid
 graph TD
-    subgraph "Web UI Pages"
-        WD["Dashboard"]
-        WS["Server Management"]
-        WQ["Queue Inspector"]
-        WR["Request Explorer"]
-        WC["Configuration Viewer"]
-        WM["Metrics & Charts"]
-    end
+    Root["/ui"] --> Dash["/ui/dashboard"]
+    Root --> Servers["/ui/servers"]
+    Root --> Queue["/ui/queue"]
+    Root --> Requests["/ui/requests"]
+    Root --> Metrics["/ui/metrics"]
+    Root --> Config["/ui/config"]
 
-    subgraph "CLI Commands"
-        CS["llamaforge status"]
-        CSS["llamaforge server *"]
-        CQ["llamaforge queue *"]
-        CC["llamaforge config *"]
-        CM["llamaforge metrics *"]
-        CL["llamaforge logs *"]
-    end
+    Dash -->|"Simple View toggle"| Simple["Simple View<br/>(Power User default)"]
 
-    subgraph "API Endpoints"
-        A1["/v1/chat/completions"]
-        A2["/v1/messages"]
-        A3["/api/servers"]
-        A4["/api/queue"]
-        A5["/api/metrics"]
-        A6["/metrics (Prometheus)"]
-    end
+    Servers --> ServerDetail["/ui/servers/:id"]
+    ServerDetail --> SlotView["Slot Inspector"]
+    ServerDetail --> LoraView["LoRA Adapters"]
+    ServerDetail --> ServerMetrics["Per-Server Metrics"]
 
-    subgraph "Journeys"
-        J1["J1: Install"]
-        J2["J2: Model Setup"]
-        J3["J3: Daily Ops"]
-        J4["J4: API Integration"]
-        J5["J5: Config Tuning"]
-        J6["J6: Priority Mgmt"]
-        J7["J7: Troubleshoot"]
-        J8["J8: Scaling"]
-        J9["J9: Observability"]
-        J10["J10: Maintenance"]
-    end
+    Queue --> Admission["Admission Control"]
 
-    J1 --> CS
-    J2 --> WS & CSS
-    J3 --> WD & CS
-    J4 --> A1 & A2
-    J5 --> WC & CC
-    J6 --> WQ & CQ
-    J7 --> WR & CL & WS
-    J8 --> WS & WM & CSS
-    J9 --> WM & A6 & CM
-    J10 --> CSS & WS & A3
+    Requests --> RequestDetail["/ui/requests/:id<br/>Full request timeline"]
+
+    Metrics --> Capacity["Capacity Planning"]
+
+    Config --> History["Change History"]
+    Config --> Preview["Change Preview"]
 ```
 
-### 15.1 Page-Level Requirements Matrix
+### 20.2 Page Priority for Implementation
 
-| Page | Real-Time? | Data Source | htmx Pattern | Priority |
-|------|-----------|-------------|-------------|----------|
-| Dashboard | Yes (2s) | Ring buffer + server state | SSE for metrics, polling for health | P0 — ship first |
-| Server Management | Event-driven | Server Manager state | SSE on lifecycle events | P0 |
-| Queue Inspector | Yes (event) | Queue + admission | SSE on enqueue/dequeue | P1 |
-| Request Explorer | On-demand | SQLite audit log | Form submit + server-rendered table | P1 |
-| Configuration Viewer | On-reload | Config Manager | Full page swap on reload event | P2 |
-| Metrics & Charts | Yes (5s) | Prometheus + ring buffer | ECharts + SSE data feed | P2 |
+| Priority | Page | Why |
+|----------|------|-----|
+| P0 | Dashboard (both views) | Every user, every visit. The ten-second check. |
+| P0 | Server Management | Core lifecycle operations. Adding/removing models. |
+| P1 | Queue Inspector | Understanding why things are slow. |
+| P1 | Request Explorer | Post-incident investigation. |
+| P2 | Configuration | Config changes, preview, revert, change history. |
+| P2 | Metrics & Capacity | Capacity planning, trend analysis. |
+| P3 | Simple View | Power User experience. |
 
 ---
 
-## Appendix A: Wireframe Sketches
+## Appendix: Design Principles Summary
 
-These ASCII wireframes define the spatial layout for each primary Web UI page. They serve as the starting point for visual design.
-
-### A.1 Dashboard
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ ☰  LlamaForge                                    v0.1.0  ⚙️   │
-├──────┬───────────────────────────────────────────────────────────┤
-│      │                                                           │
-│  📊  │  HEALTH STRIP                                            │
-│ Dash │  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────────────┐    │
-│      │  │● Srvrs │ │● Queue │ │● Errs  │ │● Throughput    │    │
-│  🖥️  │  │ 3/3    │ │ 2/100  │ │ 0.1%   │ │ 14.2 req/min  │    │
-│ Srvr │  └────────┘ └────────┘ └────────┘ └────────────────┘    │
-│      │                                                           │
-│  📋  │  ┌────────────────────────┐ ┌────────────────────────┐   │
-│ Queue│  │   THROUGHPUT CHART     │ │   TTFT DISTRIBUTION    │   │
-│      │  │                        │ │                        │   │
-│  🔍  │  │   [ECharts area chart] │ │   [ECharts histogram]  │   │
-│ Reqs │  │                        │ │                        │   │
-│      │  └────────────────────────┘ └────────────────────────┘   │
-│  📈  │                                                           │
-│ Mtrc │  SERVER CARDS                                            │
-│      │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
-│  ⚙️  │  │ qwen3-30b    │ │ codellama    │ │ mistral-7b   │     │
-│ Conf │  │ ● Running    │ │ ● Running    │ │ ● Draining   │     │
-│      │  │ 6/8 slots    │ │ 3/4 slots    │ │ 1/4 slots    │     │
-│      │  │ 22.4 TPS     │ │ 38.1 TPS     │ │ — TPS        │     │
-│      │  └──────────────┘ └──────────────┘ └──────────────┘     │
-└──────┴───────────────────────────────────────────────────────────┘
-```
-
-### A.2 Server Management Detail
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ ☰  Server: qwen3-30b (code-1)                   ← Back to list │
-├──────┬───────────────────────────────────────────────────────────┤
-│      │                                                           │
-│ Nav  │  STATE: ● Running    Uptime: 2d 14h    PID: 28451       │
-│      │  ┌─────────┐ ┌──────────┐ ┌───────┐ ┌──────────┐       │
-│      │  │  Stop   │ │ Restart  │ │ Drain │ │  Config  │       │
-│      │  └─────────┘ └──────────┘ └───────┘ └──────────┘       │
-│      │                                                           │
-│      │  CONFIGURATION                                           │
-│      │  Model: /models/qwen3-30b-Q4_K_M.gguf                   │
-│      │  GPU: 0 (RTX 3090)  VRAM: 17.2 / 24 GB                  │
-│      │  Context: 8192   Batch: 512   Slots: 8                   │
-│      │  Flash Attn: auto   Cache: f16/f16                       │
-│      │                                                           │
-│      │  SLOT STATUS                                             │
-│      │  ┌─────┬────────┬───────┬────────┬──────────┐           │
-│      │  │Slot │ State  │ Tokens│ TPS    │ Request  │           │
-│      │  ├─────┼────────┼───────┼────────┼──────────┤           │
-│      │  │  0  │●Active │ 1,204 │ 24.1   │ req-a3.. │           │
-│      │  │  1  │●Active │   847 │ 22.8   │ req-b1.. │           │
-│      │  │  2  │●Active │   312 │ 25.0   │ req-c2.. │           │
-│      │  │  3  │○Idle   │     — │ —      │ —        │           │
-│      │  │  4  │●Active │ 2,105 │ 21.3   │ req-d7.. │           │
-│      │  │  5  │●Active │   156 │ 23.7   │ req-e4.. │           │
-│      │  │  6  │●Active │ 1,890 │ 22.0   │ req-f9.. │           │
-│      │  │  7  │○Idle   │     — │ —      │ —        │           │
-│      │  └─────┴────────┴───────┴────────┴──────────┘           │
-│      │                                                           │
-│      │  PERFORMANCE (last 1h)                                   │
-│      │  ┌────────────────────────────────────────────┐          │
-│      │  │  [ECharts: TPS + TTFT over time]           │          │
-│      │  └────────────────────────────────────────────┘          │
-│      │                                                           │
-│      │  LIFECYCLE HISTORY                                       │
-│      │  10:32  Config reload → restart                          │
-│      │  10:28  Started (health check passed in 4.2s)            │
-│      │  08:15  Started (initial boot)                           │
-└──────┴───────────────────────────────────────────────────────────┘
-```
+1. **Every journey starts with a human, not a system trigger.** The opening paragraph sets a scene with a person, a constraint, and stakes.
+2. **Every flowchart is narrated from the user's chair.** If a node says "ArcSwap" or "mutex," it's in the wrong document.
+3. **Every error message is a complete thought.** What happened, why it matters, what to do.
+4. **Every empty state is an invitation.** Zero data is the first impression — design it.
+5. **Every state has three encodings.** Color + shape + label. No exceptions.
+6. **Every alert is actionable.** Symptom, impact, next step, dig-deeper link.
+7. **Every surface works via CLI too.** The Web UI is the pretty version, not the only version.
+8. **Propose, preview, confirm, observe, recover.** Every destructive or disruptive action follows this arc.
+9. **The Power User never needs a terminal.** If they do, the product failed them.
+10. **Inheritance is a first-class journey.** The person who inherits this system didn't build it and can't ask the person who did.
 
 ---
 
-## Appendix B: Information Architecture
-
-```mermaid
-graph TD
-    Root["LlamaForge Web UI<br/>/ui"] --> Dash["Dashboard<br/>/ui/dashboard"]
-    Root --> Servers["Servers<br/>/ui/servers"]
-    Root --> Queue["Queue<br/>/ui/queue"]
-    Root --> Requests["Requests<br/>/ui/requests"]
-    Root --> Metrics["Metrics<br/>/ui/metrics"]
-    Root --> Config["Configuration<br/>/ui/config"]
-
-    Servers --> ServerDetail["Server Detail<br/>/ui/servers/:id"]
-    ServerDetail --> SlotView["Slot Inspector<br/>/ui/servers/:id/slots"]
-    ServerDetail --> LoraView["LoRA Adapters<br/>/ui/servers/:id/lora"]
-    ServerDetail --> ServerMetrics["Server Metrics<br/>/ui/servers/:id/metrics"]
-
-    Queue --> QueueDetail["Request Detail<br/>/ui/queue/:request_id"]
-    Queue --> Admission["Admission Control<br/>/ui/queue/admission"]
-
-    Requests --> RequestDetail["Request Detail<br/>/ui/requests/:request_id"]
-
-    Metrics --> Capacity["Capacity Planning<br/>/ui/metrics/capacity"]
-    Metrics --> Prometheus["Prometheus Export<br/>/metrics"]
-
-    Config --> ConfigDiff["Reload Diff<br/>/ui/config/diff"]
-
-    style Root fill:#1a4a6e,stroke:#2980b9,color:#fff
-    style Dash fill:#2d5a27,stroke:#4a8c3f,color:#fff
-```
-
----
-
-*This document defines user journeys for LlamaForge v1. It is a living document — update it as the product evolves and as user feedback reshapes priorities. Each journey should be validated against real user behavior during the Phase 5 (Web UI) implementation.*
+*This is a living document. Update it after the first time a real user struggles with the setup wizard. Update it again after the first time someone inherits a running forge and can't figure out why a rule exists. Version 0.2.0 will become 1.0.0 not because it was polished, but because it learned from the world.*

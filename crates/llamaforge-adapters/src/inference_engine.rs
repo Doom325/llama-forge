@@ -37,7 +37,6 @@ pub struct InferenceEngineAdapter {
     #[allow(dead_code)]
     router: Arc<Router>,
     dispatcher: Arc<Dispatcher>,
-    #[allow(dead_code)]
     metrics: Arc<MetricsIngest>,
 }
 
@@ -128,6 +127,8 @@ impl InferenceEngine for InferenceEngineAdapter {
         };
 
         let dispatcher = Arc::clone(&self.dispatcher);
+        let metrics_for_audit = Arc::clone(&self.metrics);
+        let audit_model = req.model.clone();
 
         let s = stream! {
             let start_time = tokio::time::Instant::now();
@@ -179,24 +180,25 @@ impl InferenceEngine for InferenceEngineAdapter {
                 routing,
             };
 
-            // Audit channel: dispatch emits its own `AuditRecord` shape
-            // (different from `metrics::AuditRecord`), so a translator is
-            // needed to forward records into the metrics ingest. The
-            // translator lives in PR9b alongside the e2e harness work that
-            // exercises the audit path end-to-end. For now records are
-            // received and dropped — explicitly logged so the drop is not
-            // silent.
+            // Audit channel: dispatch emits its own per-request summary
+            // (`dispatch::proxy::AuditRecord`). Translate each record into
+            // the metrics-layer `AuditRecord` and forward via the metrics
+            // ingest; the batch collector lands it in the `events` table
+            // and aggregates `RequestMetrics`.
             let (audit_tx, mut audit_rx) = tokio::sync::mpsc::channel(32);
+            let metrics_for_audit = metrics_for_audit.clone();
+            let audit_ctx = crate::audit::AuditContext {
+                model_name: audit_model.clone(),
+                requestor: llamaforge_config::RequestorId("anonymous".to_string()),
+                task_type: llamaforge_config::TaskTypeId("default".to_string()),
+                received_at: chrono::Utc::now(),
+            };
             tokio::spawn(async move {
-                let mut dropped: u64 = 0;
-                while audit_rx.recv().await.is_some() {
-                    dropped = dropped.saturating_add(1);
-                }
-                if dropped > 0 {
-                    tracing::debug!(
-                        dropped,
-                        "inference_engine.audit_records_unwired"
-                    );
+                while let Some(record) = audit_rx.recv().await {
+                    let translated = crate::audit::translate_audit(record, &audit_ctx);
+                    if let Err(e) = metrics_for_audit.send_audit(translated).await {
+                        tracing::debug!(error = %e, "inference_engine.audit_send_failed");
+                    }
                 }
             });
 
@@ -224,7 +226,10 @@ impl InferenceEngine for InferenceEngineAdapter {
                                         .finish_reason
                                         .filter(|s| !s.is_empty())
                                         .unwrap_or_else(|| "stop".to_string());
-                                    yield Ok(ChatCompletionChunk::Stop(reason));
+                                    yield Ok(ChatCompletionChunk::Stop {
+                                        finish_reason: reason,
+                                        output_tokens: tokens_emitted,
+                                    });
                                     return;
                                 } else if !parsed.text.is_empty() {
                                     tokens_emitted = tokens_emitted.saturating_add(1);
@@ -247,7 +252,10 @@ impl InferenceEngine for InferenceEngineAdapter {
                                 // Stop; otherwise we surface the loss as
                                 // BackendDisconnect.
                                 if tokens_emitted > 0 {
-                                    yield Ok(ChatCompletionChunk::Stop("stop".to_string()));
+                                    yield Ok(ChatCompletionChunk::Stop {
+                                        finish_reason: "stop".to_string(),
+                                        output_tokens: tokens_emitted,
+                                    });
                                 } else {
                                     yield Err(StreamError::BackendDisconnect);
                                 }
@@ -508,7 +516,7 @@ mod tests {
         let mut got: Vec<ChatCompletionChunk> = Vec::new();
         while let Some(item) = stream.next().await {
             got.push(item.expect("chunk error"));
-            if matches!(got.last(), Some(ChatCompletionChunk::Stop(_))) {
+            if matches!(got.last(), Some(ChatCompletionChunk::Stop { .. })) {
                 break;
             }
         }
@@ -516,7 +524,7 @@ mod tests {
         assert!(matches!(got[0], ChatCompletionChunk::QueueUpdate { position: 1 }));
         assert!(got.iter().any(|c| matches!(c, ChatCompletionChunk::Token(s) if s == "Hel")));
         assert!(got.iter().any(|c| matches!(c, ChatCompletionChunk::Token(s) if s == "lo")));
-        assert!(matches!(got.last(), Some(ChatCompletionChunk::Stop(_))));
+        assert!(matches!(got.last(), Some(ChatCompletionChunk::Stop { .. })));
     }
 
     #[tokio::test]

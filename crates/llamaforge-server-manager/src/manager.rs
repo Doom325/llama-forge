@@ -122,7 +122,7 @@ impl ServerManager {
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to build reqwest client for orphan recovery: {}. Skipping orphan recovery.", e);
+                    tracing::warn!(error = %e, "server_manager.orphan_recovery_client_build_failed");
                 }
             }
         }

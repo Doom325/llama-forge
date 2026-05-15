@@ -411,8 +411,11 @@ pub enum ChatCompletionChunk {
     QueueUpdate { position: u32 },
     /// A generated token.
     Token(String),
-    /// The final chunk with a finish reason.
-    Stop(String),
+    /// The final chunk with a finish reason and the cumulative
+    /// generated-token count for the request. The token count is what
+    /// the Anthropic shim reports as `usage.output_tokens` and what
+    /// OpenAI clients receive on the terminal chunk.
+    Stop { finish_reason: String, output_tokens: u32 },
 }
 
 /// Error type for stream failures.
