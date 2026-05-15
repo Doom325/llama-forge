@@ -50,9 +50,9 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         mock_port,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         mock_port + 1
     ));
 
@@ -135,4 +135,20 @@ async fn test_gpu_semaphore() {
     assert!(diff.as_secs_f64() >= 1.5, "Stagger not enforced: diff was {:?}", diff);
 
     token.cancel();
+}
+
+/// See `config_tests::mock_llama_bin` — same rationale (env! is only
+/// set for tests in the same package as the bin).
+fn mock_llama_bin() -> String {
+    let target =
+        std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target")
+        });
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target.join(profile).join("mock-llama").to_string_lossy().into_owned()
 }
