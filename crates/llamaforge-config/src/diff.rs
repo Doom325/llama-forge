@@ -27,6 +27,10 @@ pub enum ConfigChange {
     RoutingConfigChanged,
     /// CORS configuration changed.
     CorsConfigChanged,
+    /// Gateway (request body / concurrency) settings changed.
+    GatewayConfigChanged,
+    /// gRPC TLS settings changed (enabled flag or cert/key paths).
+    GrpcTlsChanged,
     /// A new server was added.
     ServerAdded { id: ServerId },
     /// A server was removed.
@@ -148,6 +152,17 @@ pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff {
 
     if old.cors != new.cors {
         changes.push(ConfigChange::CorsConfigChanged);
+    }
+
+    if old.gateway != new.gateway {
+        changes.push(ConfigChange::GatewayConfigChanged);
+    }
+
+    if old.grpc.tls_enabled != new.grpc.tls_enabled
+        || old.grpc.tls_cert != new.grpc.tls_cert
+        || old.grpc.tls_key != new.grpc.tls_key
+    {
+        changes.push(ConfigChange::GrpcTlsChanged);
     }
 
     // Servers added or changed
@@ -350,6 +365,28 @@ mod tests {
             ConfigChange::PriorityRulesChanged => {}
             _ => panic!("expected PriorityRulesChanged"),
         }
+    }
+
+    #[test]
+    fn test_compute_diff_gateway_changed() {
+        let old = AppConfig::default();
+        let mut new = AppConfig::default();
+        new.gateway.max_concurrent_large_requests = 12;
+
+        let diff = compute_diff(&old, &new);
+        assert!(diff.changes.iter().any(|c| matches!(c, ConfigChange::GatewayConfigChanged)));
+    }
+
+    #[test]
+    fn test_compute_diff_grpc_tls_changed() {
+        let old = AppConfig::default();
+        let mut new = AppConfig::default();
+        new.grpc.tls_enabled = true;
+        new.grpc.tls_cert = Some(PathBuf::from("/etc/llamaforge/cert.pem"));
+        new.grpc.tls_key = Some(PathBuf::from("/etc/llamaforge/key.pem"));
+
+        let diff = compute_diff(&old, &new);
+        assert!(diff.changes.iter().any(|c| matches!(c, ConfigChange::GrpcTlsChanged)));
     }
 
     #[test]

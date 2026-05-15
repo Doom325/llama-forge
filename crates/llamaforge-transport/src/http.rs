@@ -459,12 +459,15 @@ where
     let management_state = crate::management::ManagementState {
         server_control: state.server_control.clone(),
         queue_submitter: state.queue_submitter.clone(),
+        config_reader: state.config_reader.clone(),
         config_writer: state.config_writer.clone(),
         request_metrics_store: state.request_metrics_store.clone(),
         store_maintenance: state.store_maintenance.clone(),
     };
 
     let management_router = crate::management::management_routes(management_state);
+
+    let max_body_bytes = state.config_reader.snapshot().gateway.max_request_body_bytes as usize;
 
     let inference_router = Router::new()
         .route("/v1/chat/completions", post(openai_chat_completion_handler::<CW, RMS, SM>))
@@ -483,7 +486,7 @@ where
             state.large_body_limit.clone(),
             large_body_limit_middleware,
         ))
-        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024))
+        .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(crate::middleware::build_cors_layer(state.config_reader.clone()))
         .layer(CatchPanicLayer::new())
 }

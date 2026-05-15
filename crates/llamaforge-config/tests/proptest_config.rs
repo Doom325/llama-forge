@@ -241,6 +241,7 @@ fn arb_app_config() -> impl Strategy<Value = AppConfig> {
         .prop_map(|(global, grpc, prometheus, web_ui, servers, priority_rules)| AppConfig {
             global,
             grpc,
+            gateway: Default::default(),
             prometheus,
             web_ui,
             servers,

@@ -308,7 +308,7 @@ where
     tracing::info!(
         bind_address = %config.global.bind_address,
         port = config.global.grpc_port,
-        tls = grpc_config.tls_cert.is_some(),
+        tls = grpc_config.tls_enabled,
         "transport.started"
     );
 
@@ -323,8 +323,23 @@ where
         .http2_keepalive_timeout(Some(keepalive_timeout))
         .max_concurrent_streams(max_concurrent_streams);
 
-    if let (Some(_cert_path), Some(_key_path)) = (&grpc_config.tls_cert, &grpc_config.tls_key) {
-        // TODO: Load certificates and configure TLS
+    if grpc_config.tls_enabled {
+        let cert_path = grpc_config.tls_cert.as_ref().ok_or_else(|| {
+            TransportError::Bootstrap("grpc.tls_enabled=true requires grpc.tls_cert".to_string())
+        })?;
+        let key_path = grpc_config.tls_key.as_ref().ok_or_else(|| {
+            TransportError::Bootstrap("grpc.tls_enabled=true requires grpc.tls_key".to_string())
+        })?;
+        let cert = std::fs::read(cert_path).map_err(|e| {
+            TransportError::Bootstrap(format!("read tls_cert {}: {}", cert_path.display(), e))
+        })?;
+        let key = std::fs::read(key_path).map_err(|e| {
+            TransportError::Bootstrap(format!("read tls_key {}: {}", key_path.display(), e))
+        })?;
+        let identity = tonic::transport::Identity::from_pem(cert, key);
+        builder = builder
+            .tls_config(tonic::transport::ServerTlsConfig::new().identity(identity))
+            .map_err(|e| TransportError::Bootstrap(format!("tls config: {}", e)))?;
     }
 
     builder
