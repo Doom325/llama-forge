@@ -2,25 +2,20 @@
 //! adapters into a single `TransportDeps`. See design doc §4.4 and
 //! PLAN.md PR8.4 for the dependency-strict construction order.
 //!
-//! Three port-trait gaps remain on `main` and are bridged here with
-//! local in-bin shims:
+//! Port-trait wiring summary:
 //!
 //! * `ports::SlotNotifier` is satisfied by `QueueSlotNotifier`, which
 //!   forwards into `DispatchQueue::notify_slot_available`. The queue's
 //!   wake channel is queue-wide, so the per-server `server_id` argument
 //!   is ignored — that matches the scheduler's actual semantics today.
-//! * `ports::SlotErasure` has no production implementation on main;
-//!   `NoopSlotErasure` is used as a deliberate placeholder. The dispatch
+//! * `ports::SlotErasure` is satisfied by `NoopSlotErasure`. The
 //!   reconciliation path that would call `erase_slot` becomes a no-op
-//!   until a real impl lands (PR9 / PR10 will add it once mock-llama
-//!   integration surfaces the failure mode).
-//! * `routing::ServerStateView` is satisfied by `EmptyServerStateView`,
-//!   another placeholder. A real adapter requires reconciling
-//!   `server-manager::ServerStateSnapshot.id` (`config::ServerId`, a
-//!   String wrapper) with the routing snapshot's `types::ServerId`
-//!   (a Uuid wrapper). That work lives with the e2e harness in PR9 /
-//!   PR10; routing currently returns "no servers" so the scheduler
-//!   holds requests until the fleet is wired up.
+//!   until a real impl lands alongside the e2e harness in PR9b once
+//!   mock-llama provides a verifiable slot-free contract.
+//! * `routing::ServerStateView` is satisfied by `ServerStateAdapter`,
+//!   which projects `server-manager::ServerStateSnapshot` into the
+//!   routing-layer `ServerSnapshot` via
+//!   [`config_server_id_to_types_id`].
 
 use std::sync::Arc;
 
@@ -98,15 +93,8 @@ pub async fn build(
     let slot_map = Arc::new(SlotDispatchMap::new());
 
     // 5) Router. Consumes server-state + dispatch-count views.
-    //    `EmptyServerStateView` is a deliberate placeholder: bridging
-    //    `server-manager::ServerStateSnapshot` to the routing layer's
-    //    `ServerSnapshot` requires reconciling two different `ServerId`
-    //    types (config::ServerId vs types::ServerId) — that reconciliation
-    //    is dispatch-phase work, not composition. Until then routing
-    //    answers "no servers"; the scheduler holds requests until the
-    //    fleet is wired up, which lands with the e2e harness (PR9 / PR10).
-    let server_state_view: Arc<dyn ServerStateView> = Arc::new(EmptyServerStateView);
-    let _ = &server_manager;
+    let server_state_view: Arc<dyn ServerStateView> =
+        Arc::new(ServerStateAdapter::new(server_manager.clone()));
     let router = Arc::new(Router::new(config.clone(), server_state_view.clone(), dispatch_counts));
 
     // 6) Queue + scheduler. Routing is performed by the scheduler loop,
@@ -204,9 +192,12 @@ impl SlotNotifier for QueueSlotNotifier {
     }
 }
 
-/// Placeholder slot-erasure impl. Real implementation (calling
-/// llama-server's slot-free endpoint) lands with the e2e harness in
-/// PR9 once mock-llama provides a verifiable contract.
+/// Placeholder slot-erasure impl. The real impl is a single
+/// `POST {base_url}/slots/{slot_id}?action=erase` with a 5s timeout
+/// (design doc §6.629), but the call requires a `server_id → base_url`
+/// lookup that today's `ReqwestClientStore` only populates via
+/// `add_server` — currently unwired on main. PR9b lands both pieces
+/// together against mock-llama, where the contract can be verified.
 struct NoopSlotErasure;
 
 #[async_trait::async_trait]
@@ -216,17 +207,76 @@ impl SlotErasure for NoopSlotErasure {
     }
 }
 
-/// Placeholder server-state view. Returns no servers; routing therefore
-/// rejects all requests as `NoServerForModel`. The proper adapter has
-/// to reconcile `server-manager::ServerStateSnapshot.id`
-/// (`config::ServerId`, a String wrapper) with the routing snapshot's
-/// `types::ServerId` (a Uuid wrapper). That reconciliation is dispatch
-/// substance, not composition; it lands with the e2e harness work in
-/// PR9 / PR10.
-struct EmptyServerStateView;
+/// Bridges `server-manager::ServerStateSnapshot` to the routing layer's
+/// `ServerSnapshot`. The two `ServerId` types are reconciled via
+/// [`config_server_id_to_types_id`]: load-time validation in
+/// `ConfigHandle::load` (`handle.rs:27-35`) guarantees every
+/// `config::ServerId` is UUID-shaped, so the parse is infallible by
+/// construction — the lone `.expect` cites that invariant.
+///
+/// `all_servers()` is called per routing decision (hot path). The
+/// projection is `O(n)` over the fleet plus one `Uuid::parse_str` per
+/// server. With v1's expected fleet size (low single digits) the cost
+/// is unmeasurable; a caching layer ("parse once on snapshot diff,
+/// store the `types::ServerId` alongside") is the obvious next step
+/// once PR9b's load tests show numbers.
+struct ServerStateAdapter {
+    manager: Arc<ServerManager>,
+}
 
-impl ServerStateView for EmptyServerStateView {
-    fn all_servers(&self) -> Vec<ServerSnapshot> {
-        Vec::new()
+impl ServerStateAdapter {
+    fn new(manager: Arc<ServerManager>) -> Self {
+        Self { manager }
     }
+}
+
+impl ServerStateView for ServerStateAdapter {
+    fn all_servers(&self) -> Vec<ServerSnapshot> {
+        use llamaforge_types::{Capability, LoraAdapterId, ModelAlias};
+        self.manager
+            .all_servers()
+            .into_iter()
+            .map(|(config_id, snap)| {
+                let id = config_server_id_to_types_id(&config_id);
+                let models: std::collections::HashSet<ModelAlias> =
+                    std::iter::once(snap.model_alias.clone())
+                        .chain(snap.capabilities.models.iter().cloned())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| ModelAlias::new(Arc::from(s.as_str())))
+                        .collect();
+                let lora_adapters: std::collections::HashSet<LoraAdapterId> = snap
+                    .capabilities
+                    .lora_adapters
+                    .iter()
+                    .filter_map(|s| LoraAdapterId::new(s).ok())
+                    .collect();
+                let idle_slots = snap.slots.iter().filter(|s| !s.is_processing).count() as u32;
+                ServerSnapshot {
+                    id,
+                    lifecycle: snap.lifecycle,
+                    models,
+                    capabilities: std::collections::HashSet::<Capability>::new(),
+                    lora_adapters,
+                    multimodal: snap.capabilities.multimodal,
+                    embedding: false,
+                    reranking: false,
+                    architecture: snap.capabilities.architecture,
+                    total_slots: snap.parallel_slots,
+                    idle_slots,
+                    kv_usage: 0.0,
+                    deferred_ratio: 0.0,
+                }
+            })
+            .collect()
+    }
+}
+
+/// Convert a load-validated `config::ServerId` to the routing-layer
+/// `types::ServerId`. `ConfigHandle::load` (`handle.rs:27-35`)
+/// rejects any non-UUID-shaped server id at load time, so the parse
+/// is infallible by construction.
+fn config_server_id_to_types_id(s: &llamaforge_config::ServerId) -> llamaforge_types::ServerId {
+    let uuid = uuid::Uuid::parse_str(s.0.as_str())
+        .expect("ConfigHandle::load guarantees UUID-shaped server ids");
+    llamaforge_types::ServerId::new(uuid)
 }

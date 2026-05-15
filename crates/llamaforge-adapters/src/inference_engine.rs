@@ -179,12 +179,25 @@ impl InferenceEngine for InferenceEngineAdapter {
                 routing,
             };
 
-            // Audit channel is consumed but not retained — audit recording
-            // is owned by the metrics layer at the composition root, not by
-            // this adapter.
+            // Audit channel: dispatch emits its own `AuditRecord` shape
+            // (different from `metrics::AuditRecord`), so a translator is
+            // needed to forward records into the metrics ingest. The
+            // translator lives in PR9b alongside the e2e harness work that
+            // exercises the audit path end-to-end. For now records are
+            // received and dropped — explicitly logged so the drop is not
+            // silent.
             let (audit_tx, mut audit_rx) = tokio::sync::mpsc::channel(32);
             tokio::spawn(async move {
-                while audit_rx.recv().await.is_some() {}
+                let mut dropped: u64 = 0;
+                while audit_rx.recv().await.is_some() {
+                    dropped = dropped.saturating_add(1);
+                }
+                if dropped > 0 {
+                    tracing::debug!(
+                        dropped,
+                        "inference_engine.audit_records_unwired"
+                    );
+                }
             });
 
             let (_abort, mut chunk_rx) = dispatcher.dispatch(candidate, audit_tx).await;
@@ -220,6 +233,16 @@ impl InferenceEngine for InferenceEngineAdapter {
                                 return;
                             }
                             None => {
+                                // Backend stream closed without an explicit
+                                // stop terminator. The dispatch proxy task
+                                // (`llamaforge-dispatch::proxy::proxy_task`,
+                                // backend-EOF arm at proxy.rs:142-144)
+                                // falls through to its cleanup without
+                                // emitting a `stop=true` chunk on this path,
+                                // so this *is* reachable, not dead code. If
+                                // we got any tokens we synthesize a clean
+                                // Stop; otherwise we surface the loss as
+                                // BackendDisconnect.
                                 if tokens_emitted > 0 {
                                     yield Ok(ChatCompletionChunk::Stop(String::new()));
                                 } else {

@@ -103,11 +103,19 @@ impl RoutingDecision {
     /// scheduler (`DispatchEvent::Dispatched { server_id, slot_id }`).
     ///
     /// The scheduler runs `ServerSelector::select_server` internally and
-    /// emits the result on the dispatch-event channel; adapters that consume
-    /// those events need to re-form a `RoutingDecision` to feed into the
-    /// `Dispatcher`. The recorded `reason` is a placeholder (the original
-    /// reason isn't propagated through the dispatch-event channel today);
-    /// the field is consumed by telemetry, not by dispatch logic.
+    /// emits the result on the dispatch-event channel; adapters that
+    /// consume those events need to re-form a `RoutingDecision` to feed
+    /// into the `Dispatcher`.
+    ///
+    /// **Known loss:** the original `RoutingReason` and `score` are
+    /// dropped at `llamaforge-queue::pipeline.rs:185` when the scheduler
+    /// builds `DispatchResult::Dispatched(server_id, slot_target)` from
+    /// the full `RoutingDecision`. Both fields are telemetry-only —
+    /// dispatch doesn't read them — so the placeholder
+    /// `RoundRobin { counter: 0 }` is harmless, just less informative.
+    /// Restoring fidelity requires extending
+    /// `DispatchResult`/`DispatchEvent` to carry the reason across the
+    /// queue boundary; tracked for a follow-up.
     ///
     /// See design doc §2.2.
     pub fn for_scheduler_pick(server_id: ServerId, slot: Option<SlotId>) -> Self {
