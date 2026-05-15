@@ -1,4 +1,7 @@
+mod build;
 mod init;
+mod serve;
+mod tracing_init;
 mod validate;
 
 use clap::Parser;
@@ -234,10 +237,19 @@ fn main() {
             let source = Arc::new(TomlFileConfigSource::new(paths));
 
             match ConfigHandle::load(source) {
-                Ok(_handle) => {
-                    // Keep the stub message from Phase 0 or indicate success.
-                    // As there's no actual long-running process yet, we just print and exit.
-                    println!("llamaforge: skeleton — see IMPLEMENTATION_PLAN.md Phase 0");
+                Ok(handle) => {
+                    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build()
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            eprintln!("error: failed to construct tokio runtime: {}", e);
+                            process::exit(70);
+                        }
+                    };
+                    if let Err(e) = rt.block_on(serve::run(Arc::new(handle))) {
+                        eprintln!("error: {}", e);
+                        process::exit(1);
+                    }
                 }
                 Err(err) => {
                     handle_config_error(err);

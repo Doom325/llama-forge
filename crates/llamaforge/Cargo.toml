@@ -14,4 +14,18 @@ path = "src/main.rs"
 [dependencies]
 chrono.workspace = true
 clap = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+async-trait.workspace = true
+anyhow = "1"
 llamaforge-config = { workspace = true }
+llamaforge-types = { workspace = true }
+llamaforge-metrics = { workspace = true }
+llamaforge-server-manager = { workspace = true }
+llamaforge-routing = { workspace = true }
+llamaforge-dispatch = { workspace = true }
+llamaforge-queue = { workspace = true }
+llamaforge-transport = { workspace = true }
+llamaforge-adapters = { workspace = true }
