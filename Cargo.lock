@@ -1322,6 +1322,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "llamaforge-e2e"
+version = "0.1.0-draft"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "llamaforge-adapters",
+ "llamaforge-config",
+ "llamaforge-dispatch",
+ "llamaforge-metrics",
+ "llamaforge-queue",
+ "llamaforge-routing",
+ "llamaforge-server-manager",
+ "llamaforge-transport",
+ "llamaforge-types",
+ "mock-llama",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "llamaforge-metrics"
 version = "0.1.0-draft"
 dependencies = [
@@ -1419,6 +1444,7 @@ dependencies = [
  "llamaforge-types",
  "metrics",
  "metrics-util 0.18.0",
+ "mock-llama",
  "nix",
  "parking_lot",
  "proptest",
@@ -1620,6 +1646,21 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mock-llama"
+version = "0.1.0-draft"
+dependencies = [
+ "axum",
+ "futures-util",
+ "parking_lot",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
 ]
 
 [[package]]

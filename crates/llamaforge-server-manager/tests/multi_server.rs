@@ -42,7 +42,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_base
     ));
 
@@ -58,7 +58,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_base + 1
     ));
 
@@ -74,7 +74,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_base + 2
     ));
 
@@ -220,9 +220,9 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port + 1
     );
     std::fs::write(&main_path, new_config_str).unwrap();
@@ -250,4 +250,20 @@ estimated_vram_mb = 100
     assert!(ledger.is_empty() || ledger.values().all(|&v| v == 0));
 
     assert!(start_time.elapsed() < Duration::from_secs(60), "Test took too long");
+}
+
+/// See `config_tests::mock_llama_bin` — same rationale (env! is only
+/// set for tests in the same package as the bin).
+fn mock_llama_bin() -> String {
+    let target =
+        std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target")
+        });
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target.join(profile).join("mock-llama").to_string_lossy().into_owned()
 }

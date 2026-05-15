@@ -1,0 +1,35 @@
+[package]
+name = "llamaforge-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Workspace-level end-to-end tests for LlamaForge against mock-llama."
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+mock-llama = { workspace = true }
+llamaforge-config = { workspace = true, features = ["test-utils"] }
+llamaforge-types = { workspace = true }
+llamaforge-metrics = { workspace = true }
+llamaforge-server-manager = { workspace = true }
+llamaforge-routing = { workspace = true }
+llamaforge-dispatch = { workspace = true }
+llamaforge-queue = { workspace = true }
+llamaforge-transport = { workspace = true }
+llamaforge-adapters = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+anyhow = "1"
+tempfile = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+llamaforge-config = { workspace = true, features = ["test-utils"] }

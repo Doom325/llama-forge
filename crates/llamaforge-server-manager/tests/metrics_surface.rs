@@ -11,6 +11,21 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
+/// See `config_tests::mock_llama_bin` — same rationale.
+fn mock_llama_bin() -> String {
+    let target =
+        std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target")
+        });
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target.join(profile).join("mock-llama").to_string_lossy().into_owned()
+}
+
 struct MockTelemetry;
 impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_config::GpuId) -> Result<u64, TelemetryError> {
@@ -41,7 +56,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         mock_port,
     ));
 

@@ -39,7 +39,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         mock_port,
     ));
 
@@ -194,7 +194,7 @@ async fn test_orphan_recovery() {
 
     // (a) Successful adoption
     let port_a = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let mut cmd_a = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    let mut cmd_a = tokio::process::Command::new(mock_llama_bin());
     cmd_a.arg("--port").arg(port_a.to_string());
     cmd_a.kill_on_drop(true);
     let mut child_a = cmd_a.spawn().unwrap();
@@ -205,7 +205,7 @@ async fn test_orphan_recovery() {
 
     // (b) Health fails
     let port_b = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let mut cmd_b = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    let mut cmd_b = tokio::process::Command::new(mock_llama_bin());
     cmd_b.arg("--port").arg(port_b.to_string()).arg("--alias").arg("mock,health_fail_after=0");
     cmd_b.kill_on_drop(true);
     let mut child_b = cmd_b.spawn().unwrap();
@@ -220,7 +220,7 @@ async fn test_orphan_recovery() {
 
     // (d) Model mismatch
     let port_d = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let mut cmd_d = tokio::process::Command::new(env!("CARGO_BIN_EXE_mock-llama"));
+    let mut cmd_d = tokio::process::Command::new(mock_llama_bin());
     cmd_d.arg("--port").arg(port_d.to_string()).arg("--alias").arg("wrong_model");
     cmd_d.kill_on_drop(true);
     let mut child_d = cmd_d.spawn().unwrap();
@@ -272,13 +272,13 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_a,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_b,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_c,
-        env!("CARGO_BIN_EXE_mock-llama"),
+        mock_llama_bin(),
         port_d,
     ));
 
@@ -379,4 +379,20 @@ estimated_vram_mb = 100
 
     // Cleanup
     mgr_started.shutdown_all().await;
+}
+
+/// See `config_tests::mock_llama_bin` — same rationale (env! is only
+/// set for tests in the same package as the bin).
+fn mock_llama_bin() -> String {
+    let target =
+        std::env::var("CARGO_TARGET_DIR").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("target")
+        });
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    target.join(profile).join("mock-llama").to_string_lossy().into_owned()
 }

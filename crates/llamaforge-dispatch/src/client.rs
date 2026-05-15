@@ -9,7 +9,8 @@ use dashmap::DashMap;
 use futures_core::Stream;
 use futures_util::StreamExt;
 use llamaforge_config::ServerConfig;
-use llamaforge_types::{ClientRefreshEvent, ServerId};
+use llamaforge_types::ports::{SlotErasure, SlotError};
+use llamaforge_types::{ClientRefreshEvent, ServerId, SlotId};
 use reqwest::Client;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -145,6 +146,49 @@ impl BackendClient for ReqwestClientStore {
         let stream =
             response.bytes_stream().map(|res| res.map_err(|e| StreamError::Internal(Box::new(e))));
         Ok(Box::pin(stream))
+    }
+}
+
+/// Reconciliation hook: forwards `erase_slot` calls to the backend's
+/// `POST {base_url}/slots/{slot}?action=erase` endpoint with a 5s
+/// timeout. Documented in design doc §6.629.
+///
+/// Fire-and-forget semantics: errors (timeout, server unreachable,
+/// non-200 response) translate to `SlotError` but do not block the
+/// next reconciliation cycle. If the server isn't registered in the
+/// store, we surface `ServerUnreachable` — the caller will retry on
+/// the next sweep.
+#[async_trait]
+impl SlotErasure for ReqwestClientStore {
+    async fn erase_slot(&self, server_id: &ServerId, slot_id: &SlotId) -> Result<(), SlotError> {
+        let client_ref = self
+            .clients
+            .get(server_id)
+            .ok_or_else(|| SlotError::ServerUnreachable { server_id: *server_id })?;
+        let info = client_ref.load();
+        let url = format!("{}/slots/{}?action=erase", info.base_url, slot_id.into_inner());
+
+        let res = tokio::time::timeout(Duration::from_secs(5), info.client.post(&url).send())
+            .await
+            .map_err(|_| SlotError::ErasureFailed {
+                server_id: *server_id,
+                slot_id: *slot_id,
+                reason: "timeout".to_string(),
+            })?
+            .map_err(|e| SlotError::ErasureFailed {
+                server_id: *server_id,
+                slot_id: *slot_id,
+                reason: e.to_string(),
+            })?;
+
+        if !res.status().is_success() {
+            return Err(SlotError::ErasureFailed {
+                server_id: *server_id,
+                slot_id: *slot_id,
+                reason: format!("status {}", res.status()),
+            });
+        }
+        Ok(())
     }
 }
 
