@@ -464,6 +464,10 @@ impl ServerManager {
         self.servers.get(id).map(|s| s.to_snapshot())
     }
 
+    pub fn all_servers(&self) -> Vec<(ServerId, ServerStateSnapshot)> {
+        self.servers.iter().map(|s| (s.id.clone(), s.to_snapshot())).collect()
+    }
+
     /// Returns snapshots of all currently running servers.
     pub fn running_servers(&self) -> Vec<(ServerId, ServerStateSnapshot)> {
         self.servers
@@ -476,10 +480,6 @@ impl ServerManager {
     /// Returns the states of all slots for a specific server.
     pub fn slot_states(&self, id: &ServerId) -> Option<Vec<crate::types::SlotState>> {
         self.servers.get(id).map(|s| s.slots.clone())
-    }
-
-    pub fn all_servers(&self) -> Vec<(ServerId, ServerStateSnapshot)> {
-        self.servers.iter().map(|s| (s.id.clone(), s.to_snapshot())).collect()
     }
 
     pub async fn request_start(

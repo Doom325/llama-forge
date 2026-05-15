@@ -1218,6 +1218,8 @@ dependencies = [
  "llamaforge-server-manager",
  "llamaforge-transport",
  "llamaforge-types",
+ "metrics",
+ "metrics-exporter-prometheus",
  "tempfile",
  "tokio",
  "tokio-util",
