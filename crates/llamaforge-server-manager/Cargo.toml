@@ -26,6 +26,10 @@ serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# `tests/config_tests.rs` spawns `mock-llama` as a subprocess via
+# `env!("CARGO_BIN_EXE_mock-llama")`; Cargo only sets that env var when
+# the test crate has a (dev-)dep on the bin's package.
+mock-llama = { workspace = true }
 tempfile = { workspace = true }
 proptest = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
