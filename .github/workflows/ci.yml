@@ -59,6 +59,28 @@ jobs:
       
       - name: Build
         run: cargo build --workspace
-        
+
       - name: Run Tests
         run: cargo test --workspace --all-features
+
+  e2e-mocklama:
+    name: E2E (mock-llama)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+        with:
+          mold-version: 2.4.0
+          make-default: true
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build mock-llama and e2e harness
+        run: cargo build -p mock-llama -p llamaforge-e2e --tests
+
+      - name: Run e2e tests
+        run: cargo test -p llamaforge-e2e --tests -- --nocapture

@@ -8,10 +8,12 @@
 //!   forwards into `DispatchQueue::notify_slot_available`. The queue's
 //!   wake channel is queue-wide, so the per-server `server_id` argument
 //!   is ignored — that matches the scheduler's actual semantics today.
-//! * `ports::SlotErasure` is satisfied by `NoopSlotErasure`. The
-//!   reconciliation path that would call `erase_slot` becomes a no-op
-//!   until a real impl lands alongside the e2e harness in PR9b once
-//!   mock-llama provides a verifiable slot-free contract.
+//! * `ports::SlotErasure` is satisfied by `ReqwestClientStore`, which
+//!   forwards to `POST {base_url}/slots/{id}?action=erase` per design
+//!   doc §6.629. Each configured server is registered in the store via
+//!   `add_server` during build (step 7), populating the
+//!   `server_id → base_url` map both the inference dispatch and the
+//!   reconciliation path consume.
 //! * `routing::ServerStateView` is satisfied by `ServerStateAdapter`,
 //!   which projects `server-manager::ServerStateSnapshot` into the
 //!   routing-layer `ServerSnapshot` via
@@ -36,9 +38,9 @@ use llamaforge_routing::types::{ServerSnapshot, ServerStateView};
 use llamaforge_routing::Router;
 use llamaforge_server_manager::{ServerManager, StubTelemetry};
 use llamaforge_transport::TransportDeps;
-use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
+use llamaforge_types::ports::{SlotErasure, SlotNotifier};
 use llamaforge_types::traits::{AdmissionError, IncomingRequest, RouteValidator};
-use llamaforge_types::{ServerId, SlotId};
+use llamaforge_types::ServerId;
 use std::sync::atomic::AtomicU32;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -118,12 +120,28 @@ pub async fn build(
         tokio::spawn(run_scheduler(q, a, r.clone(), r, h, st))
     };
 
-    // 7) Backend HTTP clients to the llama-server fleet.
+    // 7) Backend HTTP clients to the llama-server fleet. Registered up
+    //    front from `config.servers` so the dispatcher can resolve
+    //    `server_id → base_url` for completion POSTs *and* for the
+    //    slot-erase reconciliation path.
     let backend_client = Arc::new(ReqwestClientStore::new());
+    {
+        let snap = config.snapshot();
+        for (cfg_id, server_cfg) in snap.servers.iter() {
+            let types_id = config_server_id_to_types_id(cfg_id);
+            backend_client
+                .add_server(types_id, server_cfg)
+                .map_err(|e| anyhow::anyhow!("register backend client for {}: {}", cfg_id, e))?;
+        }
+    }
 
     // 8) Dispatcher.
     let slot_notifier: Arc<dyn SlotNotifier> = Arc::new(QueueSlotNotifier(dispatch_queue.clone()));
-    let slot_erasure: Arc<dyn SlotErasure> = Arc::new(NoopSlotErasure);
+    // Real slot-erasure: forwards to `POST /slots/{id}?action=erase` via
+    // ReqwestClientStore. The store knows each server's base_url because
+    // we registered it above. See dispatch::client::ReqwestClientStore
+    // for the impl.
+    let slot_erasure: Arc<dyn SlotErasure> = backend_client.clone();
     let dispatcher = Arc::new(Dispatcher::new(
         server_state_view.clone(),
         metrics_ingest.clone(),
@@ -189,21 +207,6 @@ struct QueueSlotNotifier(Arc<DispatchQueue>);
 impl SlotNotifier for QueueSlotNotifier {
     fn notify_slot_available(&self, _server_id: &ServerId) {
         self.0.notify_slot_available();
-    }
-}
-
-/// Placeholder slot-erasure impl. The real impl is a single
-/// `POST {base_url}/slots/{slot_id}?action=erase` with a 5s timeout
-/// (design doc §6.629), but the call requires a `server_id → base_url`
-/// lookup that today's `ReqwestClientStore` only populates via
-/// `add_server` — currently unwired on main. PR9b lands both pieces
-/// together against mock-llama, where the contract can be verified.
-struct NoopSlotErasure;
-
-#[async_trait::async_trait]
-impl SlotErasure for NoopSlotErasure {
-    async fn erase_slot(&self, _: &ServerId, _: &SlotId) -> Result<(), SlotError> {
-        Ok(())
     }
 }
 

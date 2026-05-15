@@ -1,0 +1,29 @@
+[package]
+name = "mock-llama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic in-process double for llama-server used by LlamaForge integration tests."
+
+[[bin]]
+name = "mock-llama"
+path = "src/main.rs"
+
+[lib]
+name = "mock_llama"
+path = "src/lib.rs"
+
+[dependencies]
+axum = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }

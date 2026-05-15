@@ -6,11 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "mock-llama"
-path = "src/bin/mock-llama.rs"
-required-features = ["test-utils"]
-
 [dependencies]
 llamaforge-config = { workspace = true }
 llamaforge-types = { workspace = true }
