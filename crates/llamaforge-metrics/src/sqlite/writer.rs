@@ -127,8 +127,10 @@ pub fn writer_thread_main(
 
         // Periodic checkpoint
         if last_checkpoint.elapsed() >= checkpoint_interval && !state.is_degraded() {
-            match conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get::<_, i64>(2)) {
-                Ok(pages) => debug!("Periodic WAL checkpoint: {} pages", pages),
+            match run_checkpoint(&conn, "PASSIVE") {
+                Ok(CheckpointStats { checkpointed, .. }) => {
+                    debug!("Periodic WAL checkpoint: {} pages", checkpointed)
+                }
                 Err(e) => {
                     error!("Periodic WAL checkpoint failed: {}", e);
                     state.record_failure();
@@ -139,6 +141,34 @@ pub fn writer_thread_main(
     }
 
     info!("Metrics writer thread exiting");
+}
+
+/// Result of a `PRAGMA wal_checkpoint(<mode>)` call. SQLite returns
+/// `(busy, log, checkpointed)` as a single row regardless of mode.
+struct CheckpointStats {
+    /// 1 if another reader blocked truncation, 0 otherwise.
+    busy: i64,
+    /// Total frames in the WAL.
+    log_pages: i64,
+    /// Frames written to the database file during this checkpoint.
+    checkpointed: i64,
+}
+
+/// Run `PRAGMA wal_checkpoint(<mode>)` and return the
+/// `(busy, log, checkpointed)` triple. Centralised so the periodic
+/// and shutdown call sites can't drift apart: `execute()` rejects
+/// row-returning statements, so calling it on this pragma logs an
+/// `ExecuteReturnedResults` error on every shutdown — `query_row` is
+/// the contract both sites must use.
+fn run_checkpoint(conn: &Connection, mode: &str) -> Result<CheckpointStats, rusqlite::Error> {
+    let sql = format!("PRAGMA wal_checkpoint({})", mode);
+    conn.query_row(&sql, [], |row| {
+        Ok(CheckpointStats {
+            busy: row.get::<_, i64>(0)?,
+            log_pages: row.get::<_, i64>(1)?,
+            checkpointed: row.get::<_, i64>(2)?,
+        })
+    })
 }
 
 fn handle_shutdown(
@@ -163,8 +193,10 @@ fn handle_shutdown(
 
     // 2. Truncate checkpoint
     if !state.is_degraded() {
-        match conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", []) {
-            Ok(_) => info!("Shutdown WAL checkpoint (TRUNCATE) complete"),
+        match run_checkpoint(conn, "TRUNCATE") {
+            Ok(CheckpointStats { busy, log_pages, checkpointed }) => {
+                info!(busy, log_pages, checkpointed, "Shutdown WAL checkpoint (TRUNCATE) complete")
+            }
             Err(e) => error!("Shutdown WAL checkpoint failed: {}", e),
         }
     } else {
@@ -448,6 +480,35 @@ impl Drop for WriterTestHandle {
         let _ = self.tx.send(WriterCommand::Shutdown);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// In-memory connection with `journal_mode = MEMORY`. WAL mode
+    /// requires a real file in current `rusqlite`; `MEMORY` is enough
+    /// to exercise `run_checkpoint`'s contract that it must not call
+    /// `execute()` on a row-returning pragma.
+    fn in_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "journal_mode", "MEMORY").unwrap();
+        conn
+    }
+
+    #[test]
+    fn run_checkpoint_uses_query_row_not_execute() {
+        // `Connection::execute` rejects statements that return rows,
+        // and `PRAGMA wal_checkpoint(<mode>)` always returns a single
+        // `(busy, log, checkpointed)` row. The helper must therefore
+        // use `query_row`. Iterating the documented modes guards
+        // against a regression to `execute()` for any one of them.
+        let conn = in_memory_db();
+        for mode in ["PASSIVE", "FULL", "RESTART", "TRUNCATE"] {
+            run_checkpoint(&conn, mode)
+                .unwrap_or_else(|e| panic!("checkpoint({}) failed: {}", mode, e));
         }
     }
 }
