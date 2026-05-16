@@ -127,8 +127,10 @@ pub fn writer_thread_main(
 
         // Periodic checkpoint
         if last_checkpoint.elapsed() >= checkpoint_interval && !state.is_degraded() {
-            match conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get::<_, i64>(2)) {
-                Ok(pages) => debug!("Periodic WAL checkpoint: {} pages", pages),
+            match run_checkpoint(&conn, "PASSIVE") {
+                Ok(CheckpointStats { checkpointed, .. }) => {
+                    debug!("Periodic WAL checkpoint: {} pages", checkpointed)
+                }
                 Err(e) => {
                     error!("Periodic WAL checkpoint failed: {}", e);
                     state.record_failure();
@@ -139,6 +141,35 @@ pub fn writer_thread_main(
     }
 
     info!("Metrics writer thread exiting");
+}
+
+/// Result of a `PRAGMA wal_checkpoint(<mode>)` call. SQLite returns
+/// `(busy, log, checkpointed)` as a single row regardless of mode.
+struct CheckpointStats {
+    /// 1 if another reader blocked truncation. The actual SQLite row
+    /// shape uses 0/1 here, but operators reading it as "log pages
+    /// blocked" find it more useful, so we surface it as-is.
+    busy: i64,
+    /// Total frames in the WAL.
+    log_pages: i64,
+    /// Frames written to the database file during this checkpoint.
+    checkpointed: i64,
+}
+
+/// Run `PRAGMA wal_checkpoint(<mode>)` and return the
+/// `(busy, log, checkpointed)` triple. Centralised so the periodic and
+/// shutdown call sites can't drift again — see #104, where the
+/// shutdown path used `execute()` (which rejects returned rows) and
+/// logged `ERROR` on every clean shutdown for an entire release.
+fn run_checkpoint(conn: &Connection, mode: &str) -> Result<CheckpointStats, rusqlite::Error> {
+    let sql = format!("PRAGMA wal_checkpoint({})", mode);
+    conn.query_row(&sql, [], |row| {
+        Ok(CheckpointStats {
+            busy: row.get::<_, i64>(0)?,
+            log_pages: row.get::<_, i64>(1)?,
+            checkpointed: row.get::<_, i64>(2)?,
+        })
+    })
 }
 
 fn handle_shutdown(
@@ -163,8 +194,10 @@ fn handle_shutdown(
 
     // 2. Truncate checkpoint
     if !state.is_degraded() {
-        match conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", []) {
-            Ok(_) => info!("Shutdown WAL checkpoint (TRUNCATE) complete"),
+        match run_checkpoint(conn, "TRUNCATE") {
+            Ok(CheckpointStats { busy, log_pages, checkpointed }) => {
+                info!(busy, log_pages, checkpointed, "Shutdown WAL checkpoint (TRUNCATE) complete")
+            }
             Err(e) => error!("Shutdown WAL checkpoint failed: {}", e),
         }
     } else {
@@ -448,6 +481,40 @@ impl Drop for WriterTestHandle {
         let _ = self.tx.send(WriterCommand::Shutdown);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_wal_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        // WAL mode requires a real file in current rusqlite, but
+        // `journal_mode = MEMORY` lets us still exercise the
+        // checkpoint pragma without touching the filesystem. The
+        // helper's responsibility is not to call `execute()` on a
+        // row-returning pragma; that contract holds in any journal mode.
+        conn.pragma_update(None, "journal_mode", "MEMORY").unwrap();
+        conn
+    }
+
+    #[test]
+    fn run_checkpoint_returns_stats_without_execute_returned_results_error() {
+        // Regression for #104. The shutdown path used `execute()`
+        // which rejects the (busy, log, checkpointed) row that
+        // `PRAGMA wal_checkpoint(<mode>)` returns; the helper must
+        // use `query_row` so callers can land successfully on any
+        // valid mode.
+        let conn = fresh_wal_db();
+        for mode in ["PASSIVE", "FULL", "RESTART", "TRUNCATE"] {
+            let stats = run_checkpoint(&conn, mode)
+                .unwrap_or_else(|e| panic!("checkpoint({}) failed: {}", mode, e));
+            // Counts can legitimately be zero on an empty DB; we
+            // only assert the call succeeded and produced finite
+            // i64 values.
+            let _ = (stats.busy, stats.log_pages, stats.checkpointed);
         }
     }
 }
