@@ -146,9 +146,7 @@ pub fn writer_thread_main(
 /// Result of a `PRAGMA wal_checkpoint(<mode>)` call. SQLite returns
 /// `(busy, log, checkpointed)` as a single row regardless of mode.
 struct CheckpointStats {
-    /// 1 if another reader blocked truncation. The actual SQLite row
-    /// shape uses 0/1 here, but operators reading it as "log pages
-    /// blocked" find it more useful, so we surface it as-is.
+    /// 1 if another reader blocked truncation, 0 otherwise.
     busy: i64,
     /// Total frames in the WAL.
     log_pages: i64,
@@ -157,10 +155,11 @@ struct CheckpointStats {
 }
 
 /// Run `PRAGMA wal_checkpoint(<mode>)` and return the
-/// `(busy, log, checkpointed)` triple. Centralised so the periodic and
-/// shutdown call sites can't drift again — see #104, where the
-/// shutdown path used `execute()` (which rejects returned rows) and
-/// logged `ERROR` on every clean shutdown for an entire release.
+/// `(busy, log, checkpointed)` triple. Centralised so the periodic
+/// and shutdown call sites can't drift apart: `execute()` rejects
+/// row-returning statements, so calling it on this pragma logs an
+/// `ExecuteReturnedResults` error on every shutdown — `query_row` is
+/// the contract both sites must use.
 fn run_checkpoint(conn: &Connection, mode: &str) -> Result<CheckpointStats, rusqlite::Error> {
     let sql = format!("PRAGMA wal_checkpoint({})", mode);
     conn.query_row(&sql, [], |row| {
@@ -489,32 +488,27 @@ impl Drop for WriterTestHandle {
 mod tests {
     use super::*;
 
-    fn fresh_wal_db() -> Connection {
+    /// In-memory connection with `journal_mode = MEMORY`. WAL mode
+    /// requires a real file in current `rusqlite`; `MEMORY` is enough
+    /// to exercise `run_checkpoint`'s contract that it must not call
+    /// `execute()` on a row-returning pragma.
+    fn in_memory_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        // WAL mode requires a real file in current rusqlite, but
-        // `journal_mode = MEMORY` lets us still exercise the
-        // checkpoint pragma without touching the filesystem. The
-        // helper's responsibility is not to call `execute()` on a
-        // row-returning pragma; that contract holds in any journal mode.
         conn.pragma_update(None, "journal_mode", "MEMORY").unwrap();
         conn
     }
 
     #[test]
-    fn run_checkpoint_returns_stats_without_execute_returned_results_error() {
-        // Regression for #104. The shutdown path used `execute()`
-        // which rejects the (busy, log, checkpointed) row that
-        // `PRAGMA wal_checkpoint(<mode>)` returns; the helper must
-        // use `query_row` so callers can land successfully on any
-        // valid mode.
-        let conn = fresh_wal_db();
+    fn run_checkpoint_uses_query_row_not_execute() {
+        // `Connection::execute` rejects statements that return rows,
+        // and `PRAGMA wal_checkpoint(<mode>)` always returns a single
+        // `(busy, log, checkpointed)` row. The helper must therefore
+        // use `query_row`. Iterating the documented modes guards
+        // against a regression to `execute()` for any one of them.
+        let conn = in_memory_db();
         for mode in ["PASSIVE", "FULL", "RESTART", "TRUNCATE"] {
-            let stats = run_checkpoint(&conn, mode)
+            run_checkpoint(&conn, mode)
                 .unwrap_or_else(|e| panic!("checkpoint({}) failed: {}", mode, e));
-            // Counts can legitimately be zero on an empty DB; we
-            // only assert the call succeeded and produced finite
-            // i64 values.
-            let _ = (stats.busy, stats.log_pages, stats.checkpointed);
         }
     }
 }
