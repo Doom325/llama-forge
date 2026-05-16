@@ -121,13 +121,13 @@ impl InferenceEngine for InferenceEngineAdapter {
         let prompt = render_prompt(&req.messages);
         // Always stream from the backend regardless of `req.stream`:
         // design.md §7 ("`stream: false` + JSON body → unary-style:
-        // collect stream internally") puts response aggregation at the
-        // shim boundary, not the backend boundary. The dispatch proxy
-        // is SSE-only — forwarding `stream: false` upstream causes the
-        // backend to return a unary JSON body that the SSE parser
-        // drops, surfacing as empty `content` to the client (#101).
-        // The HTTP shim's non-streaming branch already collects
-        // `ChatCompletionChunk::Token` chunks into a single response.
+        // collect stream internally") puts response aggregation at
+        // the shim boundary, not the backend boundary. The dispatch
+        // proxy is SSE-only — forwarding `stream: false` upstream
+        // causes the backend to return a unary JSON body the SSE
+        // parser silently drops. The HTTP shim's non-streaming branch
+        // collects `ChatCompletionChunk::Token` chunks into a single
+        // response.
         let completion_params = CompletionParams {
             n_predict: req.max_tokens,
             temperature: req.temperature.unwrap_or(1.0),

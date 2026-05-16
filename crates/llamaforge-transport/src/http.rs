@@ -136,6 +136,7 @@ where
             ApiError::QueueFull { retry_after_secs }
         })?;
 
+    let model_echo = req.model.clone();
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
 
@@ -202,27 +203,64 @@ where
 
         Ok(Sse::new(guarded_stream).into_response())
     } else {
+        // Non-streaming: collect `Token` chunks into the assistant
+        // content and read `finish_reason` / `output_tokens` from the
+        // terminal `Stop` chunk. The full OpenAI response shape
+        // (`object`, `created`, `model`, `choices[].index`,
+        // `choices[].finish_reason`, `usage`) is required by the
+        // official SDKs — see design.md §7.2.
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
-        let res = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
-            let mut full_text = String::new();
-            while let Some(chunk_res) = response_stream.next().await {
-                if let Ok(llamaforge_types::ChatCompletionChunk::Token(t)) = chunk_res {
-                    full_text.push_str(&t);
+        let aggregated =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
+                let mut full_text = String::new();
+                let mut finish_reason: Option<String> = None;
+                let mut completion_tokens: u32 = 0;
+                while let Some(chunk_res) = response_stream.next().await {
+                    match chunk_res {
+                        Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
+                            full_text.push_str(&t);
+                        }
+                        Ok(llamaforge_types::ChatCompletionChunk::Stop {
+                            finish_reason: reason,
+                            output_tokens,
+                        }) => {
+                            finish_reason = Some(reason);
+                            completion_tokens = output_tokens;
+                        }
+                        _ => {}
+                    }
                 }
-            }
-            full_text
-        })
-        .await
-        .map_err(|_| ApiError::Timeout)?;
+                (full_text, finish_reason, completion_tokens)
+            })
+            .await
+            .map_err(|_| ApiError::Timeout)?;
+        let (content, finish_reason, completion_tokens) = aggregated;
+        let finish_reason = finish_reason.unwrap_or_else(|| "stop".to_string());
+        let created_at = chrono::Utc::now().timestamp();
 
         Ok(axum::Json(serde_json::json!({
             "id": req_id_str,
+            "object": "chat.completion",
+            "created": created_at,
+            "model": model_echo,
             "choices": [{
+                "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": res
-                }
-            }]
+                    "content": content,
+                },
+                "finish_reason": finish_reason,
+            }],
+            // `prompt_tokens` isn't observed end-to-end in v1.0; the
+            // dispatch summary only carries completion tokens. We
+            // emit 0 for prompt tokens to keep the field present
+            // (OpenAI SDKs require the key) and document the gap in
+            // `docs/v1.1-deferred.md`.
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": completion_tokens,
+                "total_tokens": completion_tokens,
+            }
         }))
         .into_response())
     }
@@ -409,18 +447,36 @@ where
 
         Ok(Sse::new(guarded_stream).into_response())
     } else {
+        // Non-streaming: same aggregation pattern as the OpenAI shim
+        // — collect `Token` content and read `stop_reason` /
+        // `output_tokens` from the terminal `Stop` chunk.
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
-        let res = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
-            let mut full_text = String::new();
-            while let Some(chunk_res) = response_stream.next().await {
-                if let Ok(llamaforge_types::ChatCompletionChunk::Token(t)) = chunk_res {
-                    full_text.push_str(&t);
+        let aggregated =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
+                let mut full_text = String::new();
+                let mut stop_reason: Option<String> = None;
+                let mut output_tokens: u32 = 0;
+                while let Some(chunk_res) = response_stream.next().await {
+                    match chunk_res {
+                        Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
+                            full_text.push_str(&t);
+                        }
+                        Ok(llamaforge_types::ChatCompletionChunk::Stop {
+                            finish_reason,
+                            output_tokens: tokens,
+                        }) => {
+                            stop_reason = Some(finish_reason);
+                            output_tokens = tokens;
+                        }
+                        _ => {}
+                    }
                 }
-            }
-            full_text
-        })
-        .await
-        .map_err(|_| ApiError::Timeout)?;
+                (full_text, stop_reason, output_tokens)
+            })
+            .await
+            .map_err(|_| ApiError::Timeout)?;
+        let (text, stop_reason, output_tokens) = aggregated;
+        let stop_reason = stop_reason.unwrap_or_else(|| "end_turn".to_string());
 
         Ok(axum::Json(serde_json::json!({
             "id": req_id_str,
@@ -428,12 +484,14 @@ where
             "role": "assistant",
             "content": [{
                 "type": "text",
-                "text": res
+                "text": text,
             }],
             "model": model,
-            "stop_reason": "end_turn",
+            "stop_reason": stop_reason,
             "stop_sequence": null,
-            "usage": {"input_tokens": 0, "output_tokens": 0}
+            // `input_tokens` isn't observed end-to-end in v1.0 — see
+            // `docs/v1.1-deferred.md`.
+            "usage": {"input_tokens": 0, "output_tokens": output_tokens}
         }))
         .into_response())
     }
