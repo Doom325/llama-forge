@@ -38,11 +38,26 @@ pub trait DispatchCountView: Send + Sync {
     fn in_flight_count(&self, server_id: &llamaforge_types::ServerId) -> usize;
 }
 
-/// Used by Request Queue's dispatch iterator (Component 04).
+/// Used by Request Queue's admission gate (Component 04) and dispatch
+/// iterator. Split surface — `serves_model` answers the admission
+/// question ("is this model knowable?"), `has_idle_slot` answers the
+/// dispatch question ("can I forward right now?"). Conflating them
+/// causes the queue to synchronously reject burst traffic the moment
+/// all slots are busy.
 /// This trait is intentionally open (unsealed) so that external test crates can implement it.
 pub trait CapacityChecker: Send + Sync {
-    /// Checks if there is any configured capacity for a given target.
-    fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool;
+    /// True if any *configured* server matches the model + capability
+    /// set, regardless of lifecycle (Running, Starting, etc.) or slot
+    /// occupancy. The admission controller calls this — a server that
+    /// is busy now will be free later, so admission should queue, not
+    /// reject.
+    fn serves_model(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool;
+
+    /// True if at least one matching server is Running *and* has a
+    /// free slot. The queue's dispatch iterator calls this before
+    /// asking the router to actually pick a server; it's the
+    /// fast-fail check that avoids a wasted `select_server` call.
+    fn has_idle_slot(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool;
 }
 
 /// Used by Dispatch & Proxy (Component 06) to select a server after dequeue.

@@ -149,8 +149,12 @@ impl AdmissionController {
             return Err(AdmissionError::UnauthorizedTaskType { task_type: req.task_type });
         }
 
-        // 4. Model validation
-        if !self.model_validator.has_capacity(&req.model_target, &req.capabilities) {
+        // 4. Model validation — *admission* asks "is this model
+        //    knowable", not "is a slot free right now". A busy fleet
+        //    must enqueue, not synchronously reject with
+        //    `NoServerForModel`; the per-slot fast-fail belongs in the
+        //    queue's dispatch iterator (via `CapacityChecker::has_idle_slot`).
+        if !self.model_validator.serves_model(&req.model_target, &req.capabilities) {
             let model_alias = match &req.model_target {
                 ModelTarget::Exact(m) => m.clone(),
                 ModelTarget::AnyOf(models) => {
@@ -333,7 +337,14 @@ mod tests {
     }
 
     impl CapacityChecker for MockCapacityChecker {
-        fn has_capacity(
+        fn serves_model(
+            &self,
+            _target: &ModelTarget,
+            _capabilities: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
+            self.capacity
+        }
+        fn has_idle_slot(
             &self,
             _target: &ModelTarget,
             _capabilities: &llamaforge_routing::RequestCapabilities,

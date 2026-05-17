@@ -58,7 +58,7 @@ fn test_all_servers_down() {
         router.validate_routable(&req.model, &req.caps),
         Err(RoutingError::ModelUnavailable { .. })
     ));
-    assert!(!router.has_capacity(&req.model, &Default::default()));
+    assert!(!router.has_idle_slot(&req.model, &Default::default()));
     assert!(matches!(router.select_server(&req), Err(RoutingError::ModelUnavailable { .. })));
 }
 
