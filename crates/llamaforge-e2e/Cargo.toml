@@ -25,7 +25,7 @@ llamaforge = { workspace = true }
 llamaforge-proto = { workspace = true }
 futures-util = { workspace = true }
 tonic = { workspace = true }
-tonic-reflection = "0.13"
+tonic-reflection = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
