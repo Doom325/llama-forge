@@ -58,6 +58,10 @@ enum Commands {
         #[arg(long)]
         rules: Option<PathBuf>,
     },
+    /// Run the orchestrator. Equivalent to invoking the binary with
+    /// no subcommand; exists so `llamaforge serve --config <path>`
+    /// matches the README and operator muscle-memory.
+    Serve,
 }
 
 fn xdg_config_home() -> PathBuf {
@@ -102,10 +106,40 @@ fn find_rules() -> PathBuf {
     xdg_path
 }
 
+/// Platform-aware default state directory.
+///
+/// Precedence: explicit `$LLAMAFORGE_STATE_DIR` → platform-native
+/// per-user state directory → the system-wide `/var/run/llamaforge/`
+/// (only meaningful when running as root on Linux, where systemd /
+/// runit can pre-create it).
+///
+/// * macOS: `~/Library/Application Support/llamaforge`
+/// * Linux / *nix non-root: `$XDG_STATE_HOME/llamaforge`, or
+///   `~/.local/state/llamaforge` if `$XDG_STATE_HOME` is unset.
+/// * Otherwise: `/var/run/llamaforge/` (legacy default; preserved for
+///   any container / sysd unit that already targets this path).
 fn find_state_dir() -> PathBuf {
     if let Ok(p) = env::var("LLAMAFORGE_STATE_DIR") {
         return PathBuf::from(p);
     }
+    let home = env::var_os("HOME").map(PathBuf::from);
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(h) = &home {
+            return h.join("Library").join("Application Support").join("llamaforge");
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let Ok(xdg) = env::var("XDG_STATE_HOME") {
+            return PathBuf::from(xdg).join("llamaforge");
+        }
+        if let Some(h) = &home {
+            return h.join(".local").join("state").join("llamaforge");
+        }
+    }
+    // Fallback for container / root-managed setups where neither
+    // HOME nor XDG_STATE_HOME is meaningful.
     PathBuf::from("/var/run/llamaforge/")
 }
 
@@ -209,24 +243,37 @@ pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
 fn main() {
     let cli = Cli::parse();
 
+    // Resolve top-level overrides once; per-subcommand flags take
+    // precedence over them where the subcommand declares its own.
+    let cli_state_dir = cli.state_dir.clone();
+    let cli_config = cli.config.clone();
+    let cli_priority_rules = cli.priority_rules.clone();
+
     match cli.command {
         Some(Commands::Init { out, rules, state_dir, force }) => {
             let out_path =
                 out.unwrap_or_else(|| xdg_config_home().join("llamaforge").join("llamaforge.toml"));
             let rules_path =
                 rules.unwrap_or_else(|| out_path.with_file_name("priority_rules.toml"));
-            let s_dir = state_dir.unwrap_or_else(find_state_dir);
+            // Per-subcommand `--state-dir` wins; top-level
+            // `--state-dir` is the fallback so `llamaforge --state-dir
+            // /tmp/foo init` works as documented in `--help`.
+            let s_dir = state_dir.or(cli_state_dir).unwrap_or_else(find_state_dir);
             init::run(&out_path, Some(&rules_path), &s_dir, force);
         }
         Some(Commands::Validate { config, rules }) => {
-            let config_path = config.unwrap_or_else(find_config);
-            let rules_path = rules.unwrap_or_else(find_rules);
+            // `--config` is honored verbatim — do not fall back to
+            // `find_config()`'s default search path if the user
+            // supplied a missing file. A typo silently routing to a
+            // working default would let `validate` lie.
+            let config_path = config.or(cli_config).unwrap_or_else(find_config);
+            let rules_path = rules.or(cli_priority_rules).unwrap_or_else(find_rules);
             validate::run(&config_path, &rules_path, handle_config_error);
         }
-        None => {
-            let config_path = cli.config.unwrap_or_else(find_config);
-            let rules_path = cli.priority_rules.unwrap_or_else(find_rules);
-            let state_dir = cli.state_dir.unwrap_or_else(find_state_dir);
+        Some(Commands::Serve) | None => {
+            let config_path = cli_config.unwrap_or_else(find_config);
+            let rules_path = cli_priority_rules.unwrap_or_else(find_rules);
+            let state_dir = cli_state_dir.unwrap_or_else(find_state_dir);
 
             check_state_dir(&state_dir);
 

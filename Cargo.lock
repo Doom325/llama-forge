@@ -1233,6 +1233,7 @@ dependencies = [
  "llamaforge-server-manager",
  "llamaforge-transport",
  "llamaforge-types",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",

@@ -33,3 +33,6 @@ llamaforge-dispatch = { workspace = true }
 llamaforge-queue = { workspace = true }
 llamaforge-transport = { workspace = true }
 llamaforge-adapters = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
