@@ -13,6 +13,7 @@ tower.workspace = true
 tower-http.workspace = true
 tonic = { workspace = true, features = ["tls-native-roots", "gzip"] }
 tonic-health = "0.13"
+tonic-reflection = { version = "0.13", optional = true }
 hyper.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -37,6 +38,16 @@ llamaforge-types.workspace = true
 llamaforge-proto.workspace = true
 chrono.workspace = true
 tokio-util.workspace = true
+
+[features]
+default = ["dev-reflection"]
+# Enables the gRPC reflection service (`tonic-reflection`). Useful for
+# `grpcurl` and similar SDK-less probing. Documented in
+# `docs/component-designs/07_TRANSPORT_LAYER.md` as dev-only — the
+# default cargo build pulls it in so `cargo run` + `grpcurl` works
+# out of the box. Production deployments that want a smaller surface
+# can build with `--no-default-features`.
+dev-reflection = ["dep:tonic-reflection"]
 
 [dev-dependencies]
 chrono.workspace = true

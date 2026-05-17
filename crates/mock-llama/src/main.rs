@@ -31,7 +31,17 @@ async fn main() {
         }
     }
 
-    let config = MockConfig { model_alias: alias, parallel_slots, ..Default::default() };
+    // `MOCK_LLAMA_CHUNK_DELAY_MS` overrides the per-token decode
+    // delay (default 1ms). Useful for cancellation tests that need a
+    // window in which to drop the client stream.
+    let chunk_delay =
+        match std::env::var("MOCK_LLAMA_CHUNK_DELAY_MS").ok().and_then(|s| s.parse::<u64>().ok()) {
+            Some(ms) => std::time::Duration::from_millis(ms),
+            None => MockConfig::default().chunk_delay,
+        };
+
+    let config =
+        MockConfig { model_alias: alias, parallel_slots, chunk_delay, ..Default::default() };
     let mock = if let Some(p) = port {
         MockLlama::start_on_port(p, config).await.expect("mock-llama bind failed")
     } else {
