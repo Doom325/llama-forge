@@ -81,8 +81,10 @@ fn spawn_diff_forwarder(
             if diff.changes.is_empty() {
                 continue;
             }
-            tracing::info!(changes = diff.changes.len(), "lifecycle.config.reload.applying");
+            let changes = diff.changes.len();
+            tracing::info!(changes, "lifecycle.config.reload.applying");
             server_manager.apply_config_diff(&diff).await;
+            tracing::info!(changes, "lifecycle.config.reload.applied");
         }
     })
 }
@@ -124,6 +126,12 @@ async fn wait_for_shutdown_or_reload(config: &Arc<ConfigHandle>) {
                             changes = diff.changes.len(),
                             "lifecycle.config.reload.completed"
                         ),
+                        Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+                            tracing::warn!(
+                                ?fields,
+                                "lifecycle.config.reload.restart_required"
+                            );
+                        }
                         Err(e) => tracing::error!(
                             error = %e,
                             "lifecycle.config.reload.failed"

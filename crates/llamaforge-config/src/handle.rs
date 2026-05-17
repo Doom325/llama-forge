@@ -87,6 +87,23 @@ impl ConfigWriter for ConfigHandle {
         let old_config = self.inner.load();
         let diff = compute_diff(&old_config, &new_config);
 
+        // Pre-swap gate: if the on-disk file changed any field whose
+        // semantics require a server restart, abort here. v1.0 doesn't
+        // ship a staged-apply protocol, so partially applying (or
+        // even swapping the snapshot without applying) would leave
+        // operators with a half-consistent fleet. Return an error
+        // *before* the swap + broadcast so callers see no side
+        // effects — the on-disk file is the new truth, the running
+        // orchestrator keeps the old config until restart.
+        let restart_required: Vec<crate::diff::ServerConfigField> = diff
+            .servers_changed()
+            .flat_map(|(_, d)| d.fields_changed.iter().copied())
+            .filter(|f| f.requires_restart())
+            .collect();
+        if !restart_required.is_empty() {
+            return Err(ConfigReloadError::RestartRequired { fields: restart_required });
+        }
+
         if !diff.changes.is_empty() {
             self.inner.store(Arc::new(new_config));
         }

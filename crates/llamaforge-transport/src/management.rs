@@ -99,23 +99,19 @@ pub(crate) async fn reload_config<CW, RMS, SM>(
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    let diff = state.config_writer.reload().await.map_err(|e| ApiError::Internal(e.to_string()))?;
-    // Mirror the gRPC reload_config behaviour: reject diffs that
-    // touch restart-required server fields with a 412. v1.0 doesn't
-    // ship the staged-apply protocol; the operator must restart.
-    let restart_required: Vec<llamaforge_config::ServerConfigField> = diff
-        .servers_changed()
-        .flat_map(|(_, d)| d.fields_changed.iter().copied())
-        .filter(|f| f.requires_restart())
-        .collect();
-    if !restart_required.is_empty() {
-        return Err(ApiError::PreconditionFailed(format!(
-            "config diff touches restart-required server fields ({:?}); \
-             restart the orchestrator to apply",
-            restart_required
-        )));
+    // The gate is in `ConfigHandle::reload` (see grpc.rs for the
+    // rationale). Map the dedicated `RestartRequired` error to 412.
+    match state.config_writer.reload().await {
+        Ok(_) => Ok(axum::http::StatusCode::OK.into_response()),
+        Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+            Err(ApiError::PreconditionFailed(format!(
+                "config diff touches restart-required server fields ({:?}); \
+                 restart the orchestrator to apply",
+                fields
+            )))
+        }
+        Err(e) => Err(ApiError::Internal(e.to_string())),
     }
-    Ok(axum::http::StatusCode::OK.into_response())
 }
 
 #[derive(serde::Deserialize, Default)]

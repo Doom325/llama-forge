@@ -239,14 +239,21 @@ ctx_size = 4096
     )
     .unwrap();
 
-    let diff = instrumented.reload().await.unwrap();
-    assert_eq!(diff.changes.len(), 1);
-    use llamaforge_config::ConfigChange;
-    match &diff.changes[0] {
-        ConfigChange::ServerChanged { diff, .. } => {
-            assert!(diff.requires_restart());
+    // Restart-required diffs are rejected at the gate: `reload`
+    // returns `RestartRequired { fields }` *before* swapping the
+    // snapshot or broadcasting. v1.0 contract — see the
+    // pre-swap gate in `ConfigHandle::reload` and the
+    // staged-apply v1.1-deferred entry.
+    use llamaforge_config::{ConfigReloadError, ServerConfigField};
+    match instrumented.reload().await {
+        Err(ConfigReloadError::RestartRequired { fields }) => {
+            assert!(
+                fields.contains(&ServerConfigField::CtxSize),
+                "expected CtxSize in restart-required fields, got {:?}",
+                fields
+            );
         }
-        _ => panic!("Expected ServerChanged"),
+        other => panic!("Expected RestartRequired, got {:?}", other),
     }
 }
 
