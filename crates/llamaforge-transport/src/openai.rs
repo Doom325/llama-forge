@@ -77,6 +77,9 @@ pub(crate) fn parse_openai_request(
             "function_call is deprecated, please use tool_calls instead".to_string(),
         ));
     }
+    if request.messages.is_empty() {
+        return Err(ApiError::InvalidBody("messages must contain at least one entry".to_string()));
+    }
 
     let mut messages = Vec::with_capacity(request.messages.len());
     for m in request.messages {
@@ -197,6 +200,30 @@ mod tests {
         };
         let result = parse_openai_request(req);
         assert!(matches!(result, Err(ApiError::InvalidBody(_))));
+    }
+
+    #[test]
+    fn test_openai_empty_messages_rejected() {
+        // Both OpenAI and Anthropic require at least one message;
+        // empty arrays must surface as `InvalidBody` (400) rather
+        // than being silently admitted.
+        let req = OpenAiChatRequest {
+            model: "llama".to_string(),
+            messages: vec![],
+            max_tokens: None,
+            temperature: None,
+            stream: false,
+            logit_bias: None,
+            tools: None,
+            tool_choice: None,
+            function_call: None,
+        };
+        let result = parse_openai_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("at least one")),
+            "empty messages must surface as InvalidBody, got {:?}",
+            result
+        );
     }
 
     #[test]

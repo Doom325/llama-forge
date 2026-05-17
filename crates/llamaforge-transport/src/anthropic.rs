@@ -28,6 +28,10 @@ pub(crate) struct AnthropicMessagesRequest {
 pub(crate) fn parse_anthropic_request(
     request: AnthropicMessagesRequest,
 ) -> Result<ChatCompletionRequest, ApiError> {
+    if request.messages.is_empty() {
+        return Err(ApiError::InvalidBody("messages must contain at least one entry".to_string()));
+    }
+
     let mut messages = Vec::with_capacity(request.messages.len() + 1);
 
     if let Some(system_prompt) = request.system {
@@ -259,6 +263,25 @@ pub(crate) fn format_anthropic_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_anthropic_empty_messages_rejected() {
+        let req = AnthropicMessagesRequest {
+            model: "claude".to_string(),
+            messages: vec![],
+            system: None,
+            max_tokens: 100,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+        };
+        let result = parse_anthropic_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("at least one")),
+            "empty messages must surface as InvalidBody, got {:?}",
+            result
+        );
+    }
 
     #[test]
     fn test_anthropic_system_prompt_extraction() {

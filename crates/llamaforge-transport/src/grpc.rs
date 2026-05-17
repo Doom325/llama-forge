@@ -13,7 +13,7 @@ use llamaforge_proto::management::{
     QueueStatusRequest, QueueStatusResponse, ReloadConfigRequest, ReloadConfigResponse,
     StartServerRequest, StartServerResponse, StopServerRequest, StopServerResponse,
 };
-use llamaforge_types::traits::{QueueSubmitter, ServerControl};
+use llamaforge_types::traits::{QueueSubmitter, RouteValidator, ServerControl};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -26,6 +26,12 @@ use crate::{openai::OpenAiChatRequest, HttpAppState, InferenceEngine, TransportE
 
 pub struct GrpcInferenceService {
     inference_engine: Arc<dyn InferenceEngine>,
+    /// Route validator. The gRPC `stream_inference` handler used to
+    /// skip admission entirely — unknown models surfaced as
+    /// `Status::Internal` via the inference engine's downstream
+    /// failure rather than the documented `Code::NotFound`. Mirroring
+    /// the HTTP shim's path: validate first, then dispatch.
+    route_validator: Arc<dyn RouteValidator>,
 }
 
 #[tonic::async_trait]
@@ -47,6 +53,15 @@ impl InferenceService for GrpcInferenceService {
             crate::openai::parse_openai_request(openai_req).map_err(tonic::Status::from)?;
 
         chat_req.model = req.model;
+
+        // Mirror the HTTP shim: validate the model is routable before
+        // calling chat_completion. Map admission errors to the
+        // documented gRPC codes — `NoServerForModel` → `NotFound`,
+        // `QueueFull` → `ResourceExhausted` — rather than the
+        // previous "everything is `Internal`" shape.
+        let request_id = llamaforge_types::RequestId::new(uuid::Uuid::now_v7());
+        let incoming = crate::http::build_incoming_request(request_id, &chat_req);
+        self.route_validator.validate_routable(&incoming).map_err(map_admission_error)?;
 
         let mut response_stream = self
             .inference_engine
@@ -72,6 +87,33 @@ impl InferenceService for GrpcInferenceService {
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+}
+
+/// Map a domain `AdmissionError` to a gRPC `Status`. Mirrors the
+/// HTTP shim's `From<AdmissionError> for ApiError`.
+fn map_admission_error(err: llamaforge_types::traits::AdmissionError) -> Status {
+    use llamaforge_types::traits::AdmissionError as Ae;
+    match err {
+        Ae::NoServerForModel { ref model } => {
+            Status::not_found(format!("model not found: {}", model))
+        }
+        Ae::QueueFull | Ae::RateLimited { .. } => Status::resource_exhausted("queue is full"),
+        Ae::InvalidRequest { reason } => Status::invalid_argument(reason),
+        Ae::Cancelled => Status::cancelled("request cancelled during admission"),
+    }
+}
+
+/// Map a domain `ServerError` to a gRPC `Status`. `NotFound` becomes
+/// `Code::NotFound` so SDK clients see the documented status rather
+/// than `Internal` (which signals "retry" in most SDK retry policies).
+fn map_server_error(err: llamaforge_types::traits::ServerError) -> Status {
+    use llamaforge_types::traits::ServerError as Se;
+    match err {
+        Se::NotFound { .. } => Status::not_found(err.to_string()),
+        Se::AlreadyRunning { .. } => Status::already_exists(err.to_string()),
+        Se::Unreachable { .. } => Status::unavailable(err.to_string()),
+        Se::SpawnFailed { .. } => Status::internal(err.to_string()),
     }
 }
 
@@ -108,10 +150,7 @@ where
         let uuid = uuid::Uuid::parse_str(&req.server_id)
             .map_err(|_| Status::invalid_argument("Invalid server_id"))?;
         let server_id = llamaforge_types::ServerId::new(uuid);
-        self.server_control
-            .start_server(&server_id)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        self.server_control.start_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StartServerResponse {}))
     }
 
@@ -123,10 +162,7 @@ where
         let uuid = uuid::Uuid::parse_str(&req.server_id)
             .map_err(|_| Status::invalid_argument("Invalid server_id"))?;
         let server_id = llamaforge_types::ServerId::new(uuid);
-        self.server_control
-            .stop_server(&server_id)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        self.server_control.stop_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StopServerResponse {}))
     }
 
@@ -301,6 +337,7 @@ where
 
     let inference_service = InferenceServiceServer::new(GrpcInferenceService {
         inference_engine: state.inference_engine.clone(),
+        route_validator: state.route_validator.clone(),
     })
     .max_decoding_message_size(max_message_size)
     .max_encoding_message_size(max_message_size);
