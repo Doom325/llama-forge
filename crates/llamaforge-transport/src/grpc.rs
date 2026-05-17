@@ -400,10 +400,28 @@ where
             .map_err(|e| TransportError::Bootstrap(format!("tls config: {}", e)))?;
     }
 
-    builder
+    let server = builder
         .add_service(inference_service)
         .add_service(management_service)
-        .add_service(health_service) // Health service might not need auth
+        .add_service(health_service); // Health service might not need auth
+
+    #[cfg(feature = "dev-reflection")]
+    let server = {
+        // `tonic-reflection` reads the `FileDescriptorSet` emitted by
+        // `llamaforge-proto/build.rs` and serves the gRPC reflection
+        // API. SDK-less clients (`grpcurl`, `evans`, gRPC UI) can
+        // then discover services without shipping `.proto` files.
+        // Gated behind the `dev-reflection` cargo feature (default-on
+        // for dev / staging; production builds can opt out with
+        // `--no-default-features`).
+        let reflection = tonic_reflection::server::Builder::configure()
+            .register_encoded_file_descriptor_set(llamaforge_proto::FILE_DESCRIPTOR_SET)
+            .build_v1()
+            .map_err(|e| TransportError::Bootstrap(format!("reflection: {}", e)))?;
+        server.add_service(reflection)
+    };
+
+    server
         .serve_with_incoming_shutdown(incoming, async move {
             let _ = rx.changed().await;
         })

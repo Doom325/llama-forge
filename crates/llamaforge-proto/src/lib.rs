@@ -12,3 +12,12 @@ pub mod inference {
 pub mod management {
     tonic::include_proto!("llamaforge.management");
 }
+
+/// Raw `FileDescriptorSet` bytes emitted by `tonic-build`. Consumed
+/// by `tonic-reflection` when the transport crate is built with its
+/// `dev-reflection` feature so SDK-less clients (`grpcurl`, `evans`,
+/// the gRPC web UI) can discover services without shipping the
+/// `.proto` source. Always available — gating happens in the
+/// transport crate.
+pub const FILE_DESCRIPTOR_SET: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/llamaforge_descriptor.bin"));

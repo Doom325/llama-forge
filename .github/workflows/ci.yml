@@ -61,7 +61,12 @@ jobs:
         run: cargo build --workspace
 
       - name: Run Tests
-        run: cargo test --workspace --all-features
+        # `llamaforge-e2e` is excluded here because it runs in its own
+        # `e2e-mocklama` job below — running the suite twice doubles
+        # the wall-clock and lets a flaky parallel run on the same
+        # process-global metrics DB hang the workspace job. The E2E
+        # job alone is authoritative for the e2e tests.
+        run: cargo test --workspace --exclude llamaforge-e2e --all-features
 
   e2e-mocklama:
     name: E2E (mock-llama)

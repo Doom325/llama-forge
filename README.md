@@ -21,7 +21,8 @@ cargo build --release
 
 ```sh
 cargo build --bin mock-llama                           # required by the e2e harness
-cargo test -p llamaforge-e2e --tests                   # also needs `protoc` and `mold`
+cargo test -p llamaforge-e2e --tests                   # also needs `protoc`
+                                                       # on Linux, also needs `mold` (fast linker; macOS uses the system linker)
 ```
 
 ## License
