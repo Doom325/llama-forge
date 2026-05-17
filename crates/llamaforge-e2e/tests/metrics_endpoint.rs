@@ -10,7 +10,7 @@ async fn test_e2e_metrics_endpoint() {
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
-        "model": "dummy",
+        "model": "mock",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": false,
     });

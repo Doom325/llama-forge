@@ -48,6 +48,9 @@ impl From<llamaforge_types::traits::AdmissionError> for ApiError {
             llamaforge_types::traits::AdmissionError::Cancelled => {
                 ApiError::Internal("Request cancelled during admission".to_string())
             }
+            llamaforge_types::traits::AdmissionError::NoServerForModel { .. } => {
+                ApiError::ModelNotFound
+            }
         }
     }
 }

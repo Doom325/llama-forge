@@ -129,14 +129,11 @@ alias = "{alias}"
     /// `mock-llama` itself; the test drives the orchestrator's HTTP /
     /// gRPC endpoints via the returned [`OrchestratorHandle`].
     pub async fn start_full() -> anyhow::Result<OrchestratorHandle> {
-        // The HTTP handler hardcodes `ModelTarget::Exact("dummy")` when
-        // calling the route validator (see `transport/src/http.rs`).
-        // Using `dummy` as the server alias makes admission control
-        // admit the request; tests still send their own `"model"` in
-        // the request body and get the real backend response, since
-        // `chat_completion` uses the parsed request — not the
-        // validator's placeholder.
-        Self::start_full_with_alias("dummy").await
+        // Default server alias used by the e2e tests. Anything that
+        // sends `{"model": "mock"}` (most of the suite) will route to
+        // the spawned mock-llama; tests that want a different alias
+        // should use `start_full_with_alias`.
+        Self::start_full_with_alias("mock").await
     }
 
     pub async fn start_full_with_alias(alias: &str) -> anyhow::Result<OrchestratorHandle> {

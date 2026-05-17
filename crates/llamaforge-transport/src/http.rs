@@ -65,6 +65,44 @@ impl<CW, RMS, SM> axum::extract::FromRef<HttpAppState<CW, RMS, SM>> for Arc<dyn 
     }
 }
 
+/// Project a parsed `ChatCompletionRequest` into the validator's
+/// `IncomingRequest` shape, keeping the real model alias / messages /
+/// params. Used by both the OpenAI and Anthropic handlers so routing
+/// sees the same view of the request that the inference engine does.
+fn build_incoming_request(
+    request_id: llamaforge_types::RequestId,
+    req: &llamaforge_types::ChatCompletionRequest,
+) -> llamaforge_types::traits::IncomingRequest {
+    llamaforge_types::traits::IncomingRequest {
+        request_id,
+        requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
+        requestor_class: llamaforge_types::RequestorClass::new("default".into()),
+        model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
+            std::sync::Arc::from(req.model.as_str()),
+        )),
+        capabilities: Default::default(),
+        messages: req.messages.clone(),
+        params: Default::default(),
+        stream: req.stream,
+        session_id: None,
+        submitted_at: chrono::Utc::now(),
+    }
+}
+
+/// Derive a `Retry-After` (seconds) hint from the queue's current
+/// depth / throughput estimate. Falls back to 30s if either reading is
+/// unavailable. Used only on the `QueueFull` branch; model-mismatch
+/// rejections must not surface a `Retry-After` since the model name
+/// will still be unknown on retry.
+fn compute_retry_after(qs: &dyn QueueSubmitter) -> u32 {
+    if let Ok(status) = qs.status() {
+        if status.estimated_throughput_req_sec > 0.0 {
+            return (status.depth as f32 / status.estimated_throughput_req_sec).ceil() as u32;
+        }
+    }
+    30
+}
+
 pub(crate) async fn openai_chat_completion_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
@@ -107,36 +145,24 @@ async fn handle_openai_request<CW, RMS, SM>(
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    state
-        .route_validator
-        .validate_routable(&llamaforge_types::traits::IncomingRequest {
-            request_id,
-            requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
-            requestor_class: llamaforge_types::RequestorClass::new("default".into()),
-            model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
-                "dummy".into(),
-            )),
-            capabilities: Default::default(),
-            messages: vec![],
-            params: Default::default(),
-            stream: false,
-            session_id: None,
-            submitted_at: chrono::Utc::now(),
-        })
-        .map_err(|_| {
-            let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
-                if status.estimated_throughput_req_sec > 0.0 {
-                    (status.depth as f32 / status.estimated_throughput_req_sec).ceil() as u32
-                } else {
-                    30
-                }
-            } else {
-                30
-            };
-            ApiError::QueueFull { retry_after_secs }
-        })?;
-
     let model_echo = req.model.clone();
+    // Build the validator's `IncomingRequest` from the parsed body so
+    // routing sees the real model alias / capabilities / params /
+    // messages, not a placeholder.
+    let incoming = build_incoming_request(request_id, &req);
+    state.route_validator.validate_routable(&incoming).map_err(|e| {
+        // Pattern-match instead of collapsing every error to `QueueFull`:
+        // `NoServerForModel` must surface as `404 model_not_found`, not
+        // `429 queue_full` with a wrong `Retry-After`.
+        match e {
+            llamaforge_types::traits::AdmissionError::QueueFull => {
+                let retry_after_secs = compute_retry_after(&*state.queue_submitter);
+                ApiError::QueueFull { retry_after_secs }
+            }
+            other => ApiError::from(other),
+        }
+    })?;
+
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
 
@@ -345,34 +371,14 @@ where
         parse_anthropic_request(request)?
     };
 
-    state
-        .route_validator
-        .validate_routable(&llamaforge_types::traits::IncomingRequest {
-            request_id,
-            requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
-            requestor_class: llamaforge_types::RequestorClass::new("default".into()),
-            model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
-                "dummy".into(),
-            )),
-            capabilities: Default::default(),
-            messages: vec![],
-            params: Default::default(),
-            stream: false,
-            session_id: None,
-            submitted_at: chrono::Utc::now(),
-        })
-        .map_err(|_| {
-            let retry_after_secs = if let Ok(status) = state.queue_submitter.status() {
-                if status.estimated_throughput_req_sec > 0.0 {
-                    (status.depth as f32 / status.estimated_throughput_req_sec).ceil() as u32
-                } else {
-                    30
-                }
-            } else {
-                30
-            };
+    let incoming = build_incoming_request(request_id, &req);
+    state.route_validator.validate_routable(&incoming).map_err(|e| match e {
+        llamaforge_types::traits::AdmissionError::QueueFull => {
+            let retry_after_secs = compute_retry_after(&*state.queue_submitter);
             ApiError::QueueFull { retry_after_secs }
-        })?;
+        }
+        other => ApiError::from(other),
+    })?;
 
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;

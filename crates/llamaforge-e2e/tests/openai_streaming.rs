@@ -13,7 +13,7 @@ async fn test_e2e_openai_chat_streaming() {
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
-        "model": "dummy",
+        "model": "mock",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": true,
     });

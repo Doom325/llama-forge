@@ -143,6 +143,12 @@ pub enum AdmissionError {
     InvalidRequest { reason: String },
     #[error("Rate limited. Retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u32 },
+    /// No configured server can serve the requested model alias /
+    /// capability set. Distinct from `QueueFull`: this is a permanent
+    /// rejection for the given model name, not a transient
+    /// backpressure signal.
+    #[error("No server for model: {model}")]
+    NoServerForModel { model: crate::ModelAlias },
 }
 
 #[derive(Debug, Error)]

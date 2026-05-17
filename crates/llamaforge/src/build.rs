@@ -190,12 +190,22 @@ struct RouterValidatorAdapter {
 
 impl RouteValidator for RouterValidatorAdapter {
     fn validate_routable(&self, req: &IncomingRequest) -> Result<(), AdmissionError> {
+        use llamaforge_routing::RoutingError;
+        use llamaforge_types::ModelAlias;
         <Router as llamaforge_routing::RouteValidator>::validate_routable(
             &self.router,
             &req.model_target,
             &req.capabilities,
         )
-        .map_err(|e| AdmissionError::InvalidRequest { reason: e.to_string() })
+        .map_err(|e| match e {
+            RoutingError::ModelNotFound { model, .. }
+            | RoutingError::ModelUnavailable { model, .. } => AdmissionError::NoServerForModel {
+                model: ModelAlias::new(std::sync::Arc::from(model.as_str())),
+            },
+            RoutingError::NoCapableServer { requested, .. } => AdmissionError::NoServerForModel {
+                model: ModelAlias::new(std::sync::Arc::from(requested.as_str())),
+            },
+        })
     }
 }
 

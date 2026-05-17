@@ -14,7 +14,7 @@ async fn test_e2e_graceful_shutdown() {
     let http_url = orch.http_url.clone();
     let client = reqwest::Client::new();
     let body = serde_json::json!({
-        "model": "dummy",
+        "model": "mock",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": true,
     });
