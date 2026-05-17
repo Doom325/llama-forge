@@ -156,8 +156,25 @@ where
         &self,
         _request: Request<ReloadConfigRequest>,
     ) -> Result<Response<ReloadConfigResponse>, Status> {
-        self.config_writer.reload().await.map_err(|e| Status::internal(e.to_string()))?;
-        Ok(Response::new(ReloadConfigResponse {}))
+        // The gate lives inside `ConfigHandle::reload`: if the on-disk
+        // diff touches a restart-required field, reload returns
+        // `RestartRequired` *before* swapping the snapshot or
+        // broadcasting. We map that to `failed_precondition` so the
+        // operator sees an honest signal and no half-applied state.
+        // Hot-reloadable diffs swap + broadcast normally; the
+        // subscriber in `serve.rs` calls `apply_config_diff` on the
+        // server-manager.
+        match self.config_writer.reload().await {
+            Ok(_) => Ok(Response::new(ReloadConfigResponse {})),
+            Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+                Err(Status::failed_precondition(format!(
+                    "config diff touches restart-required server fields ({:?}); \
+                     restart the orchestrator to apply",
+                    fields
+                )))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 }
 

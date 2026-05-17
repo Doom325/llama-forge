@@ -99,8 +99,19 @@ pub(crate) async fn reload_config<CW, RMS, SM>(
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    state.config_writer.reload().await.map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(axum::http::StatusCode::OK.into_response())
+    // The gate is in `ConfigHandle::reload` (see grpc.rs for the
+    // rationale). Map the dedicated `RestartRequired` error to 412.
+    match state.config_writer.reload().await {
+        Ok(_) => Ok(axum::http::StatusCode::OK.into_response()),
+        Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+            Err(ApiError::PreconditionFailed(format!(
+                "config diff touches restart-required server fields ({:?}); \
+                 restart the orchestrator to apply",
+                fields
+            )))
+        }
+        Err(e) => Err(ApiError::Internal(e.to_string())),
+    }
 }
 
 #[derive(serde::Deserialize, Default)]

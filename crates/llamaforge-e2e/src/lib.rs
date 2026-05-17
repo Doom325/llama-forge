@@ -218,6 +218,24 @@ estimated_vram_mb = 100
             .await
             .map_err(|e| anyhow::anyhow!("server-manager start: {}", e))?;
 
+        // Mirror the production wiring in `llamaforge::serve::run`:
+        // forward config-change diffs into the server-manager so a
+        // `ReloadConfig` actually propagates into the running fleet.
+        // Without this, hot-reloadable edits (alias / lora_adapters)
+        // would broadcast on a channel nobody subscribed to.
+        let config_for_forwarder = handle.clone();
+        let sm_for_forwarder = server_manager.clone();
+        let _diff_task = tokio::spawn(async move {
+            use llamaforge_config::ConfigReader;
+            let mut rx = config_for_forwarder.subscribe();
+            while let Ok(diff) = rx.recv().await {
+                if diff.changes.is_empty() {
+                    continue;
+                }
+                sm_for_forwarder.apply_config_diff(&diff).await;
+            }
+        });
+
         let transport = llamaforge_transport::start_servers(deps)
             .await
             .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;

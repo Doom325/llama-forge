@@ -48,6 +48,14 @@ pub enum ConfigReloadError {
     /// The blocking task responsible for loading the configuration panicked.
     #[error("spawn_blocking task panicked: {message}")]
     LoadTaskJoin { message: String },
+
+    /// The on-disk file changed a server field that requires a
+    /// restart to apply. v1.0 doesn't ship a staged-apply protocol;
+    /// `ConfigHandle::reload` aborts before swapping the snapshot or
+    /// broadcasting a diff, so callers see no half-applied state.
+    /// See `docs/v1.1-deferred.md` "Staged-apply protocol".
+    #[error("restart required for fields: {fields:?}")]
+    RestartRequired { fields: Vec<crate::diff::ServerConfigField> },
 }
 
 /// Error during crash-safe writeback.
