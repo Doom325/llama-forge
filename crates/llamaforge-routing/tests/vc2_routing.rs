@@ -60,8 +60,8 @@ fn test_vc2_2_dispatch_compensation() {
 
     let model_target = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
-    // effective_free = 0, has_capacity = false
-    assert!(!router.has_capacity(&model_target, &Default::default()));
+    // effective_free = 0, has_idle_slot = false
+    assert!(!router.has_idle_slot(&model_target, &Default::default()));
 }
 
 // VC-2.3

@@ -204,9 +204,19 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
     // and then send ShuttingDown.
     struct DrainChecker;
     impl CapacityChecker for DrainChecker {
-        fn has_capacity(
+        fn serves_model(
             &self,
+            t: &ModelTarget,
+            c: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
+            self.has_idle_slot(t, c)
+        }
+
+        fn has_idle_slot(
+            &self,
+
             _: &ModelTarget,
+
             _: &llamaforge_routing::RequestCapabilities,
         ) -> bool {
             true

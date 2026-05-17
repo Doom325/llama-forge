@@ -168,9 +168,19 @@ mod tests {
 
     struct MockCapacityChecker;
     impl CapacityChecker for MockCapacityChecker {
-        fn has_capacity(
+        fn serves_model(
             &self,
+            t: &ModelTarget,
+            c: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
+            self.has_idle_slot(t, c)
+        }
+
+        fn has_idle_slot(
+            &self,
+
             _: &ModelTarget,
+
             _: &llamaforge_routing::RequestCapabilities,
         ) -> bool {
             true

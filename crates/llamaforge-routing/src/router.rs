@@ -247,75 +247,85 @@ impl Router {
         ((val % candidates.len() as u64) as usize, val)
     }
 
-    /// Check if we have any capacity for the model and capabilities.
-    pub fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
-        let config = self.config.snapshot();
+    /// Project the model + capability filter into the two
+    /// admission/dispatch questions. `(serves_model, has_idle_slot)`:
+    ///   * `serves_model` — any configured server matches the model
+    ///     and capability set, regardless of lifecycle or slot
+    ///     occupancy. Admission's permanent-reject signal.
+    ///   * `has_idle_slot` — at least one *Running* matching server
+    ///     has a free slot (effective_free > 0). The queue dispatch
+    ///     iterator's fast-fail signal.
+    fn capacity_view(
+        &self,
+        target: &ModelTarget,
+        capabilities: &RequestCapabilities,
+    ) -> (bool, bool) {
         let all_servers = self.server_state.all_servers();
-        let mut model_matches = Vec::new();
-        let mut all_starting = true;
-        let mut any_servers = false;
+        let mut serves_model = false;
+        let mut has_idle_slot = false;
 
         for server in all_servers {
-            let serves_model = match target {
+            let model_match = match target {
                 ModelTarget::Exact(alias) => server.models.contains(alias),
                 ModelTarget::AnyOf(aliases) => {
                     aliases.iter().any(|alias| server.models.contains(alias))
                 }
                 ModelTarget::AnyWithCapability(cap) => server.capabilities.contains(cap),
             };
+            if !model_match {
+                continue;
+            }
 
-            if serves_model {
-                let mut server_capable = true;
-
-                if let Some(lora) = &capabilities.lora_adapter {
-                    if !server.lora_adapters.contains(lora) {
-                        server_capable = false;
+            let mut capable = true;
+            if let Some(lora) = &capabilities.lora_adapter {
+                if !server.lora_adapters.contains(lora) {
+                    capable = false;
+                }
+            }
+            if capable && capabilities.multimodal && !server.multimodal {
+                capable = false;
+            }
+            if capable && capabilities.embedding && !server.embedding {
+                capable = false;
+            }
+            if capable && capabilities.reranking && !server.reranking {
+                capable = false;
+            }
+            if capable {
+                if let Some(arch) = &capabilities.architecture {
+                    if server.architecture != *arch {
+                        capable = false;
                     }
                 }
-                if server_capable && capabilities.multimodal && !server.multimodal {
-                    server_capable = false;
-                }
-                if server_capable && capabilities.embedding && !server.embedding {
-                    server_capable = false;
-                }
-                if server_capable && capabilities.reranking && !server.reranking {
-                    server_capable = false;
-                }
-                if server_capable {
-                    if let Some(arch) = &capabilities.architecture {
-                        if server.architecture != *arch {
-                            server_capable = false;
-                        }
-                    }
-                }
+            }
+            if !capable {
+                continue;
+            }
 
-                if server_capable {
-                    any_servers = true;
-                    if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
-                        all_starting = false;
-                        model_matches.push(server);
-                    } else if server.lifecycle != llamaforge_types::ServerLifecycle::Starting {
-                        all_starting = false;
-                    }
+            serves_model = true;
+
+            if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
+                let in_flight = self.dispatch_counts.in_flight_count(&server.id);
+                let effective_free = server.idle_slots.saturating_sub(in_flight as u32);
+                if effective_free > 0 {
+                    has_idle_slot = true;
                 }
             }
         }
 
-        if any_servers && all_starting {
-            let wait_secs = config.routing.startup_wait_secs;
-            if self.started_at.elapsed().as_secs() < wait_secs {
-                return true;
-            }
-        }
+        (serves_model, has_idle_slot)
+    }
 
-        for server in model_matches {
-            let in_flight = self.dispatch_counts.in_flight_count(&server.id);
-            let effective_free = server.idle_slots.saturating_sub(in_flight as u32);
-            if effective_free > 0 {
-                return true;
-            }
-        }
-        false
+    /// Admission gate: any configured server matches the model and
+    /// capability set, lifecycle-agnostic. See [`CapacityChecker::serves_model`].
+    pub fn serves_model(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
+        self.capacity_view(target, capabilities).0
+    }
+
+    /// Dispatch fast-fail: at least one Running matching server has a
+    /// free slot. See [`CapacityChecker::has_idle_slot`].
+    pub fn has_idle_slot(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
+        self.capacity_view(target, capabilities).1
     }
 
     /// Validate if it's even possible to route this request.
@@ -497,8 +507,11 @@ impl Router {
 }
 
 impl CapacityChecker for Router {
-    fn has_capacity(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
-        self.has_capacity(target, capabilities)
+    fn serves_model(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
+        self.serves_model(target, capabilities)
+    }
+    fn has_idle_slot(&self, target: &ModelTarget, capabilities: &RequestCapabilities) -> bool {
+        self.has_idle_slot(target, capabilities)
     }
 }
 
@@ -695,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn test_has_capacity_with_tracker_compensation() {
+    fn test_has_idle_slot_with_tracker_compensation() {
         let mut s1 = default_server(1, "model1");
         s1.idle_slots = 4;
         let mut dispatch = MockDispatchCountView::new();
@@ -704,12 +717,17 @@ mod tests {
         let router = create_mock_router(vec![s1.clone()], dispatch);
         let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
-        assert!(!router.has_capacity(&model, &Default::default()));
+        // Slots fully occupied via the dispatch-count tracker → no
+        // idle slot. `serves_model` still true (the model is
+        // configured) so admission would still queue, but the
+        // dispatch path's fast-fail check correctly says "not now".
+        assert!(router.serves_model(&model, &Default::default()));
+        assert!(!router.has_idle_slot(&model, &Default::default()));
 
         let mut dispatch2 = MockDispatchCountView::new();
         dispatch2.counts.insert(s1.id, 3);
         let router2 = create_mock_router(vec![s1], dispatch2);
-        assert!(router2.has_capacity(&model, &Default::default()));
+        assert!(router2.has_idle_slot(&model, &Default::default()));
     }
 
     #[test]
@@ -753,36 +771,22 @@ mod tests {
     }
 
     #[test]
-    fn test_has_capacity_startup_grace_period() {
+    fn test_serves_model_includes_starting_servers() {
+        // After the capacity-API split, lifecycle-grace logic moved
+        // out of the router. `serves_model` is admission's view: a
+        // configured server matches the model regardless of lifecycle,
+        // so the request must be admitted (and queued). `has_idle_slot`
+        // is the dispatch-time view: a Starting server has no slot
+        // available, so the dispatch path correctly fast-fails until
+        // health checks promote the server to Running.
         let mut s1 = default_server(1, "model1");
         s1.lifecycle = llamaforge_types::ServerLifecycle::Starting;
 
-        // Custom router with 0s wait_secs
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), "[global]\n[routing]\nstartup_wait_secs = 0\n").unwrap();
-        let paths = llamaforge_config::ConfigPaths::new(
-            tmp.path().to_path_buf(),
-            tmp.path().to_path_buf(),
-            tmp.path().parent().unwrap().to_path_buf(),
-        );
-        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
-        let config = Arc::new(ConfigHandle::load(source).unwrap());
-
-        let dispatch = MockDispatchCountView::new();
-        let router_no_grace = Router::new(
-            config,
-            Arc::new(MockServerStateView { servers: vec![s1.clone()] }),
-            Arc::new(dispatch),
-        );
-
+        let router = create_mock_router(vec![s1], MockDispatchCountView::new());
         let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
 
-        // Since grace period is 0s, it should return false
-        assert!(!router_no_grace.has_capacity(&model, &Default::default()));
-
-        // Default router has 30s wait_secs
-        let router_with_grace = create_mock_router(vec![s1], MockDispatchCountView::new());
-        assert!(router_with_grace.has_capacity(&model, &Default::default()));
+        assert!(router.serves_model(&model, &Default::default()));
+        assert!(!router.has_idle_slot(&model, &Default::default()));
     }
 
     #[test]

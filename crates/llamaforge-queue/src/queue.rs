@@ -52,7 +52,7 @@ impl FlatPriorityQueue {
         for (rev_prio, deque) in self.queue.iter() {
             for (idx, req) in deque.iter().enumerate() {
                 scan_depth += 1;
-                if capacity.has_capacity(&req.model_target, &req.capabilities) {
+                if capacity.has_idle_slot(&req.model_target, &req.capabilities) {
                     target_coord = Some((rev_prio.0, idx));
                     break;
                 }
@@ -399,7 +399,16 @@ mod tests {
     }
 
     impl CapacityChecker for MockCapacityChecker {
-        fn has_capacity(
+        fn serves_model(
+            &self,
+            target: &ModelTarget,
+            capabilities: &llamaforge_routing::RequestCapabilities,
+        ) -> bool {
+            // For the mock, "serves model" and "has idle slot" both
+            // collapse to the allow-listed-models check.
+            self.has_idle_slot(target, capabilities)
+        }
+        fn has_idle_slot(
             &self,
             target: &ModelTarget,
             _capabilities: &llamaforge_routing::RequestCapabilities,
@@ -409,7 +418,7 @@ mod tests {
                 ModelTarget::AnyOf(aliases) => {
                     aliases.iter().any(|a| self.allowed_models.contains(a))
                 }
-                ModelTarget::AnyWithCapability(_) => !self.allowed_models.is_empty(), // dummy logic
+                ModelTarget::AnyWithCapability(_) => !self.allowed_models.is_empty(), // mock logic
             }
         }
     }
