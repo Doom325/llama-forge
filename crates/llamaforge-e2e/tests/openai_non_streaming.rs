@@ -21,7 +21,7 @@ async fn test_e2e_openai_chat_non_streaming_returns_content() {
 
     let client = reqwest::Client::new();
     let body = serde_json::json!({
-        "model": "dummy",
+        "model": "mock",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": false,
     });
@@ -57,7 +57,7 @@ async fn test_e2e_openai_chat_non_streaming_returns_content() {
         "created should be a unix ts, got {:?}",
         payload["created"]
     );
-    assert_eq!(payload["model"].as_str(), Some("dummy"));
+    assert_eq!(payload["model"].as_str(), Some("mock"));
     assert_eq!(payload["choices"][0]["index"].as_u64(), Some(0));
     assert_eq!(payload["choices"][0]["finish_reason"].as_str(), Some("stop"));
     let usage = &payload["usage"];

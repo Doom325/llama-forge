@@ -15,13 +15,13 @@ async fn test_e2e_grpc_streaming() {
         InferenceServiceClient::connect(orch.grpc_url.clone()).await.expect("grpc connect");
 
     let payload = serde_json::json!({
-        "model": "dummy",
+        "model": "mock",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": true,
     })
     .to_string();
 
-    let req = tonic::Request::new(InferenceRequest { model: "dummy".to_string(), payload });
+    let req = tonic::Request::new(InferenceRequest { model: "mock".to_string(), payload });
     let mut stream = client.stream_inference(req).await.expect("stream_inference").into_inner();
 
     let mut chunks_seen = 0usize;
