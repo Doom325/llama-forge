@@ -240,6 +240,13 @@ pub async fn spawn_server_task(
 
         info!(server.id = %server_id, "Backing off before restart {}", restart_count);
 
+        // Stamp the restart wall-clock for the next spawn cycle so
+        // `ServerStateSnapshot::last_restart_at` reflects when the
+        // restart was initiated.
+        if let Some(mut state) = mgr.servers.get_mut(&server_id) {
+            state.last_restart_at = Some(chrono::Utc::now());
+        }
+
         let cooldown_base = config.restart_cooldown_secs as f64;
         let delay_secs = compute_backoff_delay(restart_count, cooldown_base);
 

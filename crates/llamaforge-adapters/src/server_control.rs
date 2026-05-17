@@ -35,8 +35,8 @@ impl ServerControl for ServerControlAdapter {
                 port: state.port,
                 slots_total: state.parallel_slots,
                 slots_busy: busy_slots,
-                started_at: None,
-                last_restart_at: None,
+                started_at: state.started_at,
+                last_restart_at: state.last_restart_at,
             });
         }
         Ok(summaries)

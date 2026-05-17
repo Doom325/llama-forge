@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use chrono::{DateTime, Utc};
 use llamaforge_config::{GpuId, ServerId};
 
 use crate::types::{ServerCapabilities, ServerLifecycle, SlotState};
@@ -25,6 +26,15 @@ pub struct ServerStateSnapshot {
     pub restart_count: u32,
     pub cumulative_requests: u64,
     pub capabilities: ServerCapabilities,
+    /// Wall-clock timestamp when this server's *first* spawn task
+    /// started. Captured once at registration and preserved across
+    /// restarts; mirrors the design.md §5.3.1 `started_at` field on
+    /// `ServerSummary`. `None` until the spawn task initialises it.
+    pub started_at: Option<DateTime<Utc>>,
+    /// Wall-clock timestamp of the most recent *restart* spawn — i.e.
+    /// the second and subsequent spawns. `None` while
+    /// `restart_count == 0`.
+    pub last_restart_at: Option<DateTime<Utc>>,
 }
 
 /// Internal mutable state for a server, held in a DashMap.
@@ -56,6 +66,12 @@ pub(crate) struct ServerState {
     pub reserved_vram_bytes: u64,
     /// Token used to signal this specific server task to shutdown.
     pub task_shutdown_token: tokio_util::sync::CancellationToken,
+    /// First-spawn wall-clock timestamp. Set once when the server task
+    /// initialises; preserved across restarts.
+    pub started_at: Option<DateTime<Utc>>,
+    /// Last restart wall-clock timestamp. Updated on every spawn
+    /// after the first.
+    pub last_restart_at: Option<DateTime<Utc>>,
 
     #[cfg(any(test, feature = "test-utils"))]
     pub test_warm_tps_samples: Option<(usize, f64)>,
@@ -78,6 +94,8 @@ impl ServerState {
             restart_count: self.restart_count,
             cumulative_requests: self.cumulative_requests,
             capabilities: self.capabilities.clone().unwrap_or_default(),
+            started_at: self.started_at,
+            last_restart_at: self.last_restart_at,
         }
     }
 }
@@ -113,6 +131,8 @@ mod tests {
             gguf_metadata: None,
             reserved_vram_bytes: 0,
             task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+            started_at: Some(Utc::now()),
+            last_restart_at: None,
             #[cfg(any(test, feature = "test-utils"))]
             test_warm_tps_samples: None,
         };

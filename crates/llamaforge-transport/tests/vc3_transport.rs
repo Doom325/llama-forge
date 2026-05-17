@@ -72,7 +72,18 @@ fn default_deps() -> (
     (
         Arc::new(mocks::MockRouteValidator),
         Arc::new(mocks::MockQueueSubmitter),
-        Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 }),
+        // Default mock engine emits a terminal `Stop` so the
+        // non-streaming aggregator's `saw_stop` warming-window guard
+        // doesn't 503 fixtures whose only intent is exercising the
+        // HTTP/gRPC surface. Per-test overrides supply their own
+        // chunks where the stream shape matters.
+        Arc::new(mocks::MockEngine {
+            chunks: std::sync::Mutex::new(vec![Ok(ChatCompletionChunk::Stop {
+                finish_reason: "stop".to_string(),
+                output_tokens: 0,
+            })]),
+            sleep_ms: 0,
+        }),
         Arc::new(mocks::MockServerControl),
     )
 }
