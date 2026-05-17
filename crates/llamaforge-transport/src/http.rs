@@ -67,9 +67,10 @@ impl<CW, RMS, SM> axum::extract::FromRef<HttpAppState<CW, RMS, SM>> for Arc<dyn 
 
 /// Project a parsed `ChatCompletionRequest` into the validator's
 /// `IncomingRequest` shape, keeping the real model alias / messages /
-/// params. Used by both the OpenAI and Anthropic handlers so routing
-/// sees the same view of the request that the inference engine does.
-fn build_incoming_request(
+/// params. Used by both the OpenAI and Anthropic HTTP handlers and the
+/// gRPC `stream_inference` handler so routing sees the same view of
+/// the request that the inference engine does.
+pub(crate) fn build_incoming_request(
     request_id: llamaforge_types::RequestId,
     req: &llamaforge_types::ChatCompletionRequest,
 ) -> llamaforge_types::traits::IncomingRequest {
@@ -355,11 +356,32 @@ where
 pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
     axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
+    headers: axum::http::HeaderMap,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
+    // Anthropic SDK mandates an `anthropic-version: YYYY-MM-DD`
+    // header. v1.0 is permissive — log a structured warning and
+    // continue, mirroring the header back if it was supplied so SDK
+    // clients can keep their version-pinning code paths working.
+    // A strict-mode `gateway.anthropic_strict_version_header` knob
+    // is tracked in `docs/v1.1-deferred.md`.
+    let anthropic_version =
+        headers.get("anthropic-version").and_then(|v| v.to_str().ok()).map(str::to_string);
+    if anthropic_version.is_none() {
+        tracing::warn!(api = "anthropic", "api.missing_anthropic_version_header");
+    }
+    let inject_version = |mut resp: axum::response::Response| -> axum::response::Response {
+        if let Some(ref v) = anthropic_version {
+            if let Ok(hv) = axum::http::HeaderValue::from_str(v) {
+                resp.headers_mut().insert("anthropic-version", hv);
+            }
+        }
+        resp
+    };
+
     let body_len = req_bytes.len();
 
     let request: AnthropicMessagesRequest = if body_len > 1_048_576 {
@@ -463,7 +485,7 @@ where
             finished: false,
         };
 
-        Ok(Sse::new(guarded_stream).into_response())
+        Ok(inject_version(Sse::new(guarded_stream).into_response()))
     } else {
         // Non-streaming: same aggregation pattern as the OpenAI shim
         // — collect `Token` content, read `stop_reason` /
@@ -503,27 +525,74 @@ where
         }
         let stop_reason = stop_reason.unwrap_or_else(|| "end_turn".to_string());
 
-        Ok(axum::Json(serde_json::json!({
-            "id": req_id_str,
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "text",
-                "text": text,
-            }],
-            "model": model,
-            "stop_reason": stop_reason,
-            "stop_sequence": null,
-            // `input_tokens` isn't observed end-to-end in v1.0 — see
-            // `docs/v1.1-deferred.md`.
-            "usage": {"input_tokens": 0, "output_tokens": output_tokens}
-        }))
-        .into_response())
+        Ok(inject_version(
+            axum::Json(serde_json::json!({
+                "id": req_id_str,
+                "type": "message",
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": text,
+                }],
+                "model": model,
+                "stop_reason": stop_reason,
+                "stop_sequence": null,
+                // `input_tokens` isn't observed end-to-end in v1.0 — see
+                // `docs/v1.1-deferred.md`.
+                "usage": {"input_tokens": 0, "output_tokens": output_tokens}
+            }))
+            .into_response(),
+        ))
     }
 }
 
 pub(crate) async fn health_check() -> axum::response::Response {
     axum::Json(serde_json::json!({"status": "ok"})).into_response()
+}
+
+/// `GET /v1/models` — OpenAI-compatible model discovery. Emits the
+/// list envelope `{"object":"list","data":[...]}` over the distinct
+/// server aliases in the config snapshot. Servers without an alias
+/// (default `"default"`) are skipped to keep the discovery surface
+/// useful.
+pub(crate) async fn list_openai_models<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
+) -> axum::response::Response {
+    let snap = state.config_reader.snapshot();
+    let now_unix = chrono::Utc::now().timestamp();
+    let mut seen = std::collections::BTreeSet::new();
+    let mut data: Vec<serde_json::Value> = Vec::new();
+    for (_id, cfg) in snap.servers.iter() {
+        if let Some(alias) = cfg.alias.clone() {
+            if alias.is_empty() {
+                continue;
+            }
+            if seen.insert(alias.clone()) {
+                data.push(serde_json::json!({
+                    "id": alias,
+                    "object": "model",
+                    "created": now_unix,
+                    "owned_by": "llamaforge",
+                }));
+            }
+        }
+    }
+    axum::Json(serde_json::json!({
+        "object": "list",
+        "data": data,
+    }))
+    .into_response()
+}
+
+/// `GET /v1/servers` — operator status surface aliased on top of
+/// `/api/servers`. The payload is the existing `Vec<ServerSummary>`
+/// from the `ServerControl` port, unchanged.
+pub(crate) async fn list_v1_servers<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
+) -> Result<axum::response::Response, ApiError> {
+    let summaries =
+        state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(axum::Json(summaries).into_response())
 }
 
 pub(crate) async fn prometheus_export<CW, RMS, SM>(
@@ -559,6 +628,13 @@ where
         .route("/v1/chat/completions", post(openai_chat_completion_handler::<CW, RMS, SM>))
         .route("/v1/completions", post(openai_completion_handler::<CW, RMS, SM>))
         .route("/v1/messages", post(anthropic_messages_handler::<CW, RMS, SM>))
+        // OpenAI SDKs hit `/v1/models` at construction time for
+        // discovery. Sourced from the config snapshot's aliased
+        // servers, reshaped to the OpenAI list envelope.
+        .route("/v1/models", get(list_openai_models::<CW, RMS, SM>))
+        // `USER_JOURNEYS.md` J3 documents `/v1/servers` as the
+        // operator status surface. Same payload as `/api/servers`.
+        .route("/v1/servers", get(list_v1_servers::<CW, RMS, SM>))
         .route("/health", get(health_check))
         .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
         .with_state(state.clone());
