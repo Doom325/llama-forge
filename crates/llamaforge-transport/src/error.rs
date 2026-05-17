@@ -28,6 +28,13 @@ pub enum ApiError {
     BackendError,
     #[error("Timeout")]
     Timeout,
+    /// Surface as `503 Service Unavailable` with a `Retry-After`. Used
+    /// for the warming-window guard: a non-streaming response that ends
+    /// without ever observing a terminal `Stop` chunk means the backend
+    /// went away mid-response (no Running server, or a crash). Returning
+    /// a successful empty body would hand the client confident garbage.
+    #[error("Service unavailable")]
+    ServiceUnavailable { retry_after_secs: u32 },
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -81,6 +88,11 @@ impl IntoResponse for ApiError {
             ApiError::Timeout => {
                 (StatusCode::GATEWAY_TIMEOUT, "timeout", "Request timed out".to_string())
             }
+            ApiError::ServiceUnavailable { .. } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                "Backend warming up or unavailable; retry shortly".to_string(),
+            ),
             ApiError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.clone())
             }
@@ -93,9 +105,14 @@ impl IntoResponse for ApiError {
 
         let mut response = (status, body).into_response();
 
-        if let ApiError::QueueFull { retry_after_secs } = self {
-            if let Ok(header_val) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string())
-            {
+        // Retry-After header for both transient backpressure paths.
+        let retry_after_secs = match self {
+            ApiError::QueueFull { retry_after_secs } => Some(retry_after_secs),
+            ApiError::ServiceUnavailable { retry_after_secs } => Some(retry_after_secs),
+            _ => None,
+        };
+        if let Some(secs) = retry_after_secs {
+            if let Ok(header_val) = axum::http::HeaderValue::from_str(&secs.to_string()) {
                 response.headers_mut().insert(axum::http::header::RETRY_AFTER, header_val);
             }
         }
@@ -113,6 +130,9 @@ impl From<ApiError> for tonic::Status {
             ApiError::QueueFull { .. } => tonic::Status::resource_exhausted("Queue is full"),
             ApiError::BackendError => tonic::Status::internal("Backend error"),
             ApiError::Timeout => tonic::Status::deadline_exceeded("Request timed out"),
+            ApiError::ServiceUnavailable { .. } => {
+                tonic::Status::unavailable("Backend warming up or unavailable; retry shortly")
+            }
             ApiError::Internal(msg) => tonic::Status::internal(msg),
         }
     }

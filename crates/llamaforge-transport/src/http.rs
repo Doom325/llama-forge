@@ -241,6 +241,7 @@ where
                 let mut full_text = String::new();
                 let mut finish_reason: Option<String> = None;
                 let mut completion_tokens: u32 = 0;
+                let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
                         Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
@@ -252,15 +253,26 @@ where
                         }) => {
                             finish_reason = Some(reason);
                             completion_tokens = output_tokens;
+                            saw_stop = true;
                         }
                         _ => {}
                     }
                 }
-                (full_text, finish_reason, completion_tokens)
+                (full_text, finish_reason, completion_tokens, saw_stop)
             })
             .await
             .map_err(|_| ApiError::Timeout)?;
-        let (content, finish_reason, completion_tokens) = aggregated;
+        let (content, finish_reason, completion_tokens, saw_stop) = aggregated;
+        // Warming-window guard: if the stream closed without ever
+        // observing a terminal `Stop` chunk, the backend went away
+        // mid-response (no Running server yet, or a crash). Return
+        // 503 with `Retry-After` instead of a successful empty body
+        // that the client would interpret as `finish_reason="stop"
+        // tokens=0`. A *legitimately* empty completion arrives as
+        // `Stop { output_tokens: 0, .. }` and is still a 200.
+        if !saw_stop {
+            return Err(ApiError::ServiceUnavailable { retry_after_secs: 1 });
+        }
         let finish_reason = finish_reason.unwrap_or_else(|| "stop".to_string());
         let created_at = chrono::Utc::now().timestamp();
 
@@ -454,14 +466,17 @@ where
         Ok(Sse::new(guarded_stream).into_response())
     } else {
         // Non-streaming: same aggregation pattern as the OpenAI shim
-        // — collect `Token` content and read `stop_reason` /
-        // `output_tokens` from the terminal `Stop` chunk.
+        // — collect `Token` content, read `stop_reason` /
+        // `output_tokens` from the terminal `Stop` chunk, and 503 if
+        // the stream closes without ever observing one (warming-window
+        // guard — see the OpenAI handler comment above).
         let timeout_secs = state.config_reader.snapshot().global.queue_default_timeout_secs;
         let aggregated =
             tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async move {
                 let mut full_text = String::new();
                 let mut stop_reason: Option<String> = None;
                 let mut output_tokens: u32 = 0;
+                let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
                         Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
@@ -473,15 +488,19 @@ where
                         }) => {
                             stop_reason = Some(finish_reason);
                             output_tokens = tokens;
+                            saw_stop = true;
                         }
                         _ => {}
                     }
                 }
-                (full_text, stop_reason, output_tokens)
+                (full_text, stop_reason, output_tokens, saw_stop)
             })
             .await
             .map_err(|_| ApiError::Timeout)?;
-        let (text, stop_reason, output_tokens) = aggregated;
+        let (text, stop_reason, output_tokens, saw_stop) = aggregated;
+        if !saw_stop {
+            return Err(ApiError::ServiceUnavailable { retry_after_secs: 1 });
+        }
         let stop_reason = stop_reason.unwrap_or_else(|| "end_turn".to_string());
 
         Ok(axum::Json(serde_json::json!({
@@ -765,6 +784,71 @@ mod tests {
         assert!(body_str.contains("Hel"));
         assert!(body_str.contains("lo"));
         assert!(body_str.contains("[DONE]"));
+    }
+
+    #[tokio::test]
+    async fn test_non_streaming_no_stop_chunk_returns_503() {
+        // Warming-window guard: a stream that closes without ever
+        // emitting a terminal `Stop` chunk represents a backend that
+        // went away mid-response. The aggregator must surface this as
+        // `503 Service Unavailable` with a `Retry-After` header, not
+        // as a successful empty 200.
+        let chunks: Vec<Result<ChatCompletionChunk, StreamError>> = vec![]; // closes without Stop
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(res.headers().get("retry-after").is_some(), "503 must carry Retry-After");
+    }
+
+    #[tokio::test]
+    async fn test_non_streaming_empty_completion_returns_200() {
+        // Counter-case: a *legitimately* empty completion arrives as a
+        // single `Stop { output_tokens: 0, .. }` chunk with no preceding
+        // `Token`s. The aggregator must return `200 OK` with empty
+        // `content`, not 503 — `saw_stop` distinguishes "backend went
+        // away" from "model chose to say nothing".
+        let chunks = vec![Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 0,
+        })];
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["choices"][0]["message"]["content"].as_str(), Some(""));
+        assert_eq!(json["choices"][0]["finish_reason"].as_str(), Some("stop"));
+        assert_eq!(json["usage"]["completion_tokens"].as_u64(), Some(0));
     }
 
     #[tokio::test]

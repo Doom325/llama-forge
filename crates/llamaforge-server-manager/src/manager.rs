@@ -167,6 +167,8 @@ impl ServerManager {
                     gguf_metadata: None,
                     reserved_vram_bytes: 0,
                     task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                    started_at: Some(chrono::Utc::now()),
+                    last_restart_at: None,
                     #[cfg(any(test, feature = "test-utils"))]
                     test_warm_tps_samples: None,
                 },
@@ -240,6 +242,8 @@ impl ServerManager {
                             gguf_metadata: None,
                             reserved_vram_bytes: 0,
                             task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                            started_at: Some(chrono::Utc::now()),
+                            last_restart_at: None,
                             #[cfg(any(test, feature = "test-utils"))]
                             test_warm_tps_samples: None,
                         },
@@ -291,6 +295,8 @@ impl ServerManager {
                         gguf_metadata: None,
                         reserved_vram_bytes: 0,
                         task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                        started_at: Some(chrono::Utc::now()),
+                        last_restart_at: None,
                         #[cfg(any(test, feature = "test-utils"))]
                         test_warm_tps_samples: None,
                     },
@@ -530,6 +536,8 @@ impl ServerManager {
                     gguf_metadata: None,
                     reserved_vram_bytes: 0,
                     task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                    started_at: Some(chrono::Utc::now()),
+                    last_restart_at: None,
                     #[cfg(any(test, feature = "test-utils"))]
                     test_warm_tps_samples: None,
                 },
@@ -735,6 +743,8 @@ mod tests {
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
                 task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                started_at: Some(chrono::Utc::now()),
+                last_restart_at: None,
                 #[cfg(any(test, feature = "test-utils"))]
                 test_warm_tps_samples: None,
             },
@@ -788,6 +798,8 @@ mod tests {
                 gguf_metadata: None,
                 reserved_vram_bytes: 0,
                 task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+                started_at: Some(chrono::Utc::now()),
+                last_restart_at: None,
                 #[cfg(any(test, feature = "test-utils"))]
                 test_warm_tps_samples: None,
             },
