@@ -35,6 +35,12 @@ pub enum ApiError {
     /// a successful empty body would hand the client confident garbage.
     #[error("Service unavailable")]
     ServiceUnavailable { retry_after_secs: u32 },
+    /// Surface as `412 Precondition Failed`. Used for management
+    /// operations whose semantics require a precondition the caller
+    /// must satisfy (e.g. `/api/config/reload` rejecting a diff that
+    /// touches restart-required server fields).
+    #[error("Precondition failed: {0}")]
+    PreconditionFailed(String),
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -93,6 +99,9 @@ impl IntoResponse for ApiError {
                 "service_unavailable",
                 "Backend warming up or unavailable; retry shortly".to_string(),
             ),
+            ApiError::PreconditionFailed(msg) => {
+                (StatusCode::PRECONDITION_FAILED, "precondition_failed", msg.clone())
+            }
             ApiError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.clone())
             }
@@ -133,6 +142,7 @@ impl From<ApiError> for tonic::Status {
             ApiError::ServiceUnavailable { .. } => {
                 tonic::Status::unavailable("Backend warming up or unavailable; retry shortly")
             }
+            ApiError::PreconditionFailed(msg) => tonic::Status::failed_precondition(msg),
             ApiError::Internal(msg) => tonic::Status::internal(msg),
         }
     }

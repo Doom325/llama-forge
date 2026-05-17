@@ -156,7 +156,31 @@ where
         &self,
         _request: Request<ReloadConfigRequest>,
     ) -> Result<Response<ReloadConfigResponse>, Status> {
-        self.config_writer.reload().await.map_err(|e| Status::internal(e.to_string()))?;
+        // Reload the file, compute the diff. Restart-required fields
+        // (per `ServerConfigField::requires_restart` — port, model_path,
+        // ctx_size, parallel_slots, devices, backend, gpu_layers,
+        // cache_type_*, flash_attn, speculative_method,
+        // model_architecture) need a staged-apply protocol that v1.0
+        // doesn't ship; reject with `FailedPrecondition` so the
+        // operator gets a clear signal rather than a silent
+        // half-applied state. Hot-reloadable diffs (alias,
+        // lora_adapters, estimated_vram_mb, plus global/gateway/etc.)
+        // apply via the broadcast subscriber in `serve.rs`.
+        let diff =
+            self.config_writer.reload().await.map_err(|e| Status::internal(e.to_string()))?;
+
+        let restart_required: Vec<llamaforge_config::ServerConfigField> = diff
+            .servers_changed()
+            .flat_map(|(_, d)| d.fields_changed.iter().copied())
+            .filter(|f| f.requires_restart())
+            .collect();
+        if !restart_required.is_empty() {
+            return Err(Status::failed_precondition(format!(
+                "config diff touches restart-required server fields ({:?}); \
+                 restart the orchestrator to apply",
+                restart_required
+            )));
+        }
         Ok(Response::new(ReloadConfigResponse {}))
     }
 }

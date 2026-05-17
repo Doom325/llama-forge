@@ -3,7 +3,8 @@
 
 use std::sync::Arc;
 
-use llamaforge_config::{ConfigHandle, ConfigReader};
+use llamaforge_config::{ConfigHandle, ConfigReader, ConfigWriter};
+use llamaforge_server_manager::ServerManager;
 use tokio_util::sync::CancellationToken;
 
 use crate::build;
@@ -32,18 +33,26 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("server-manager start: {}", e))?;
 
+    // Forward config-change events to the server-manager so a
+    // `ReloadConfig` RPC or a SIGHUP-triggered reload actually
+    // propagates into the running fleet (hot-reloadable fields apply
+    // immediately; restart-required fields are rejected at the RPC
+    // boundary before they reach this path).
+    let diff_task = spawn_diff_forwarder(config.clone(), server_manager.clone());
+
     let handles = llamaforge_transport::start_servers(deps)
         .await
         .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;
 
     tracing::info!("lifecycle.startup.ready");
 
-    wait_for_shutdown().await;
+    wait_for_shutdown_or_reload(&config).await;
     tracing::info!("lifecycle.shutdown.started");
 
     // Signal every subsystem.
     shutdown_token.cancel();
     handles.shutdown();
+    diff_task.abort();
 
     // Wait for the transports to finish their graceful drain.
     if let Err(e) = handles.wait().await {
@@ -57,21 +66,71 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn wait_for_shutdown() {
+/// Subscribe to the `ConfigHandle`'s diff broadcast and forward every
+/// non-empty `ConfigDiff` to `ServerManager::apply_config_diff`. Before
+/// this wire-up, `ReloadConfig` swapped the `ArcSwap` but the running
+/// fleet never picked up the change — alias / lora-adapter edits
+/// silently no-op'd.
+fn spawn_diff_forwarder(
+    config: Arc<ConfigHandle>,
+    server_manager: Arc<ServerManager>,
+) -> tokio::task::JoinHandle<()> {
+    let mut rx = config.subscribe();
+    tokio::spawn(async move {
+        while let Ok(diff) = rx.recv().await {
+            if diff.changes.is_empty() {
+                continue;
+            }
+            tracing::info!(changes = diff.changes.len(), "lifecycle.config.reload.applying");
+            server_manager.apply_config_diff(&diff).await;
+        }
+    })
+}
+
+async fn wait_for_shutdown_or_reload(config: &Arc<ConfigHandle>) {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
         let mut term = match signal(SignalKind::terminate()) {
             Ok(s) => s,
             Err(e) => {
-                tracing::warn!(error = %e, "failed to install SIGTERM handler; falling back to Ctrl+C only");
+                tracing::warn!(error = %e, "lifecycle.sigterm_handler_install_failed");
                 let _ = tokio::signal::ctrl_c().await;
                 return;
             }
         };
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = term.recv() => {}
+        let mut hup = match signal(SignalKind::hangup()) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                tracing::warn!(error = %e, "lifecycle.sighup_handler_install_failed");
+                None
+            }
+        };
+
+        loop {
+            let hup_fut = async {
+                match hup.as_mut() {
+                    Some(s) => s.recv().await,
+                    None => std::future::pending::<Option<()>>().await,
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => return,
+                _ = term.recv() => return,
+                _ = hup_fut => {
+                    tracing::info!("lifecycle.config.reload.signaled");
+                    match config.reload().await {
+                        Ok(diff) => tracing::info!(
+                            changes = diff.changes.len(),
+                            "lifecycle.config.reload.completed"
+                        ),
+                        Err(e) => tracing::error!(
+                            error = %e,
+                            "lifecycle.config.reload.failed"
+                        ),
+                    }
+                }
+            }
         }
     }
     #[cfg(not(unix))]
