@@ -32,12 +32,19 @@ pub enum ApiError {
     Internal(String),
 }
 
+/// Fallback `Retry-After` (seconds) for the `QueueFull` branch when
+/// the conversion has no queue context. The HTTP handlers override
+/// this with `compute_retry_after` (depth / throughput) before
+/// returning — see `crate::http::handle_openai_request`. Callers
+/// using the `?` operator on `AdmissionError` get this conservative
+/// default instead of `0`.
+const QUEUE_FULL_FALLBACK_RETRY_SECS: u32 = 30;
+
 impl From<llamaforge_types::traits::AdmissionError> for ApiError {
     fn from(err: llamaforge_types::traits::AdmissionError) -> Self {
         match err {
             llamaforge_types::traits::AdmissionError::QueueFull => {
-                // Defaulting to 5 seconds if not explicitly provided
-                ApiError::QueueFull { retry_after_secs: 5 }
+                ApiError::QueueFull { retry_after_secs: QUEUE_FULL_FALLBACK_RETRY_SECS }
             }
             llamaforge_types::traits::AdmissionError::RateLimited { retry_after_secs } => {
                 ApiError::QueueFull { retry_after_secs }
