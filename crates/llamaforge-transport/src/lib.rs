@@ -204,7 +204,17 @@ mod tests {
             if self.sleep_ms > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
             }
-            Ok(Box::pin(stream::iter(vec![Ok(ChatCompletionChunk::Token("test".into()))])))
+            // Emit a terminal `Stop` chunk so the non-streaming
+            // aggregator's `saw_stop` warming-window guard doesn't
+            // 503 this fixture. The test's intent — graceful shutdown
+            // drains in-flight requests — is unchanged.
+            Ok(Box::pin(stream::iter(vec![
+                Ok(ChatCompletionChunk::Token("test".into())),
+                Ok(ChatCompletionChunk::Stop {
+                    finish_reason: "stop".to_string(),
+                    output_tokens: 1,
+                }),
+            ])))
         }
     }
 
