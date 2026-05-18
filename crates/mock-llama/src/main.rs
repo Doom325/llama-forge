@@ -9,12 +9,25 @@ async fn main() {
     let mut alias = "mock".to_string();
     let mut port: Option<u16> = None;
     let mut parallel_slots: u32 = 1;
+    let mut health_fail_after: u32 = u32::MAX;
+    let mut startup_503_duration = std::time::Duration::ZERO;
+
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--alias" => {
                 if let Some(a) = args.next() {
-                    alias = a.split(',').next().unwrap_or("mock").to_string();
+                    let mut parts = a.split(',');
+                    alias = parts.next().unwrap_or("mock").to_string();
+                    for part in parts {
+                        if let Some(val) = part.strip_prefix("health_fail_after=") {
+                            health_fail_after = val.parse().unwrap_or(u32::MAX);
+                        } else if let Some(val) = part.strip_prefix("startup_503_ms=") {
+                            if let Ok(ms) = val.parse() {
+                                startup_503_duration = std::time::Duration::from_millis(ms);
+                            }
+                        }
+                    }
                 }
             }
             "--port" => {
@@ -40,8 +53,14 @@ async fn main() {
             None => MockConfig::default().chunk_delay,
         };
 
-    let config =
-        MockConfig { model_alias: alias, parallel_slots, chunk_delay, ..Default::default() };
+    let config = MockConfig {
+        model_alias: alias,
+        parallel_slots,
+        chunk_delay,
+        health_fail_after,
+        startup_503_duration,
+        ..Default::default()
+    };
     let mock = if let Some(p) = port {
         MockLlama::start_on_port(p, config).await.expect("mock-llama bind failed")
     } else {
