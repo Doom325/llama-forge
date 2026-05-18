@@ -60,8 +60,21 @@ enum Commands {
     },
     /// Run the orchestrator. Equivalent to invoking the binary with
     /// no subcommand; exists so `llamaforge serve --config <path>`
-    /// matches the README and operator muscle-memory.
-    Serve,
+    /// matches the README and operator muscle-memory. Per-subcommand
+    /// flags take precedence over the top-level forms.
+    Serve {
+        /// Path to llamaforge.toml
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Path to priority_rules.toml
+        #[arg(long)]
+        rules: Option<PathBuf>,
+
+        /// Writable state directory
+        #[arg(long)]
+        state_dir: Option<PathBuf>,
+    },
 }
 
 fn xdg_config_home() -> PathBuf {
@@ -270,35 +283,45 @@ fn main() {
             let rules_path = rules.or(cli_priority_rules).unwrap_or_else(find_rules);
             validate::run(&config_path, &rules_path, handle_config_error);
         }
-        Some(Commands::Serve) | None => {
+        Some(Commands::Serve { config, rules, state_dir }) => {
+            let config_path = config.or(cli_config).unwrap_or_else(find_config);
+            let rules_path = rules.or(cli_priority_rules).unwrap_or_else(find_rules);
+            let state_dir = state_dir.or(cli_state_dir).unwrap_or_else(find_state_dir);
+
+            run_serve(config_path, rules_path, state_dir);
+        }
+        None => {
             let config_path = cli_config.unwrap_or_else(find_config);
             let rules_path = cli_priority_rules.unwrap_or_else(find_rules);
             let state_dir = cli_state_dir.unwrap_or_else(find_state_dir);
 
-            check_state_dir(&state_dir);
+            run_serve(config_path, rules_path, state_dir);
+        }
+    }
+}
 
-            let paths = ConfigPaths::new(config_path, rules_path, state_dir);
-            let source = Arc::new(TomlFileConfigSource::new(paths));
+fn run_serve(config_path: PathBuf, rules_path: PathBuf, state_dir: PathBuf) {
+    check_state_dir(&state_dir);
 
-            match ConfigHandle::load(source) {
-                Ok(handle) => {
-                    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build()
-                    {
-                        Ok(rt) => rt,
-                        Err(e) => {
-                            eprintln!("error: failed to construct tokio runtime: {}", e);
-                            process::exit(70);
-                        }
-                    };
-                    if let Err(e) = rt.block_on(llamaforge::run(Arc::new(handle))) {
-                        eprintln!("error: {}", e);
-                        process::exit(1);
-                    }
+    let paths = ConfigPaths::new(config_path, rules_path, state_dir);
+    let source = Arc::new(TomlFileConfigSource::new(paths));
+
+    match ConfigHandle::load(source) {
+        Ok(handle) => {
+            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("error: failed to construct tokio runtime: {}", e);
+                    process::exit(70);
                 }
-                Err(err) => {
-                    handle_config_error(err);
-                }
+            };
+            if let Err(e) = rt.block_on(llamaforge::run(Arc::new(handle))) {
+                eprintln!("error: {}", e);
+                process::exit(1);
             }
+        }
+        Err(err) => {
+            handle_config_error(err);
         }
     }
 }

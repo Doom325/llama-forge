@@ -26,6 +26,27 @@ fn serve_subcommand_exists() {
     );
 }
 
+/// The README and `Serve` doc comment promise that
+/// `llamaforge serve --config <path>` works. Clap must accept the
+/// flag on the subcommand, not only at the top level.
+#[test]
+fn serve_accepts_config_flag() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bogus = tmp.path().join("definitely-missing.toml");
+
+    let out = Command::new(bin()).arg("serve").arg("--config").arg(&bogus).output().expect("spawn");
+
+    // Subcommand must parse the flag — we don't care whether the
+    // orchestrator then errors out on the missing config; only that
+    // clap didn't reject the flag itself.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "clap rejected `serve --config <path>`: stderr={}",
+        stderr
+    );
+}
+
 /// Top-level `--state-dir` flag must propagate into `init` so the
 /// per-subcommand fallback honours it. Before PR-5 this was silently
 /// dropped and `init` always wrote to `/var/run/llamaforge/`.
