@@ -610,6 +610,7 @@ Each managed server is defined in the LlamaForge config file:
 
 ```toml
 [servers.llama-8b-gpu0]
+binary_path = "/usr/local/bin/llama-server"   # Path to the llama-server executable
 model_path = "/models/llama-3.1-8B-Q4_K_M.gguf"
 alias = "llama-3.1-8b"
 host = "127.0.0.1"

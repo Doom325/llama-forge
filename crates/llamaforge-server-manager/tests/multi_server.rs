@@ -35,6 +35,7 @@ fn get_multi_config(tmp: &TempDir, port_base: u16) -> Arc<ConfigHandle> {
         r#"
 [servers.srv_0_a]
 devices = [{{gpu_id = 0, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -42,6 +43,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         port_base
     ));
@@ -51,6 +53,7 @@ estimated_vram_mb = 100
         r#"
 [servers.srv_0_b]
 devices = [{{gpu_id = 0, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -58,6 +61,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         port_base + 1
     ));
@@ -67,6 +71,7 @@ estimated_vram_mb = 100
         r#"
 [servers.srv_1]
 devices = [{{gpu_id = 1, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -74,6 +79,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         port_base + 2
     ));
@@ -204,6 +210,7 @@ restart_stagger_secs = 2
 
 [servers.srv_0_a]
 devices = [{{gpu_id = 0, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -213,6 +220,7 @@ estimated_vram_mb = 100
 
 [servers.srv_0_b]
 devices = [{{gpu_id = 0, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -221,7 +229,9 @@ parallel_slots = 1
 estimated_vram_mb = 100
 "#,
         mock_llama_bin(),
+        mock_llama_bin(),
         port,
+        mock_llama_bin(),
         mock_llama_bin(),
         port + 1
     );
