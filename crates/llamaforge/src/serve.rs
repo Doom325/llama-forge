@@ -59,6 +59,8 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
         tracing::error!(error = %e, "lifecycle.shutdown.wait_error");
     }
 
+    bg.server_manager.shutdown_all().await;
+
     // Stop the scheduler.
     let _ = bg.scheduler.await;
 
