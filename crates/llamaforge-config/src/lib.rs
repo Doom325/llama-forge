@@ -22,7 +22,7 @@ pub(crate) mod types;
 pub use cached::CachedConfigReader;
 pub use diff::{compute_diff, ConfigChange, ConfigDiff, ServerConfigDiff, ServerConfigField};
 pub use error::{ConfigLoadError, ConfigReloadError, WritebackError};
-pub use handle::ConfigHandle;
+pub use handle::{validate_server_id_slug, ConfigHandle, SERVER_ID_MAX_LEN};
 pub use instrumented::InstrumentedConfigHandle;
 pub use source::toml_file::TomlFileConfigSource;
 pub use source::ConfigSource;

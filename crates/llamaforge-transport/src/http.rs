@@ -955,10 +955,11 @@ mod tests {
         let engine = MockEngine { chunks: std::sync::Mutex::new(vec![]), sleep_ms: 0 };
         let app = build_test_router(engine);
 
-        // trigger 404 by hitting wrong endpoint
+        // Slugs starting with `-` are rejected by validate_server_id_slug,
+        // producing the canonical 400 JSON error body we want to inspect.
         let req = Request::builder()
             .method("POST")
-            .uri("/api/servers/invalid-id/start")
+            .uri("/api/servers/-bad/start")
             .body(Body::empty())
             .unwrap();
 
