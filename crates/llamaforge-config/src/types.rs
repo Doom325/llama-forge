@@ -918,8 +918,8 @@ wal_checkpoint_mode = "truncate"
                 speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
                 model_architecture: ModelArchitecture::Recurrent,
                 max_restart_attempts: 5,
-                restart_on_degradation: false,
-                restart_cooldown_secs: 20,
+                restart_on_degradation: true,
+                restart_cooldown_secs: 10,
                 startup_timeout_secs: 300,
             },
         );

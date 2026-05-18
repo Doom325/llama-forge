@@ -335,7 +335,7 @@ async fn monitor_loop(
     // weights loading), llama-server returns 503. Don't count those toward the
     // restart threshold; instead cap total startup wait by ticks.
     let mut starting_503_ticks: u32 = 0;
-    let starting_503_cap: u32 = 300; // 300 * 2s = 10 minutes
+    let starting_503_cap: u32 = config.startup_timeout_secs / 2; // 2s per tick
 
     let mut tps_window = RollingTpsWindow::default();
     let mut last_total_tokens_decoded: u64 = 0;

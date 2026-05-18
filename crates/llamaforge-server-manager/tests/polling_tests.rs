@@ -154,7 +154,6 @@ async fn test_consecutive_health_failures() {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_startup_grace_window() {
     let _ = tracing_subscriber::fmt::try_init();
 
