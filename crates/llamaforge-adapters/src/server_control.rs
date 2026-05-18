@@ -10,6 +10,19 @@ impl ServerControlAdapter {
     pub fn new(manager: Arc<ServerManager>) -> Self {
         Self { manager }
     }
+
+    /// Reverse `types::ServerId` → `config::ServerId` by iterating
+    /// the manager's fleet and matching the UUIDv5-derived id. Slug
+    /// configs can no longer be looked up by stringifying the UUID,
+    /// so iteration is the only option short of a side-table.
+    fn resolve_config_id(
+        &self,
+        id: &llamaforge_types::ServerId,
+    ) -> Option<llamaforge_config::ServerId> {
+        self.manager.all_servers().into_iter().find_map(|(config_id, _)| {
+            (llamaforge_types::ServerId::from_config_id(&config_id.0) == *id).then_some(config_id)
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -19,14 +32,7 @@ impl ServerControl for ServerControlAdapter {
         for (config_id, state) in self.manager.all_servers() {
             let busy_slots = state.slots.iter().filter(|s| s.is_processing).count() as u32;
 
-            // Map the config ServerId back to the types ServerId
-            let types_id = match uuid::Uuid::parse_str(&config_id.0) {
-                Ok(u) => llamaforge_types::ServerId::new(u),
-                Err(_) => {
-                    // Not a valid UUID? Provide a deterministic fallback or continue.
-                    continue;
-                }
-            };
+            let types_id = llamaforge_types::ServerId::from_config_id(&config_id.0);
 
             summaries.push(ServerSummary {
                 id: types_id,
@@ -43,7 +49,7 @@ impl ServerControl for ServerControlAdapter {
     }
 
     async fn start_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
-        let config_id = llamaforge_config::ServerId(id.to_string());
+        let config_id = self.resolve_config_id(id).ok_or(ServerError::NotFound { id: *id })?;
         match self.manager.request_start(&config_id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
@@ -61,7 +67,7 @@ impl ServerControl for ServerControlAdapter {
     }
 
     async fn stop_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
-        let config_id = llamaforge_config::ServerId(id.to_string());
+        let config_id = self.resolve_config_id(id).ok_or(ServerError::NotFound { id: *id })?;
         match self.manager.request_stop(&config_id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {

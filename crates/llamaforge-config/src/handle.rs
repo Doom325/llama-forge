@@ -11,6 +11,46 @@ use arc_swap::{ArcSwap, Guard};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
+/// Maximum length of a `[servers.<id>]` slug, in bytes.
+/// Bounded so derived UUIDs, log lines, and Prometheus labels stay sane.
+pub const SERVER_ID_MAX_LEN: usize = 64;
+
+/// Validate a `[servers.<id>]` slug: non-empty, ≤ `SERVER_ID_MAX_LEN`,
+/// must start with `[A-Za-z0-9]`, body in `[A-Za-z0-9._-]`. UUIDs satisfy
+/// this rule unchanged.
+///
+/// Exposed so the management API (HTTP / gRPC) can reject malformed
+/// `server_id` path/body parameters with the same rule that gated load.
+pub fn validate_server_id_slug(id: &str) -> Result<(), ConfigLoadError> {
+    if id.is_empty() {
+        return Err(ConfigLoadError::ValidationError { message: "empty ServerId".to_string() });
+    }
+    if id.len() > SERVER_ID_MAX_LEN {
+        return Err(ConfigLoadError::ValidationError {
+            message: format!("ServerId '{}' exceeds {}-byte limit", id, SERVER_ID_MAX_LEN),
+        });
+    }
+    let mut chars = id.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphanumeric() {
+        return Err(ConfigLoadError::ValidationError {
+            message: format!("ServerId '{}' must start with an ASCII letter or digit", id),
+        });
+    }
+    for c in chars {
+        let ok = c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.');
+        if !ok {
+            return Err(ConfigLoadError::ValidationError {
+                message: format!(
+                    "ServerId '{}' contains invalid character '{}' (allowed: A-Z a-z 0-9 . _ -)",
+                    id, c
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Central coordinator for configuration state and reloads.
 /// See design doc Section 2.3.
 pub struct ConfigHandle {
@@ -25,13 +65,8 @@ impl ConfigHandle {
     pub fn load(source: Arc<dyn ConfigSource>) -> Result<Self, ConfigLoadError> {
         let config = source.load()?;
 
-        // Enforce UUID-shaped IDs
         for server_id in config.servers.keys() {
-            if uuid::Uuid::parse_str(server_id.0.as_str()).is_err() {
-                return Err(ConfigLoadError::ValidationError {
-                    message: format!("ServerId '{}' is not a valid UUID", server_id.0),
-                });
-            }
+            validate_server_id_slug(&server_id.0)?;
         }
 
         let (change_tx, _) = broadcast::channel(16);
@@ -165,6 +200,54 @@ mod tests {
     use crate::diff::ConfigChange;
     use crate::source::memory::InMemoryConfigSource;
     use crate::types::{ServerConfig, ServerId};
+
+    fn make_handle_with_server_id(id: &str) -> Result<ConfigHandle, ConfigLoadError> {
+        let mut config = AppConfig::default();
+        config.servers.insert(
+            ServerId::from(id),
+            ServerConfig {
+                binary_path: std::path::PathBuf::from("/usr/local/bin/llama-server"),
+                model_path: std::path::PathBuf::from("/tmp/model.gguf"),
+                ctx_size: 1024,
+                parallel_slots: 1,
+                ..Default::default()
+            },
+        );
+        ConfigHandle::load(Arc::new(InMemoryConfigSource::new(config)))
+    }
+
+    #[test]
+    fn slug_server_ids_are_accepted() {
+        for ok in &[
+            "gemma3-27b",
+            "qwen-coder-7b",
+            "phi.mini",
+            "server_01",
+            "Server-A",
+            "a",
+            "00000000-0000-0000-0000-000000000001",
+        ] {
+            let res = make_handle_with_server_id(ok);
+            assert!(res.is_ok(), "expected slug {:?} to be accepted", ok);
+        }
+    }
+
+    #[test]
+    fn invalid_server_ids_are_rejected() {
+        for bad in &["", "-leading-hyphen", ".leading-dot", "has space", "has/slash", "emoji😀"] {
+            match make_handle_with_server_id(bad) {
+                Err(ConfigLoadError::ValidationError { .. }) => {}
+                Err(other) => panic!("expected ValidationError for {:?}, got {:?}", bad, other),
+                Ok(_) => panic!("expected slug {:?} to be rejected", bad),
+            }
+        }
+        // 65-byte slug exceeds SERVER_ID_MAX_LEN.
+        let long = "a".repeat(SERVER_ID_MAX_LEN + 1);
+        assert!(matches!(
+            make_handle_with_server_id(&long),
+            Err(ConfigLoadError::ValidationError { .. })
+        ));
+    }
 
     #[tokio::test]
     async fn test_config_handle_load_and_snapshot() {

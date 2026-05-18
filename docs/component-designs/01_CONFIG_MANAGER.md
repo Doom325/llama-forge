@@ -732,6 +732,7 @@ Validation runs both at startup (fatal) and during reload (non-fatal — logs er
 |------|----------|----------|
 | `fair_share` weights sum to 100 | Normalize proportionally + WARN log | Warning (auto-corrected) |
 | Server ports unique across all servers | ERROR — reject config | Error |
+| `[servers.<id>]` slug matches `^[A-Za-z0-9][A-Za-z0-9._-]*$`, ≤ 64 bytes | ERROR — reject config | Error |
 | `binary_path` non-empty for every server | ERROR — reject config | Error |
 | `model_path` non-empty for every server | ERROR — reject config | Error |
 | `ctx_size > 0` for every server | ERROR — reject config | Error |

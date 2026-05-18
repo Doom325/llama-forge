@@ -70,7 +70,7 @@ rusqlite_migration = "1"
 deadpool-sqlite = "0.8"
 deadpool-sync = "0.1.4"
 deadpool = "0.12"
-uuid = { version = "1", features = ["v4", "v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 metrics-exporter-prometheus = "0.16"
 metrics-util = "0.18"
 opentelemetry = "0.27"

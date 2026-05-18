@@ -184,6 +184,26 @@ impl ServerId {
     pub fn into_inner(self) -> Uuid {
         self.0
     }
+
+    /// Resolve a config-level `[servers.<id>]` slug to the internal UUID.
+    ///
+    /// If `s` already parses as a UUID, the UUID is preserved verbatim
+    /// (backward-compatible with pre-#114 UUID-only configs). Otherwise
+    /// the result is a stable UUIDv5 derived from a fixed
+    /// `llamaforge.server` namespace, so the same slug always maps to
+    /// the same `ServerId`.
+    pub fn from_config_id(s: &str) -> Self {
+        if let Ok(uuid) = Uuid::parse_str(s) {
+            return Self(uuid);
+        }
+        // UUIDv5(NAMESPACE_DNS, "llamaforge.server"), computed once.
+        // Static would require const-fn UUIDv5, which uuid 1.x does not
+        // expose; an OnceLock avoids re-deriving the namespace per call.
+        static NAMESPACE: std::sync::OnceLock<Uuid> = std::sync::OnceLock::new();
+        let ns =
+            *NAMESPACE.get_or_init(|| Uuid::new_v5(&Uuid::NAMESPACE_DNS, b"llamaforge.server"));
+        Self(Uuid::new_v5(&ns, s.as_bytes()))
+    }
 }
 
 impl fmt::Display for ServerId {
@@ -287,6 +307,22 @@ pub enum Capability {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_id_from_config_id_preserves_uuid() {
+        let s = "019e389b-57a2-7fe0-b74b-1d1038ad1134";
+        let id = ServerId::from_config_id(s);
+        assert_eq!(id.as_uuid(), Uuid::parse_str(s).unwrap());
+    }
+
+    #[test]
+    fn server_id_from_config_id_is_deterministic_for_slugs() {
+        let a = ServerId::from_config_id("gemma3-27b");
+        let b = ServerId::from_config_id("gemma3-27b");
+        assert_eq!(a, b, "same slug must derive to the same UUID");
+        let c = ServerId::from_config_id("qwen-coder-7b");
+        assert_ne!(a, c, "different slugs must derive to different UUIDs");
+    }
 
     #[test]
     fn test_session_id_validation() {

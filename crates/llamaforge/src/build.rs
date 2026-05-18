@@ -284,12 +284,10 @@ impl ServerStateView for ServerStateAdapter {
     }
 }
 
-/// Convert a load-validated `config::ServerId` to the routing-layer
-/// `types::ServerId`. `ConfigHandle::load` (`handle.rs:27-35`)
-/// rejects any non-UUID-shaped server id at load time, so the parse
-/// is infallible by construction.
+/// Convert a load-validated `config::ServerId` (slug or UUID) to the
+/// routing-layer `types::ServerId`. UUID-shaped slugs are preserved
+/// verbatim; arbitrary slugs are hashed to a stable UUIDv5 — see
+/// `llamaforge_types::ServerId::from_config_id`.
 fn config_server_id_to_types_id(s: &llamaforge_config::ServerId) -> llamaforge_types::ServerId {
-    let uuid = uuid::Uuid::parse_str(s.0.as_str())
-        .expect("ConfigHandle::load guarantees UUID-shaped server ids");
-    llamaforge_types::ServerId::new(uuid)
+    llamaforge_types::ServerId::from_config_id(s.0.as_str())
 }

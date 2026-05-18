@@ -147,9 +147,9 @@ where
         request: Request<StartServerRequest>,
     ) -> Result<Response<StartServerResponse>, Status> {
         let req = request.into_inner();
-        let uuid = uuid::Uuid::parse_str(&req.server_id)
-            .map_err(|_| Status::invalid_argument("Invalid server_id"))?;
-        let server_id = llamaforge_types::ServerId::new(uuid);
+        llamaforge_config::validate_server_id_slug(&req.server_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let server_id = llamaforge_types::ServerId::from_config_id(&req.server_id);
         self.server_control.start_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StartServerResponse {}))
     }
@@ -159,9 +159,9 @@ where
         request: Request<StopServerRequest>,
     ) -> Result<Response<StopServerResponse>, Status> {
         let req = request.into_inner();
-        let uuid = uuid::Uuid::parse_str(&req.server_id)
-            .map_err(|_| Status::invalid_argument("Invalid server_id"))?;
-        let server_id = llamaforge_types::ServerId::new(uuid);
+        llamaforge_config::validate_server_id_slug(&req.server_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let server_id = llamaforge_types::ServerId::from_config_id(&req.server_id);
         self.server_control.stop_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StopServerResponse {}))
     }

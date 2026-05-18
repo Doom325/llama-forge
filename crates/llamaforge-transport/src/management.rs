@@ -48,9 +48,9 @@ pub(crate) async fn start_server<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let server_id = ServerId::new(
-        uuid::Uuid::parse_str(&id).map_err(|_| ApiError::InvalidBody("Invalid ServerId".into()))?,
-    );
+    llamaforge_config::validate_server_id_slug(&id)
+        .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
+    let server_id = ServerId::from_config_id(&id);
     state
         .server_control
         .start_server(&server_id)
@@ -63,9 +63,9 @@ pub(crate) async fn stop_server<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let server_id = ServerId::new(
-        uuid::Uuid::parse_str(&id).map_err(|_| ApiError::InvalidBody("Invalid ServerId".into()))?,
-    );
+    llamaforge_config::validate_server_id_slug(&id)
+        .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
+    let server_id = ServerId::from_config_id(&id);
     state
         .server_control
         .stop_server(&server_id)
@@ -301,15 +301,23 @@ mod tests {
     #[tokio::test]
     async fn test_route_parameter_parsing() {
         let state = build_test_state();
-        let valid_id = uuid::Uuid::now_v7().to_string();
-        let res = start_server(axum::extract::State(state.clone()), axum::extract::Path(valid_id))
+        // UUIDs and slugs both parse — slug acceptance is the point of #114.
+        let uuid_id = uuid::Uuid::now_v7().to_string();
+        let res = start_server(axum::extract::State(state.clone()), axum::extract::Path(uuid_id))
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
+        let slug_id = "gemma3-27b".to_string();
+        let res = start_server(axum::extract::State(state.clone()), axum::extract::Path(slug_id))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Malformed slugs (leading `-`, whitespace, …) must still 400.
         let res_invalid = start_server(
             axum::extract::State(state.clone()),
-            axum::extract::Path("invalid-id".to_string()),
+            axum::extract::Path("-leading-hyphen".to_string()),
         )
         .await;
         assert!(matches!(res_invalid.unwrap_err(), ApiError::InvalidBody(_)));
