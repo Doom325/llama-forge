@@ -1342,6 +1342,7 @@ dependencies = [
  "llamaforge-types",
  "mock-llama",
  "reqwest",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",

@@ -123,7 +123,8 @@ estimated_vram_mb = 100
     let db_path = state_dir.join("metrics.db");
     if db_path.exists() {
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM managed_processes", [], |row| row.get(0)).unwrap();
+        let count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM managed_processes", [], |row| row.get(0)).unwrap();
         assert_eq!(count, 0, "managed_processes table should be empty");
     }
 }
