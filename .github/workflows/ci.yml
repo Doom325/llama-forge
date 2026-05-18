@@ -91,6 +91,8 @@ jobs:
       # subprocess via the configured `model_path`.
       - name: Build mock-llama binary
         run: cargo build --bin mock-llama
+      - name: Build llamaforge binary
+        run: cargo build --bin llamaforge
       - name: Build e2e harness
         run: cargo build -p llamaforge-e2e --tests
 

@@ -39,3 +39,4 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 llamaforge-config = { workspace = true, features = ["test-utils"] }
+rusqlite = { workspace = true }

@@ -122,12 +122,8 @@ estimated_vram_mb = 100
     // Check that managed_processes table is empty
     let db_path = state_dir.join("metrics.db");
     if db_path.exists() {
-        let check_db_cmd = std::process::Command::new("sqlite3")
-            .arg(db_path)
-            .arg("SELECT COUNT(*) FROM managed_processes;")
-            .output()
-            .unwrap();
-        let stdout = String::from_utf8_lossy(&check_db_cmd.stdout);
-        assert_eq!(stdout.trim(), "0", "managed_processes table should be empty");
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM managed_processes", [], |row| row.get(0)).unwrap();
+        assert_eq!(count, 0, "managed_processes table should be empty");
     }
 }
