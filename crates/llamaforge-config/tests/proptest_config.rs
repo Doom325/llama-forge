@@ -162,6 +162,7 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
                     model_architecture,
                 ),
             )| ServerConfig {
+                binary_path: std::path::PathBuf::from("/usr/local/bin/llama-server"),
                 model_path,
                 alias,
                 port,

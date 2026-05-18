@@ -30,6 +30,7 @@ async fn test_concurrent_sighups_serialized() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -65,6 +66,7 @@ async fn test_writeback_atomic_rename() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -112,6 +114,7 @@ async fn test_serde_default_backward_compat() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -140,6 +143,7 @@ async fn test_broadcast_lagged_subscriber() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -171,6 +175,7 @@ async fn test_readonly_fs_writeback_graceful() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048

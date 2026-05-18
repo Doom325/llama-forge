@@ -70,6 +70,7 @@ impl ConfigDiff {
 /// See design doc Section 2.8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServerConfigField {
+    BinaryPath,
     ModelPath,
     Alias,
     Port,
@@ -93,7 +94,8 @@ impl ServerConfigField {
     pub fn requires_restart(&self) -> bool {
         matches!(
             self,
-            Self::ModelPath
+            Self::BinaryPath
+                | Self::ModelPath
                 | Self::CtxSize
                 | Self::ParallelSlots
                 | Self::Devices
@@ -190,6 +192,9 @@ pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff {
 fn compute_server_diff(old: &ServerConfig, new: &ServerConfig) -> ServerConfigDiff {
     let mut fields_changed = Vec::new();
 
+    if old.binary_path != new.binary_path {
+        fields_changed.push(ServerConfigField::BinaryPath);
+    }
     if old.model_path != new.model_path {
         fields_changed.push(ServerConfigField::ModelPath);
     }

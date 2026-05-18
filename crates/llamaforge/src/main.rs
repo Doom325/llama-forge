@@ -179,7 +179,7 @@ pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
             eprintln!();
             eprintln!("To get started:");
             eprintln!("  1. Run `llamaforge init` to generate a default config");
-            eprintln!("  2. Edit `model_path`, `port`, `ctx_size` for your llama-server instances");
+            eprintln!("  2. Edit `binary_path` (path to llama-server), `model_path`, `port`, `ctx_size` for your llama-server instances");
             eprintln!("  3. Re-run llamaforge");
             eprintln!();
             eprintln!("Search order: --config, $LLAMAFORGE_CONFIG, $XDG_CONFIG_HOME/llamaforge/, /etc/llamaforge/");
@@ -221,7 +221,7 @@ pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
             eprintln!();
             eprintln!("Validation rules (design §6.1):");
             eprintln!("  - Server ports must be unique across all [servers] entries");
-            eprintln!("  - Every server must have a non-empty model_path, ctx_size > 0, parallel_slots > 0");
+            eprintln!("  - Every server must have a non-empty binary_path, non-empty model_path, ctx_size > 0, parallel_slots > 0");
             eprintln!("  - device.gpu_id must be unique within each server");
             eprintln!("  - global.queue_default_timeout_secs must be > 0");
             eprintln!();

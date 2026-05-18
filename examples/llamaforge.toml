@@ -53,7 +53,9 @@ state_dir = "/tmp/llamaforge"
 # enabled = true
 
 [servers.llama-3-8b]
-# Path to the GGUF model file.
+# Path to the `llama-server` executable.
+binary_path = "/usr/local/bin/llama-server"
+# Path to the GGUF model file (passed to llama-server as `--model`).
 model_path = "models/llama-3-8b.gguf"
 # Human-readable alias used in logs and UI.
 alias = "Llama-3-8B-Instruct"
@@ -82,6 +84,7 @@ path = "loras/math-lora.gguf"
 scale = 0.8
 
 [servers.tinyllama]
+binary_path = "/usr/local/bin/llama-server"
 model_path = "models/tinyllama-1.1b.gguf"
 port = 8081
 gpu_layers = -1

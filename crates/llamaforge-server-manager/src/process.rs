@@ -60,7 +60,8 @@ impl ProcessHandle {
 /// Spawns the underlying `llama-server` process with the given configuration.
 /// Ensures the process is put into its own process group on Unix-like systems.
 pub(crate) fn spawn_child_process(config: &ServerConfig) -> Result<ProcessHandle, std::io::Error> {
-    let mut cmd = Command::new(&config.model_path);
+    let mut cmd = Command::new(&config.binary_path);
+    cmd.arg("--model").arg(&config.model_path);
     cmd.arg("--port").arg(config.port.to_string());
     cmd.arg("--ctx-size").arg(config.ctx_size.to_string());
     cmd.arg("--parallel").arg(config.parallel_slots.to_string());

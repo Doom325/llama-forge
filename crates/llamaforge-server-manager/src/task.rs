@@ -191,7 +191,11 @@ pub async fn spawn_server_task(
             pid: ProcessId(pid),
             server_id: server_id.clone(),
             started_at: Utc::now(),
-            cmdline: config.model_path.to_string_lossy().to_string(), // Simplified cmdline
+            cmdline: format!(
+                "{} --model {}",
+                config.binary_path.display(),
+                config.model_path.display()
+            ),
             port: config.port,
             model_alias,
         };

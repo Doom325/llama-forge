@@ -102,6 +102,7 @@ grpc_port = 0
 [gateway]
 
 [servers.{sid}]
+binary_path = "{binary}"
 model_path = "{model}"
 port = {port}
 ctx_size = 1024
@@ -109,6 +110,7 @@ parallel_slots = 1
 alias = "{alias}"
 "#,
             sid = server_id,
+            binary = "/usr/bin/true",
             model = model_path.display(),
             port = port,
             alias = alias,
@@ -167,6 +169,11 @@ alias = "{alias}"
         let state_dir = tmp.path().join("state");
         std::fs::create_dir_all(&state_dir)?;
 
+        // mock-llama ignores --model; create a placeholder GGUF file so the
+        // value passed via --model is a real path on disk.
+        let model_path = tmp.path().join("model.gguf");
+        std::fs::write(&model_path, b"")?;
+
         let toml = format!(
             r#"
 [global]
@@ -178,6 +185,7 @@ restart_cooldown_secs = 1
 [gateway]
 
 [servers.{sid}]
+binary_path = "{binary}"
 model_path = "{model}"
 port = {port}
 ctx_size = 1024
@@ -186,7 +194,8 @@ alias = "{alias}"
 estimated_vram_mb = 100
 "#,
             sid = server_id,
-            model = mock_bin.display(),
+            binary = mock_bin.display(),
+            model = model_path.display(),
             port = mock_port,
             alias = alias,
         );
