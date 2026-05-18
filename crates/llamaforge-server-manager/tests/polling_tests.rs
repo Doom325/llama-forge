@@ -153,6 +153,38 @@ async fn test_consecutive_health_failures() {
     token.cancel();
 }
 
+#[tokio::test]
+async fn test_startup_grace_window() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let tmp = TempDir::new().unwrap();
+    let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    // Return 503 for 8 seconds. This would normally cause 3 consecutive health
+    // failures (at 2s, 4s, 6s) and trigger a restart if not for the grace window.
+    let (mgr, _, token) = setup_manager(&tmp, port, true, 4096, "mock,startup_503_ms=8000").await;
+    let srv_id = ServerId("srv_test".into());
+
+    let mut is_running = false;
+    let mut restarted = false;
+    // Wait up to 15 seconds to allow the 8s 503 window to expire and state to transition
+    for _ in 0..150 {
+        if let Some(state) = mgr.server_state(&srv_id) {
+            if state.lifecycle == ServerLifecycle::Restarting {
+                restarted = true;
+            }
+            if state.lifecycle == ServerLifecycle::Running {
+                is_running = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(!restarted, "Server incorrectly restarted during the 503 grace window");
+    assert!(is_running, "Failed to reach Running state after the grace window");
+
+    token.cancel();
+}
+
 /// See `config_tests::mock_llama_bin` — same rationale (env! is only
 /// set for tests in the same package as the bin).
 fn mock_llama_bin() -> String {

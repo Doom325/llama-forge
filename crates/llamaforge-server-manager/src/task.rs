@@ -331,6 +331,11 @@ async fn monitor_loop(
     let mut consecutive_health_failures = 0;
     let restart_on_degradation = config.restart_on_degradation;
     let mut consecutive_degraded_ticks = 0;
+    // Workaround for issue #121: while a server is still in Starting (model
+    // weights loading), llama-server returns 503. Don't count those toward the
+    // restart threshold; instead cap total startup wait by ticks.
+    let mut starting_503_ticks: u32 = 0;
+    let starting_503_cap: u32 = config.startup_timeout_secs / 2; // 2s per tick
 
     let mut tps_window = RollingTpsWindow::default();
     let mut last_total_tokens_decoded: u64 = 0;
@@ -470,6 +475,7 @@ async fn monitor_loop(
                     Ok(resp) => {
                         if resp.status().is_success() {
                             consecutive_health_failures = 0;
+                            starting_503_ticks = 0;
 
                             if let Some(state) = mgr.servers.get(server_id) {
                                 if state.lifecycle == ServerLifecycle::Starting {
@@ -494,13 +500,35 @@ async fn monitor_loop(
                                 }
                             }
                         } else {
-                            error!(server.id = %server_id, "Health check failed with status: {}", resp.status());
-                            consecutive_health_failures += 1;
-                            if consecutive_health_failures >= 3 {
-                                warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
-                                transition_to(mgr, server_id, ServerLifecycle::Restarting);
-                                info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
-                                return true; // Restart
+                            let is_starting = mgr
+                                .servers
+                                .get(server_id)
+                                .map(|s| s.lifecycle == ServerLifecycle::Starting)
+                                .unwrap_or(false);
+                            if is_starting && resp.status().as_u16() == 503 {
+                                starting_503_ticks += 1;
+                                if starting_503_ticks % 5 == 1 {
+                                    info!(
+                                        server.id = %server_id,
+                                        starting_503_ticks,
+                                        "Upstream still loading (503), within startup grace window",
+                                    );
+                                }
+                                if starting_503_ticks >= starting_503_cap {
+                                    warn!(server.id = %server_id, server.health_fail = true, "Startup grace window exhausted while still 503");
+                                    transition_to(mgr, server_id, ServerLifecycle::Failed);
+                                    info!(server.id = %server_id, reason = "startup_timeout", "Server failed to start within timeout");
+                                    return false; // Do not endlessly restart
+                                }
+                            } else {
+                                error!(server.id = %server_id, "Health check failed with status: {}", resp.status());
+                                consecutive_health_failures += 1;
+                                if consecutive_health_failures >= 3 {
+                                    warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
+                                    transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                    info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
+                                    return true; // Restart
+                                }
                             }
                         }
                     }

@@ -83,6 +83,7 @@ impl Harness {
             completion_chunks: 3,
             chunk_delay: Duration::from_millis(1),
             parallel_slots: 1,
+            ..Default::default()
         };
         let mock = MockLlama::start(cfg).await?;
         let port = mock.addr.port();

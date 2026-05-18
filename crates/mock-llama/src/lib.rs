@@ -40,6 +40,10 @@ pub struct MockConfig {
     /// tests rely on this so admission control sees a routable server
     /// before any `/completion` has populated the slot map.
     pub parallel_slots: u32,
+    /// Return 503 from /health for this duration after startup. Default 0.
+    pub startup_503_duration: Duration,
+    /// Number of successful /health checks before returning 500. Default u32::MAX.
+    pub health_fail_after: u32,
 }
 
 impl Default for MockConfig {
@@ -49,17 +53,31 @@ impl Default for MockConfig {
             completion_chunks: 3,
             chunk_delay: Duration::from_millis(1),
             parallel_slots: 1,
+            startup_503_duration: Duration::ZERO,
+            health_fail_after: u32::MAX,
         }
     }
 }
 
-#[derive(Default)]
 struct MockState {
     health_calls: AtomicU32,
     completions: AtomicU32,
     /// Per-slot `(is_processing, n_decoded)`. Indexed by slot id.
     slots: Mutex<HashMap<u32, SlotState>>,
     erase_calls: AtomicU32,
+    start_time: std::time::Instant,
+}
+
+impl Default for MockState {
+    fn default() -> Self {
+        Self {
+            health_calls: AtomicU32::new(0),
+            completions: AtomicU32::new(0),
+            slots: Mutex::new(HashMap::new()),
+            erase_calls: AtomicU32::new(0),
+            start_time: std::time::Instant::now(),
+        }
+    }
 }
 
 #[derive(Default, Clone, Copy)]
@@ -147,8 +165,25 @@ struct AppState {
 }
 
 async fn health(State(s): State<AppState>) -> impl IntoResponse {
-    s.state.health_calls.fetch_add(1, Ordering::Relaxed);
-    Json(serde_json::json!({"status": "ok", "model": s.config.model_alias}))
+    let calls = s.state.health_calls.fetch_add(1, Ordering::Relaxed);
+
+    if s.state.start_time.elapsed() < s.config.startup_503_duration {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "loading model"})),
+        )
+            .into_response();
+    }
+
+    if calls >= s.config.health_fail_after {
+        return (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "simulated failure"})),
+        )
+            .into_response();
+    }
+
+    Json(serde_json::json!({"status": "ok", "model": s.config.model_alias})).into_response()
 }
 
 async fn slots_get(State(s): State<AppState>) -> impl IntoResponse {

@@ -182,6 +182,7 @@ fn arb_server_config() -> impl Strategy<Value = ServerConfig> {
                 max_restart_attempts: 3,
                 restart_on_degradation: true,
                 restart_cooldown_secs: 10,
+                startup_timeout_secs: 300,
             },
         )
 }

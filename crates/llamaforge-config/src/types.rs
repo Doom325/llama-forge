@@ -568,6 +568,8 @@ pub struct ServerConfig {
     pub restart_on_degradation: bool,
     #[serde(default = "default_restart_cooldown_secs")]
     pub restart_cooldown_secs: u64,
+    #[serde(default = "default_startup_timeout_secs")]
+    pub startup_timeout_secs: u32,
 }
 
 fn default_max_restart_attempts() -> u32 {
@@ -580,6 +582,10 @@ fn default_restart_on_degradation() -> bool {
 
 fn default_restart_cooldown_secs() -> u64 {
     10
+}
+
+fn default_startup_timeout_secs() -> u32 {
+    300
 }
 
 impl Default for ServerConfig {
@@ -605,6 +611,7 @@ impl Default for ServerConfig {
             max_restart_attempts: default_max_restart_attempts(),
             restart_on_degradation: default_restart_on_degradation(),
             restart_cooldown_secs: default_restart_cooldown_secs(),
+            startup_timeout_secs: default_startup_timeout_secs(),
         }
     }
 }
@@ -913,6 +920,7 @@ wal_checkpoint_mode = "truncate"
                 max_restart_attempts: 5,
                 restart_on_degradation: true,
                 restart_cooldown_secs: 10,
+                startup_timeout_secs: 300,
             },
         );
 
