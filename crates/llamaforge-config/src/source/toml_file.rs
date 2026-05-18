@@ -75,6 +75,13 @@ impl TomlFileConfigSource {
                 });
             }
 
+            // Rule 3a: binary_path non-empty (path to llama-server executable)
+            if server.binary_path.as_os_str().is_empty() {
+                return Err(ConfigLoadError::ValidationError {
+                    message: format!("empty binary_path for server '{}'", id),
+                });
+            }
+
             // Rule 3: model_path non-empty
             if server.model_path.as_os_str().is_empty() {
                 return Err(ConfigLoadError::ValidationError {
@@ -335,6 +342,7 @@ mod tests {
 [global]
 http_port = 9000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -412,22 +420,25 @@ check_interval_secs = 60
         };
 
         // Rule 2: Duplicate port
-        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.s2]\nbinary_path='llama-server'\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+
+        // Rule 3a: Empty binary_path
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path=''\nmodel_path='m1'\nport=8080\nctx_size=1", "empty binary_path");
 
         // Rule 3: Empty model_path
-        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
 
         // Rule 4: ctx_size 0
-        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
 
         // Rule 5: parallel_slots 0
         check_val(
-            "[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
+            "[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
             "parallel_slots must be > 0",
         );
 
         // Rule 6: Duplicate GPU ID
-        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
+        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
 
         // Rule 7: queue_default_timeout_secs 0
         check_val(
@@ -506,6 +517,7 @@ check_interval_secs = 60
             r#"
 # This is a comment we want to preserve
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048

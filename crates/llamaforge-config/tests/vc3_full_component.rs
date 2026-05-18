@@ -32,6 +32,7 @@ async fn test_vc3_1_full_lifecycle() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -52,11 +53,13 @@ ctx_size = 2048
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 
 [servers."00000000-0000-0000-0000-000000000002"]
+binary_path = "llama-server"
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 4096
@@ -116,10 +119,12 @@ async fn test_vc3_4_startup_failure_validation_error() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 [servers."00000000-0000-0000-0000-000000000002"]
+binary_path = "llama-server"
 model_path = "m2.gguf"
 port = 8080
 ctx_size = 2048
@@ -142,6 +147,7 @@ async fn test_vc3_5_hot_reload_add_server() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -156,10 +162,12 @@ ctx_size = 2048
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 [servers."00000000-0000-0000-0000-000000000002"]
+binary_path = "llama-server"
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 2048
@@ -180,10 +188,12 @@ async fn test_vc3_6_hot_reload_remove_server() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
 [servers."00000000-0000-0000-0000-000000000002"]
+binary_path = "llama-server"
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 2048
@@ -198,6 +208,7 @@ ctx_size = 2048
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -218,6 +229,7 @@ async fn test_vc3_7_hot_reload_change_requiring_restart() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -232,6 +244,7 @@ ctx_size = 2048
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 4096
@@ -265,6 +278,7 @@ async fn test_vc3_8_hot_reload_change_not_requiring_restart() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -279,6 +293,7 @@ ctx_size = 2048
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -307,6 +322,7 @@ async fn test_vc3_9_hot_reload_parse_error_preserves_old_config() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -335,6 +351,7 @@ async fn test_vc3_10_writeback_crash_safety() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -366,6 +383,7 @@ async fn test_vc3_11_writeback_read_only_fs() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -404,6 +422,7 @@ async fn test_vc3_12_concurrent_stress_test() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -488,6 +507,7 @@ async fn test_vc3_13_observability_verification() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -512,6 +532,7 @@ async fn test_vc3_14_cached_config_reader_consistency() {
         &main_path,
         r#"
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048

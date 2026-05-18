@@ -35,6 +35,7 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
 restart_stagger_secs = 2
 
 [servers.srv1]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -43,6 +44,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 
 [servers.srv2]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -51,7 +53,9 @@ parallel_slots = 1
 estimated_vram_mb = 100
 "#,
         mock_llama_bin(),
+        mock_llama_bin(),
         mock_port,
+        mock_llama_bin(),
         mock_llama_bin(),
         mock_port + 1
     ));

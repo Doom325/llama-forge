@@ -529,6 +529,9 @@ fn default_true() -> bool {
 /// See design doc Section 2.6.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ServerConfig {
+    /// Path to the `llama-server` executable.
+    pub binary_path: PathBuf,
+    /// Path to the GGUF model file, passed to `llama-server` as `--model`.
     pub model_path: PathBuf,
     #[serde(default)]
     pub alias: Option<String>,
@@ -582,6 +585,7 @@ fn default_restart_cooldown_secs() -> u64 {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            binary_path: PathBuf::new(),
             model_path: PathBuf::new(),
             alias: None,
             port: 0,
@@ -886,6 +890,7 @@ wal_checkpoint_mode = "truncate"
         config.servers.insert(
             ServerId::from("s1"),
             ServerConfig {
+                binary_path: PathBuf::from("/usr/local/bin/llama-server"),
                 model_path: PathBuf::from("model.gguf"),
                 alias: Some("alias".to_string()),
                 port: 1234,

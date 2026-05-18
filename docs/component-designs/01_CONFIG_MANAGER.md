@@ -260,6 +260,9 @@ pub struct GlobalConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ServerConfig {
+    /// Path to the `llama-server` executable.
+    pub binary_path: PathBuf,
+    /// Path to the GGUF model file (passed to `llama-server` as `--model`).
     pub model_path: PathBuf,
     #[serde(default)]
     pub alias: Option<String>,
@@ -476,6 +479,7 @@ impl ConfigDiff {
 /// so they can never drift out of sync with the actual field list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ServerConfigField {
+    BinaryPath,
     ModelPath,
     Alias,
     Port,
@@ -497,7 +501,7 @@ impl ServerConfigField {
     /// Fields that require a full server restart to take effect.
     pub fn requires_restart(&self) -> bool {
         matches!(self,
-            Self::ModelPath | Self::CtxSize | Self::ParallelSlots
+            Self::BinaryPath | Self::ModelPath | Self::CtxSize | Self::ParallelSlots
             | Self::Devices | Self::Backend | Self::GpuLayers
             | Self::CacheTypeK | Self::CacheTypeV | Self::FlashAttn
             | Self::Port | Self::SpeculativeMethod | Self::ModelArchitecture
@@ -728,6 +732,7 @@ Validation runs both at startup (fatal) and during reload (non-fatal — logs er
 |------|----------|----------|
 | `fair_share` weights sum to 100 | Normalize proportionally + WARN log | Warning (auto-corrected) |
 | Server ports unique across all servers | ERROR — reject config | Error |
+| `binary_path` non-empty for every server | ERROR — reject config | Error |
 | `model_path` non-empty for every server | ERROR — reject config | Error |
 | `ctx_size > 0` for every server | ERROR — reject config | Error |
 | `parallel_slots > 0` for every server | ERROR — reject config | Error |

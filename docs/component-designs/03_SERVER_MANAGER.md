@@ -370,7 +370,7 @@ fn is_deadlocked(
 | Metrics & Storage | `MetricsIngest::send_telemetry()` for event logging. `MetricsStore::upsert_managed_process()` for PID persistence (orphan recovery). |
 | GPU Telemetry | `free_vram_bytes()` and `utilization_percent()` best-effort. Graceful fallback on `Unavailable`. |
 | OS | `tokio::process::Command::spawn()` works. Signals deliverable (SIGTERM, SIGKILL). `/proc` or equivalent for process liveness. |
-| llama-server binary | Available in PATH or configured path. Exposes `/health`, `/slots`, `/metrics` HTTP endpoints. |
+| llama-server binary | Path provided via each server's required `binary_path` config field. Auto-discovery on `PATH` is deferred (see issue #115). Exposes `/health`, `/slots`, `/metrics` HTTP endpoints. |
 
 ### 4.2 What This Component GUARANTEES to Consumers
 

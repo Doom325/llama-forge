@@ -69,7 +69,7 @@ pub fn run(out_path: &Path, rules_path: Option<&Path>, state_dir: &Path, force: 
     }
 
     println!(
-        "Wrote default config to {}. Edit `model_path`, `port`, `ctx_size` for your llama-server instances, then run `llamaforge`.",
+        "Wrote default config to {}. Edit `binary_path` (path to llama-server), `model_path`, `port`, `ctx_size` for your llama-server instances, then run `llamaforge`.",
         out_path.display()
     );
     process::exit(0);

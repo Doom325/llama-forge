@@ -35,6 +35,7 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
     config_str.push_str(&format!(
         r#"
 [servers.srv_scenario]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -43,6 +44,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         mock_port,
     ));
@@ -61,6 +63,7 @@ fn update_config(tmp: &TempDir, mock_port: u16, alias: &str, ctx_size: u32) {
     config_str.push_str(&format!(
         r#"
 [servers.srv_scenario]
+binary_path = "{}"
 model_path = "{}"
 alias = "{}"
 port = {}
@@ -69,6 +72,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         alias,
         mock_port,

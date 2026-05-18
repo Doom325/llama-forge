@@ -21,6 +21,7 @@ http_port = 8000
 
 # Server 1 configuration comment
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -82,6 +83,7 @@ async fn test_filesystem_writeback_readonly() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048

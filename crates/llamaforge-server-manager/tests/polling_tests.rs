@@ -39,6 +39,7 @@ fn get_test_config(
     config_str.push_str(&format!(
         r#"
 [servers.srv_test]
+binary_path = "{}"
 model_path = "{}"
 alias = "{}"
 port = {}
@@ -47,6 +48,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = {}
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         alias,
         mock_port,

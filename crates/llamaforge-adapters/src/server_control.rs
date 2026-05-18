@@ -79,7 +79,7 @@ mod tests {
 
     fn dummy_manager() -> Arc<ServerManager> {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let toml_config = "[global]\n[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path=\"m1\"\nport=8080\nctx_size=1\n";
+        let toml_config = "[global]\n[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path=\"llama-server\"\nmodel_path=\"m1\"\nport=8080\nctx_size=1\n";
         std::fs::write(tmp.path(), toml_config).unwrap();
         let paths = ConfigPaths::new(
             tmp.path().to_path_buf(),

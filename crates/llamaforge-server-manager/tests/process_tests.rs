@@ -32,6 +32,7 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
     config_str.push_str(&format!(
         r#"
 [servers.srv_test]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -39,6 +40,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         mock_port,
     ));
@@ -241,6 +243,7 @@ async fn test_orphan_recovery() {
     config_str.push_str(&format!(
         r#"
 [servers.srv_a]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -249,6 +252,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 
 [servers.srv_b]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -257,6 +261,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 
 [servers.srv_c]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -265,6 +270,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 
 [servers.srv_d]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -273,11 +279,15 @@ parallel_slots = 1
 estimated_vram_mb = 100
 "#,
         mock_llama_bin(),
+        mock_llama_bin(),
         port_a,
+        mock_llama_bin(),
         mock_llama_bin(),
         port_b,
         mock_llama_bin(),
+        mock_llama_bin(),
         port_c,
+        mock_llama_bin(),
         mock_llama_bin(),
         port_d,
     ));

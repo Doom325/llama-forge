@@ -52,6 +52,7 @@ fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
     config_str.push_str(&format!(
         r#"
 [servers.srv_test]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -60,6 +61,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         mock_port,
     ));
@@ -128,6 +130,7 @@ async fn test_apply_config_diff() {
     config_str.push_str(&format!(
         r#"
 [servers.srv_added]
+binary_path = "{}"
 model_path = "{}"
 alias = "added"
 port = {}
@@ -135,6 +138,7 @@ ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         port + 1,
     ));
@@ -202,6 +206,7 @@ estimated_vram_mb = 100
         r#"
 [servers.srv_test]
 devices = [{{gpu_id = 1, layer_range = [0, 10]}}]
+binary_path = "{}"
 model_path = "{}"
 alias = "mock"
 port = {}
@@ -210,6 +215,7 @@ parallel_slots = 1
 estimated_vram_mb = 100
 restart_on_degradation = true
 "#,
+        mock_llama_bin(),
         mock_llama_bin(),
         port,
     ));

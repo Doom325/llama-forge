@@ -21,6 +21,7 @@ async fn test_vc2_1_end_to_end_reload() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -45,6 +46,7 @@ ctx_size = 2048
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -54,6 +56,7 @@ path = "lora1.gguf"
 scale = 1.0
 
 [servers."00000000-0000-0000-0000-000000000002"]
+binary_path = "llama-server"
 model_path = "m2.gguf"
 port = 8081
 ctx_size = 4096
@@ -93,6 +96,7 @@ async fn test_vc2_3_concurrent_reload_stress() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
@@ -144,12 +148,12 @@ async fn test_vc2_4_validation_rejects_bad_config() {
         }
     };
 
-    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.\"00000000-0000-0000-0000-000000000002\"]\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
+    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\n[servers.\"00000000-0000-0000-0000-000000000002\"]\nbinary_path='llama-server'\nmodel_path='m2'\nport=8080\nctx_size=1", "duplicate server port");
     check_val(
-        "[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path=''\nport=8080\nctx_size=1",
+        "[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path=''\nport=8080\nctx_size=1",
         "empty model_path",
     );
-    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
+    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
 }
 
 #[tokio::test]
@@ -165,6 +169,7 @@ async fn test_vc2_5_backward_compatibility() {
 [global]
 http_port = 8000
 [servers."00000000-0000-0000-0000-000000000001"]
+binary_path = "llama-server"
 model_path = "m1.gguf"
 port = 8080
 ctx_size = 2048
