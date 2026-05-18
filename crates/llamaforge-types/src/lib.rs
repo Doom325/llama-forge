@@ -200,8 +200,8 @@ impl ServerId {
         // Static would require const-fn UUIDv5, which uuid 1.x does not
         // expose; an OnceLock avoids re-deriving the namespace per call.
         static NAMESPACE: std::sync::OnceLock<Uuid> = std::sync::OnceLock::new();
-        let ns = *NAMESPACE
-            .get_or_init(|| Uuid::new_v5(&Uuid::NAMESPACE_DNS, b"llamaforge.server"));
+        let ns =
+            *NAMESPACE.get_or_init(|| Uuid::new_v5(&Uuid::NAMESPACE_DNS, b"llamaforge.server"));
         Self(Uuid::new_v5(&ns, s.as_bytes()))
     }
 }

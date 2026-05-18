@@ -23,26 +23,18 @@ pub const SERVER_ID_MAX_LEN: usize = 64;
 /// `server_id` path/body parameters with the same rule that gated load.
 pub fn validate_server_id_slug(id: &str) -> Result<(), ConfigLoadError> {
     if id.is_empty() {
-        return Err(ConfigLoadError::ValidationError {
-            message: "empty ServerId".to_string(),
-        });
+        return Err(ConfigLoadError::ValidationError { message: "empty ServerId".to_string() });
     }
     if id.len() > SERVER_ID_MAX_LEN {
         return Err(ConfigLoadError::ValidationError {
-            message: format!(
-                "ServerId '{}' exceeds {}-byte limit",
-                id, SERVER_ID_MAX_LEN
-            ),
+            message: format!("ServerId '{}' exceeds {}-byte limit", id, SERVER_ID_MAX_LEN),
         });
     }
     let mut chars = id.chars();
     let first = chars.next().unwrap();
     if !first.is_ascii_alphanumeric() {
         return Err(ConfigLoadError::ValidationError {
-            message: format!(
-                "ServerId '{}' must start with an ASCII letter or digit",
-                id
-            ),
+            message: format!("ServerId '{}' must start with an ASCII letter or digit", id),
         });
     }
     for c in chars {

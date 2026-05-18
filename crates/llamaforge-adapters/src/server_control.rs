@@ -49,9 +49,7 @@ impl ServerControl for ServerControlAdapter {
     }
 
     async fn start_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
-        let config_id = self
-            .resolve_config_id(id)
-            .ok_or(ServerError::NotFound { id: *id })?;
+        let config_id = self.resolve_config_id(id).ok_or(ServerError::NotFound { id: *id })?;
         match self.manager.request_start(&config_id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
@@ -69,9 +67,7 @@ impl ServerControl for ServerControlAdapter {
     }
 
     async fn stop_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
-        let config_id = self
-            .resolve_config_id(id)
-            .ok_or(ServerError::NotFound { id: *id })?;
+        let config_id = self.resolve_config_id(id).ok_or(ServerError::NotFound { id: *id })?;
         match self.manager.request_stop(&config_id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
