@@ -34,10 +34,31 @@ pub struct ServerCapabilities {
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SlotState {
     pub id: u32,
+    #[serde(alias = "state", deserialize_with = "deserialize_state_as_bool", default)]
     pub is_processing: bool,
+    #[serde(alias = "n_past_tokens", default)]
     pub n_past: u32,
+    #[serde(alias = "n_decoded_tokens", default)]
     pub n_decoded: u32,
+    #[serde(default)]
     pub prompt_hash: Option<u64>,
+}
+
+fn deserialize_state_as_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum StateOrBool {
+        State(u32),
+        Bool(bool),
+    }
+
+    match StateOrBool::deserialize(deserializer)? {
+        StateOrBool::State(s) => Ok(s != 0),
+        StateOrBool::Bool(b) => Ok(b),
+    }
 }
 
 /// An event broadcasted when a client should refresh its connection to a server.
