@@ -45,7 +45,7 @@ pub async fn is_deadlocked(
     pid: u32,
     pending_dispatches: u64,
     slots: &[SlotState],
-    last_n_decoded: &HashMap<u32, u32>,
+    last_n_decoded: &HashMap<u32, Option<u32>>,
     first_health_ok_at: Option<Instant>,
     gpu_telemetry: &dyn GpuTelemetry,
     gpu_id: &GpuId,
@@ -64,16 +64,36 @@ pub async fn is_deadlocked(
     // Condition 2: No decode progress
     // If any active slot has progressed, we are not deadlocked.
     let mut no_progress = true;
+    let mut active_slots = 0;
+    let mut active_slots_missing_progress = 0;
+
     for slot in slots {
         if slot.is_processing {
-            if let Some(&last) = last_n_decoded.get(&slot.id) {
-                if slot.n_decoded > last {
-                    no_progress = false;
-                    break;
+            active_slots += 1;
+            if let Some(n_dec) = slot.n_decoded {
+                if let Some(&Some(last)) = last_n_decoded.get(&slot.id) {
+                    if n_dec > last {
+                        no_progress = false;
+                        break;
+                    }
                 }
+            } else {
+                // If we have mixed-availability (some slots report progress, some omit it),
+                // we treat the omitted slots as "not progressing" for the purpose of the
+                // `no_progress` check. However, if ALL active slots omit progress, the
+                // `active_slots_missing_progress == active_slots` condition below will
+                // trigger and safely skip this deadlock check entirely.
+                active_slots_missing_progress += 1;
             }
         }
     }
+
+    if active_slots > 0 && active_slots_missing_progress == active_slots {
+        // We have active slots, but NONE of them provide n_decoded.
+        // We cannot reliably detect a slot-level deadlock. Skip this condition.
+        no_progress = false;
+    }
+
     if !no_progress {
         return false;
     }
@@ -225,13 +245,13 @@ mod tests {
         let gpu_id = llamaforge_config::GpuId(0);
         let pid = std::process::id(); // Use own PID for CPU check
         let mut last_n_decoded = std::collections::HashMap::new();
-        last_n_decoded.insert(0, 10);
+        last_n_decoded.insert(0, Some(10));
 
         let slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 10,
+            n_past: Some(100),
+            n_decoded: Some(10),
             prompt_hash: None,
         }];
 
@@ -255,8 +275,8 @@ mod tests {
         let idle_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: false,
-            n_past: 100,
-            n_decoded: 10,
+            n_past: Some(100),
+            n_decoded: Some(10),
             prompt_hash: None,
         }];
         assert!(
@@ -276,8 +296,8 @@ mod tests {
         let progress_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 15,
+            n_past: Some(100),
+            n_decoded: Some(15),
             prompt_hash: None,
         }];
         assert!(
@@ -325,12 +345,12 @@ mod tests {
         let prefill_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 0,
+            n_past: Some(100),
+            n_decoded: Some(0),
             prompt_hash: None,
         }];
         let mut empty_last = std::collections::HashMap::new();
-        empty_last.insert(0, 0);
+        empty_last.insert(0, Some(0));
         assert!(
             !is_deadlocked(
                 pid,
@@ -353,6 +373,94 @@ mod tests {
                 &last_n_decoded,
                 healthy_at,
                 &MockTelemetry { util: Err(TelemetryError::FfiError { message: "".into() }) },
+                &gpu_id
+            )
+            .await
+        );
+
+        // Missing n_decoded in all slots -> skips deadlock check
+        let missing_progress_slots = vec![crate::types::SlotState {
+            id: 0,
+            is_processing: true,
+            n_past: None,
+            n_decoded: None,
+            prompt_hash: None,
+        }];
+        let mut missing_last = std::collections::HashMap::new();
+        missing_last.insert(0, None);
+        // Even with GPU idle, if we have no progress info at all, we shouldn't kill
+        assert!(
+            !is_deadlocked(
+                pid,
+                0,
+                &missing_progress_slots,
+                &missing_last,
+                healthy_at,
+                &MockTelemetry { util: Ok(0) },
+                &gpu_id
+            )
+            .await
+        );
+
+        // Mixed availability: one missing, one progressing -> skips deadlock kill
+        let mixed_progress_slots = vec![
+            crate::types::SlotState {
+                id: 0,
+                is_processing: true,
+                n_past: None,
+                n_decoded: None,
+                prompt_hash: None,
+            },
+            crate::types::SlotState {
+                id: 1,
+                is_processing: true,
+                n_past: Some(100),
+                n_decoded: Some(20),
+                prompt_hash: None,
+            },
+        ];
+        let mut mixed_last = std::collections::HashMap::new();
+        mixed_last.insert(0, None);
+        mixed_last.insert(1, Some(10));
+        assert!(
+            !is_deadlocked(
+                pid,
+                0,
+                &mixed_progress_slots,
+                &mixed_last,
+                healthy_at,
+                &MockTelemetry { util: Ok(0) },
+                &gpu_id
+            )
+            .await
+        );
+
+        // Mixed availability: one missing, one NOT progressing -> kills
+        let mixed_no_progress_slots = vec![
+            crate::types::SlotState {
+                id: 0,
+                is_processing: true,
+                n_past: None,
+                n_decoded: None,
+                prompt_hash: None,
+            },
+            crate::types::SlotState {
+                id: 1,
+                is_processing: true,
+                n_past: Some(100),
+                n_decoded: Some(10),
+                prompt_hash: None,
+            },
+        ];
+        // using the same mixed_last where slot 1 had 10 -> no progress
+        assert!(
+            is_deadlocked(
+                pid,
+                0,
+                &mixed_no_progress_slots,
+                &mixed_last,
+                healthy_at,
+                &MockTelemetry { util: Ok(0) },
                 &gpu_id
             )
             .await

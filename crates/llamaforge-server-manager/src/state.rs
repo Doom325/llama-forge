@@ -57,7 +57,7 @@ pub(crate) struct ServerState {
     /// The instant the server first passed its health check. Used by deadlock detection.
     pub first_health_ok_at: Option<Instant>,
     /// Track the decode progress of each slot. Used by deadlock detection.
-    pub last_n_decoded: HashMap<u32, u32>,
+    pub last_n_decoded: HashMap<u32, Option<u32>>,
     /// The GPU assigned to this server.
     pub gpu_id: GpuId,
     /// Cached metadata to avoid re-parsing on restarts.
