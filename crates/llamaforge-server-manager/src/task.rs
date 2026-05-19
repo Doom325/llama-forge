@@ -666,8 +666,13 @@ mod tests {
         assert_eq!(consec, 0);
 
         // Case 2: Prefill guard
-        let prefill_slot =
-            SlotState { id: 0, is_processing: true, n_past: Some(100), n_decoded: Some(0), prompt_hash: None };
+        let prefill_slot = SlotState {
+            id: 0,
+            is_processing: true,
+            n_past: Some(100),
+            n_decoded: Some(0),
+            prompt_hash: None,
+        };
         let action =
             check_degradation(1.0, 50, Some(10.0), &[prefill_slot], 4096, true, &mut consec);
         assert!(matches!(action, DegradationAction::None));
