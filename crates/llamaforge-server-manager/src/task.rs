@@ -551,8 +551,8 @@ async fn monitor_loop(
                 if let Ok(resp) = client.get(&url).send().await {
                     if let Ok(slots) = resp.json::<Vec<SlotState>>().await {
                         if let Some(mut state) = mgr.servers.get_mut(server_id) {
-                            state.slots = slots.clone();
-                            for slot in slots {
+                            let old_slots = std::mem::replace(&mut state.slots, slots);
+                            for slot in old_slots {
                                 state.last_n_decoded.insert(slot.id, slot.n_decoded);
                             }
                         }
