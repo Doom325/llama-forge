@@ -69,7 +69,7 @@ pub async fn build(
     let snap = config.snapshot();
     let metrics_cfg = llamaforge_metrics::MetricsConfig {
         db_path: snap.global.metrics_db_path.clone(),
-        retention_days: snap.global.metrics_retention_days,
+        // Note: metrics_retention_days is read live in prune.rs
         ..llamaforge_metrics::MetricsConfig::default()
     };
     let metrics_pipeline = create_metrics_pipeline(&metrics_cfg, config.clone())
