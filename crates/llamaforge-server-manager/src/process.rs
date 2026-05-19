@@ -18,6 +18,20 @@ impl ProcessHandle {
         }
     }
 
+    pub fn take_stdout(&mut self) -> Option<tokio::process::ChildStdout> {
+        match self {
+            ProcessHandle::Child(c) => c.stdout.take(),
+            ProcessHandle::Orphan(_) => None,
+        }
+    }
+
+    pub fn take_stderr(&mut self) -> Option<tokio::process::ChildStderr> {
+        match self {
+            ProcessHandle::Child(c) => c.stderr.take(),
+            ProcessHandle::Orphan(_) => None,
+        }
+    }
+
     pub async fn wait(&mut self) -> std::io::Result<ExitStatus> {
         match self {
             ProcessHandle::Child(c) => c.wait().await,

@@ -163,6 +163,38 @@ pub async fn spawn_server_task(
                 }
             };
 
+            if let Some(stdout) = child.take_stdout() {
+                let id = server_id.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut lines = tokio::io::BufReader::new(stdout).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let lower = line.to_lowercase();
+                        if lower.contains("error") || lower.contains("failed") {
+                            tracing::warn!(server.id = %id, stream = "stdout", "{}", line);
+                        } else {
+                            tracing::info!(server.id = %id, stream = "stdout", "{}", line);
+                        }
+                    }
+                });
+            }
+
+            if let Some(stderr) = child.take_stderr() {
+                let id = server_id.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncBufReadExt;
+                    let mut lines = tokio::io::BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let lower = line.to_lowercase();
+                        if lower.contains("error") || lower.contains("failed") {
+                            tracing::warn!(server.id = %id, stream = "stderr", "{}", line);
+                        } else {
+                            tracing::info!(server.id = %id, stream = "stderr", "{}", line);
+                        }
+                    }
+                });
+            }
+
             pid = match child.id() {
                 Some(id) => id,
                 None => {
