@@ -122,6 +122,12 @@ impl ConfigWriter for ConfigHandle {
         let old_config = self.inner.load();
         let diff = compute_diff(&old_config, &new_config);
 
+        if old_config.global.metrics_db_path != new_config.global.metrics_db_path {
+            return Err(ConfigReloadError::GlobalRestartRequired {
+                message: "metrics_db_path changed".to_string(),
+            });
+        }
+
         // Pre-swap gate: if the on-disk file changed any field whose
         // semantics require a server restart, abort here. v1.0 doesn't
         // ship a staged-apply protocol, so partially applying (or

@@ -66,7 +66,12 @@ pub async fn build(
     //    that emits metrics via `metrics::counter!` macros so the recorder
     //    is installed; the global recorder is installed by the
     //    MetricsExporterAdapter constructor below.
-    let metrics_cfg = llamaforge_metrics::MetricsConfig::default();
+    let snap = config.snapshot();
+    let metrics_cfg = llamaforge_metrics::MetricsConfig {
+        db_path: snap.global.metrics_db_path.clone(),
+        retention_days: snap.global.metrics_retention_days,
+        ..llamaforge_metrics::MetricsConfig::default()
+    };
     let metrics_pipeline = create_metrics_pipeline(&metrics_cfg, config.clone())
         .map_err(|e| anyhow::anyhow!("metrics pipeline: {}", e))?;
 

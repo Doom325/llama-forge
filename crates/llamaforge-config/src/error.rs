@@ -56,6 +56,10 @@ pub enum ConfigReloadError {
     /// See `docs/v1.1-deferred.md` "Staged-apply protocol".
     #[error("restart required for fields: {fields:?}")]
     RestartRequired { fields: Vec<crate::diff::ServerConfigField> },
+
+    /// A global setting was changed that requires a restart.
+    #[error("restart required for global setting: {message}")]
+    GlobalRestartRequired { message: String },
 }
 
 /// Error during crash-safe writeback.

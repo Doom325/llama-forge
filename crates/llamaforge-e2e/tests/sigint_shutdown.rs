@@ -39,6 +39,7 @@ async fn test_sigint_orphans() {
 bind_address = "127.0.0.1"
 http_port = 0
 grpc_port = 0
+metrics_db_path = "{metrics_db}"
 
 [gateway]
 
@@ -51,6 +52,7 @@ parallel_slots = 1
 alias = "mock"
 estimated_vram_mb = 100
 "#,
+        metrics_db = tmp.path().join("metrics.db").display(),
         binary = mock_bin.display(),
         port = port,
     );
@@ -120,7 +122,7 @@ estimated_vram_mb = 100
     }
 
     // Check that managed_processes table is empty
-    let db_path = state_dir.join("metrics.db");
+    let db_path = tmp.path().join("metrics.db");
     if db_path.exists() {
         let conn = rusqlite::Connection::open(db_path).unwrap();
         let count: i64 =

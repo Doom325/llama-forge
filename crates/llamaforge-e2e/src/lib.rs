@@ -175,6 +175,8 @@ alias = "{alias}"
         let model_path = tmp.path().join("model.gguf");
         std::fs::write(&model_path, b"")?;
 
+        let metrics_db_path = tmp.path().join("metrics.db");
+
         let toml = format!(
             r#"
 [global]
@@ -182,6 +184,7 @@ bind_address = "127.0.0.1"
 http_port = 0
 grpc_port = 0
 restart_cooldown_secs = 1
+metrics_db_path = "{metrics_db}"
 
 [gateway]
 
@@ -199,6 +202,7 @@ estimated_vram_mb = 100
             model = model_path.display(),
             port = mock_port,
             alias = alias,
+            metrics_db = metrics_db_path.display(),
         );
 
         let config_path = tmp.path().join("llamaforge.toml");
