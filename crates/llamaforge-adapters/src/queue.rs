@@ -81,15 +81,14 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                                 }
                                 Ok(DispatchResult::TimedOut { .. }) => {
                                     let _ = events_tx.send(DispatchEvent::Failed { error: "timed out".to_string() }).await;
-                                    pipeline_clone.record_completion(&requestor_id);
+                                    // Starvation/timeout logic already handled dequeue
                                 }
                                 Ok(DispatchResult::ShuttingDown) => {
                                     let _ = events_tx.send(DispatchEvent::Failed { error: "shutting down".to_string() }).await;
-                                    pipeline_clone.record_completion(&requestor_id);
+                                    // Drain queue already handled dequeue
                                 }
                                 Err(_) => {
-                                    // Sender dropped without result
-                                    pipeline_clone.record_completion(&requestor_id);
+                                    // Sender dropped without result, dequeue handled at drop site
                                 }
                             }
                         }
