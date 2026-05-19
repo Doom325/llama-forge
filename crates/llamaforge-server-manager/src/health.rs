@@ -45,7 +45,7 @@ pub async fn is_deadlocked(
     pid: u32,
     pending_dispatches: u64,
     slots: &[SlotState],
-    last_n_decoded: &HashMap<u32, u32>,
+    last_n_decoded: &HashMap<u32, Option<u32>>,
     first_health_ok_at: Option<Instant>,
     gpu_telemetry: &dyn GpuTelemetry,
     gpu_id: &GpuId,
@@ -64,16 +64,31 @@ pub async fn is_deadlocked(
     // Condition 2: No decode progress
     // If any active slot has progressed, we are not deadlocked.
     let mut no_progress = true;
+    let mut active_slots = 0;
+    let mut active_slots_missing_progress = 0;
+
     for slot in slots {
         if slot.is_processing {
-            if let Some(&last) = last_n_decoded.get(&slot.id) {
-                if slot.n_decoded > last {
-                    no_progress = false;
-                    break;
+            active_slots += 1;
+            if let Some(n_dec) = slot.n_decoded {
+                if let Some(&Some(last)) = last_n_decoded.get(&slot.id) {
+                    if n_dec > last {
+                        no_progress = false;
+                        break;
+                    }
                 }
+            } else {
+                active_slots_missing_progress += 1;
             }
         }
     }
+
+    if active_slots > 0 && active_slots_missing_progress == active_slots {
+        // We have active slots, but NONE of them provide n_decoded.
+        // We cannot reliably detect a slot-level deadlock. Skip this condition.
+        no_progress = false;
+    }
+
     if !no_progress {
         return false;
     }
@@ -225,13 +240,13 @@ mod tests {
         let gpu_id = llamaforge_config::GpuId(0);
         let pid = std::process::id(); // Use own PID for CPU check
         let mut last_n_decoded = std::collections::HashMap::new();
-        last_n_decoded.insert(0, 10);
+        last_n_decoded.insert(0, Some(10));
 
         let slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 10,
+            n_past: Some(100),
+            n_decoded: Some(10),
             prompt_hash: None,
         }];
 
@@ -255,8 +270,8 @@ mod tests {
         let idle_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: false,
-            n_past: 100,
-            n_decoded: 10,
+            n_past: Some(100),
+            n_decoded: Some(10),
             prompt_hash: None,
         }];
         assert!(
@@ -276,8 +291,8 @@ mod tests {
         let progress_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 15,
+            n_past: Some(100),
+            n_decoded: Some(15),
             prompt_hash: None,
         }];
         assert!(
@@ -325,12 +340,12 @@ mod tests {
         let prefill_slots = vec![crate::types::SlotState {
             id: 0,
             is_processing: true,
-            n_past: 100,
-            n_decoded: 0,
+            n_past: Some(100),
+            n_decoded: Some(0),
             prompt_hash: None,
         }];
         let mut empty_last = std::collections::HashMap::new();
-        empty_last.insert(0, 0);
+        empty_last.insert(0, Some(0));
         assert!(
             !is_deadlocked(
                 pid,

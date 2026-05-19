@@ -279,7 +279,7 @@ pub(crate) fn check_degradation(
     }
 
     for slot in slots {
-        if slot.is_processing && slot.n_past < (ctx_size / 10) {
+        if slot.is_processing && slot.n_past.unwrap_or(ctx_size) < (ctx_size / 10) {
             *consecutive_degraded_ticks = 0;
             return DegradationAction::None;
         }
@@ -667,7 +667,7 @@ mod tests {
 
         // Case 2: Prefill guard
         let prefill_slot =
-            SlotState { id: 0, is_processing: true, n_past: 100, n_decoded: 0, prompt_hash: None };
+            SlotState { id: 0, is_processing: true, n_past: Some(100), n_decoded: Some(0), prompt_hash: None };
         let action =
             check_degradation(1.0, 50, Some(10.0), &[prefill_slot], 4096, true, &mut consec);
         assert!(matches!(action, DegradationAction::None));
@@ -677,8 +677,8 @@ mod tests {
         let normal_slot = SlotState {
             id: 0,
             is_processing: true,
-            n_past: 1000,
-            n_decoded: 10,
+            n_past: Some(1000),
+            n_decoded: Some(10),
             prompt_hash: None,
         };
         let action = check_degradation(

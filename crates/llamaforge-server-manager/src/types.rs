@@ -37,9 +37,9 @@ pub struct SlotState {
     #[serde(alias = "state", deserialize_with = "deserialize_state_as_bool", default)]
     pub is_processing: bool,
     #[serde(alias = "n_past_tokens", default)]
-    pub n_past: u32,
+    pub n_past: Option<u32>,
     #[serde(alias = "n_decoded_tokens", default)]
-    pub n_decoded: u32,
+    pub n_decoded: Option<u32>,
     #[serde(default)]
     pub prompt_hash: Option<u64>,
 }
@@ -96,8 +96,8 @@ mod tests {
         let slot = SlotState {
             id: 0,
             is_processing: false,
-            n_past: 0,
-            n_decoded: 0,
+            n_past: Some(0),
+            n_decoded: Some(0),
             prompt_hash: Some(12345),
         };
         assert!(format!("{:?}", slot).contains("12345"));
