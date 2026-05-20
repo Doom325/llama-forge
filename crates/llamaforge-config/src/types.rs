@@ -284,8 +284,8 @@ fn default_max_concurrent_large_requests() -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WalCheckpointMode {
-    #[default]
     Passive,
+    #[default]
     Truncate,
 }
 
@@ -786,7 +786,7 @@ mod tests {
         assert_eq!(g.max_request_body_bytes, 50 * 1024 * 1024);
         assert_eq!(g.large_body_threshold_mb, 1);
         assert_eq!(g.max_concurrent_large_requests, 5);
-        assert_eq!(g.wal_checkpoint_mode, WalCheckpointMode::Passive);
+        assert_eq!(g.wal_checkpoint_mode, WalCheckpointMode::Truncate);
     }
 
     #[test]
