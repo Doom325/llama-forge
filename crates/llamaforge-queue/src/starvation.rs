@@ -153,13 +153,15 @@ async fn maintenance_sweep_loop(
                 let mut timeouts = 0;
                 let mut cancellations = 0;
 
-                for req in removed {
+                for mut req in removed {
                     if req.cancel_token.is_cancelled() {
                         cancellations += 1;
+                        drop(req.admission_token.take());
                         admission.record_dequeue(&req.requestor, DequeueReason::Cancelled);
                         let _ = req.response_tx.send(DispatchResult::Cancelled);
                     } else {
                         timeouts += 1;
+                        drop(req.admission_token.take());
                         admission.record_dequeue(&req.requestor, DequeueReason::TimedOut);
                         let _ = req.response_tx.send(DispatchResult::TimedOut { waited: req.queue_timeout });
                     }

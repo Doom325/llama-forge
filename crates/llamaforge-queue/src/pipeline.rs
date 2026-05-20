@@ -56,7 +56,8 @@ impl RequestPipeline {
     }
 
     pub fn cancel(&self, id: RequestId) -> Option<RequestId> {
-        let req = self.queue.cancel(id)?;
+        let mut req = self.queue.cancel(id)?;
+        drop(req.admission_token.take());
         self.admission.record_dequeue(&req.requestor, DequeueReason::Cancelled);
         Some(id)
     }
@@ -160,11 +161,12 @@ pub async fn run_scheduler(
             _ = queue.wait_for_dispatch_signal() => {
                 // Wake up and try to dispatch as many as possible
                 while let Some(candidate) = queue.try_dispatch(capacity.as_ref()) {
-                    let req = candidate.request;
+                    let mut req = candidate.request;
                     let request_id = req.id;
                     let requestor = req.requestor.clone();
 
                     // Record dequeue BEFORE potentially slow dispatch/routing
+                    drop(req.admission_token.take());
                     admission.record_dequeue(&requestor, DequeueReason::Dispatched);
 
                     let decision = server_selector.select_server(&req);
@@ -223,7 +225,8 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
         }
     }
 
-    while let Some(candidate) = queue.try_dispatch(&DrainChecker) {
+    while let Some(mut candidate) = queue.try_dispatch(&DrainChecker) {
+        drop(candidate.request.admission_token.take());
         admission.record_dequeue(&candidate.request.requestor, DequeueReason::ShuttingDown);
         let _ = candidate.request.response_tx.send(DispatchResult::ShuttingDown);
     }

@@ -232,7 +232,6 @@ impl AdmissionController {
 
         // Metrics
         metrics::counter!("llamaforge_queue_admissions_total", "result" => "accepted").increment(1);
-        metrics::gauge!("llamaforge_admission_queued").increment(1.0);
         metrics::histogram!("llamaforge_admission_duration_seconds")
             .record(start_time.elapsed().as_secs_f64());
 
@@ -310,7 +309,6 @@ impl AdmissionAccounting for AdmissionController {
 
         if let Some(usage) = self.requestor_usage.get(requestor) {
             usage.queued.fetch_sub(1, Ordering::SeqCst);
-            metrics::gauge!("llamaforge_admission_queued").decrement(1.0);
 
             if reason == DequeueReason::Dispatched {
                 usage.in_flight.fetch_add(1, Ordering::SeqCst);
@@ -480,6 +478,122 @@ max_concurrent = 10
         let usage = controller.requestor_usage(&requestor);
         assert_eq!(usage.0, 0);
         assert_eq!(usage.1, 0);
+    }
+
+    /// Minimal recorder that exposes `llamaforge_admission_queued` as a
+    /// shared atomic so the test can observe gauge state directly. Using
+    /// `metrics_util::debugging::DebuggingRecorder` produced unstable
+    /// reads under `with_local_recorder` for our use case.
+    struct GaugeProbe {
+        delta_milli: Arc<std::sync::atomic::AtomicI64>,
+    }
+
+    struct ProbeGauge(Arc<std::sync::atomic::AtomicI64>);
+    impl metrics::GaugeFn for ProbeGauge {
+        fn increment(&self, value: f64) {
+            self.0.fetch_add((value * 1000.0) as i64, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn decrement(&self, value: f64) {
+            self.0.fetch_sub((value * 1000.0) as i64, std::sync::atomic::Ordering::SeqCst);
+        }
+        fn set(&self, value: f64) {
+            self.0.store((value * 1000.0) as i64, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    struct NoopCounter;
+    impl metrics::CounterFn for NoopCounter {
+        fn increment(&self, _: u64) {}
+        fn absolute(&self, _: u64) {}
+    }
+    struct NoopHistogram;
+    impl metrics::HistogramFn for NoopHistogram {
+        fn record(&self, _: f64) {}
+    }
+
+    impl metrics::Recorder for GaugeProbe {
+        fn describe_counter(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+        fn describe_gauge(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+        fn describe_histogram(
+            &self,
+            _: metrics::KeyName,
+            _: Option<metrics::Unit>,
+            _: metrics::SharedString,
+        ) {
+        }
+        fn register_counter(
+            &self,
+            _: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Counter {
+            metrics::Counter::from_arc(Arc::new(NoopCounter))
+        }
+        fn register_gauge(&self, key: &metrics::Key, _: &metrics::Metadata<'_>) -> metrics::Gauge {
+            if key.name() == "llamaforge_admission_queued" {
+                metrics::Gauge::from_arc(Arc::new(ProbeGauge(self.delta_milli.clone())))
+            } else {
+                metrics::Gauge::from_arc(Arc::new(ProbeGauge(Arc::new(
+                    std::sync::atomic::AtomicI64::new(0),
+                ))))
+            }
+        }
+        fn register_histogram(
+            &self,
+            _: &metrics::Key,
+            _: &metrics::Metadata<'_>,
+        ) -> metrics::Histogram {
+            metrics::Histogram::from_arc(Arc::new(NoopHistogram))
+        }
+    }
+
+    #[test]
+    fn test_admission_gauge_lifecycle() {
+        let delta = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let probe = GaugeProbe { delta_milli: delta.clone() };
+        metrics::with_local_recorder(&probe, || {
+            let config = test_config();
+            let queue_depth = Arc::new(AtomicU32::new(0));
+            let model_validator = Arc::new(MockCapacityChecker { capacity: true });
+            let controller = AdmissionController::new(config, queue_depth.clone(), model_validator);
+
+            let read = || delta.load(std::sync::atomic::Ordering::SeqCst) as f64 / 1000.0;
+
+            assert_eq!(read(), 0.0);
+
+            // Each dequeue reason must return the gauge to baseline. The
+            // token must be dropped at dequeue time (not held through the
+            // dispatch lifetime), otherwise the gauge would track
+            // queued + in-flight rather than queued.
+            for reason in [
+                DequeueReason::Dispatched,
+                DequeueReason::Cancelled,
+                DequeueReason::TimedOut,
+                DequeueReason::ShuttingDown,
+            ] {
+                let req = mock_incoming();
+                let requestor = req.requestor.clone();
+                let mut admitted = controller.admit(req).unwrap();
+                assert_eq!(read(), 1.0, "after admit ({:?})", reason);
+                drop(admitted.admission_token.take());
+                controller.record_dequeue(&requestor, reason);
+                assert_eq!(read(), 0.0, "after dequeue ({:?})", reason);
+                if reason == DequeueReason::Dispatched {
+                    controller.record_completion(&requestor);
+                }
+            }
+        });
     }
 
     #[test]

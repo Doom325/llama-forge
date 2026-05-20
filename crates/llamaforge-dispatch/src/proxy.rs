@@ -63,6 +63,21 @@ pub struct AuditRecord {
 /// A proxy task that handles connection, streaming, and cleanup for a single request.
 ///
 /// See design doc Section 3.1.
+/// RAII guard for pending dispatches metric.
+struct PendingDispatchToken;
+impl PendingDispatchToken {
+    #[allow(clippy::new_without_default)]
+    fn new() -> Self {
+        metrics::gauge!("llamaforge_pending_dispatches").increment(1.0);
+        Self
+    }
+}
+impl Drop for PendingDispatchToken {
+    fn drop(&mut self) {
+        metrics::gauge!("llamaforge_pending_dispatches").decrement(1.0);
+    }
+}
+
 #[instrument(
     skip_all,
     fields(
@@ -91,7 +106,7 @@ pub async fn proxy_task(
     let mut prompt_tokens: u32 = 0;
     let id_slot = request.id_slot; // Copy before move
 
-    metrics::gauge!("llamaforge_pending_dispatches").increment(1.0);
+    let _guard = PendingDispatchToken::new();
     tracing::debug!("dispatch.started");
 
     // PreConnect phase
@@ -302,7 +317,6 @@ fn cleanup(
     metrics::histogram!("llamaforge_dispatch_duration_seconds").record(duration.as_secs_f64());
     metrics::counter!("llamaforge_tokens_completion_total").increment(tokens_predicted as u64);
     metrics::counter!("llamaforge_tokens_prompt_total").increment(prompt_tokens as u64);
-    metrics::gauge!("llamaforge_pending_dispatches").decrement(1.0);
 
     // Audit record (fire and forget with timeout)
     let audit_record = AuditRecord {
