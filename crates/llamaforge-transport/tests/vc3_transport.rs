@@ -22,6 +22,40 @@ use llamaforge_types::{
 /// (which carry the OS-assigned `http_addr` / `grpc_addr`) plus the
 /// config handle. Tests format URLs off `handles.http_addr` /
 /// `handles.grpc_addr` rather than hardcoding port numbers.
+async fn setup_test_server_with_store(
+    config_modifier: impl FnOnce(&mut AppConfig),
+    route_validator: Arc<dyn RouteValidator>,
+    queue_submitter: Arc<dyn QueueSubmitter>,
+    inference_engine: Arc<dyn llamaforge_transport::InferenceEngine>,
+    server_control: Arc<dyn ServerControl>,
+) -> (llamaforge_transport::TransportHandles, Arc<ConfigHandle>, Arc<InMemoryStore>) {
+    let mut config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
+    config.global.http_port = 0;
+    config.global.grpc_port = 0;
+    config_modifier(&mut config);
+
+    let source = Arc::new(InMemoryConfigSource::new(config));
+    let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+    let metrics_store = Arc::new(InMemoryStore::default());
+
+    let deps = TransportDeps {
+        config_reader: handle.clone(),
+        route_validator,
+        inference_engine,
+        metrics_exporter: Arc::new(mocks::MockMetricsExporter),
+        server_control,
+        queue_submitter,
+        config_writer: handle.clone(),
+        request_metrics_store: metrics_store.clone(),
+        store_maintenance: Arc::new(InMemoryStore::default()),
+    };
+
+    let handles = start_servers(deps).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    (handles, handle, metrics_store)
+}
+
 async fn setup_test_server(
     config_modifier: impl FnOnce(&mut AppConfig),
     route_validator: Arc<dyn RouteValidator>,
@@ -224,6 +258,46 @@ async fn test_vc3_4_non_streaming_timeout() {
         panic!("Status: {}, Body: {}", res.status(), res.text().await.unwrap());
     }
     assert_eq!(res.status(), StatusCode::GATEWAY_TIMEOUT);
+}
+
+#[tokio::test]
+async fn test_issue_144_completion_tokens_match() {
+    let chunks = vec![
+        Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
+        Ok(ChatCompletionChunk::Token("Tok1".into())),
+        Ok(ChatCompletionChunk::Token("Tok2".into())),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 42,
+            prompt_tokens: 15,
+        }),
+    ];
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
+    let (rv, qs, _, sc) = default_deps();
+    let (handles, _, _metrics_store) = setup_test_server_with_store(|_| {}, rv, qs, ie, sc).await;
+
+    let client = Client::new();
+    let res = client
+        .post(http_url(&handles, "/v1/chat/completions"))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_str = res.text().await.unwrap();
+    let body_json: serde_json::Value = serde_json::from_str(&body_str).unwrap();
+
+    let completion_tokens = body_json["usage"]["completion_tokens"].as_u64().unwrap();
+    let prompt_tokens = body_json["usage"]["prompt_tokens"].as_u64().unwrap();
+    assert_eq!(completion_tokens, 42);
+    assert_eq!(prompt_tokens, 15);
 }
 
 #[tokio::test]
