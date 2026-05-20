@@ -127,6 +127,11 @@ impl ConfigWriter for ConfigHandle {
                 message: "metrics_db_path changed".to_string(),
             });
         }
+        if old_config.global.telemetry_backend != new_config.global.telemetry_backend {
+            return Err(ConfigReloadError::GlobalRestartRequired {
+                message: "telemetry_backend changed".to_string(),
+            });
+        }
 
         // Pre-swap gate: if the on-disk file changed any field whose
         // semantics require a server restart, abort here. v1.0 doesn't

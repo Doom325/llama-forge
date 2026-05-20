@@ -50,11 +50,7 @@ impl GpuTelemetry for NvmlTelemetry {
             let memory = device.memory_info().map_err(|e| TelemetryError::FfiError {
                 message: format!("Failed to get memory info for device {}: {}", i, e),
             })?;
-            devices.push(GpuDevice {
-                id: GpuId(i),
-                name,
-                total_vram_bytes: memory.total,
-            });
+            devices.push(GpuDevice { id: GpuId(i), name, total_vram_bytes: memory.total });
         }
         Ok(devices)
     }

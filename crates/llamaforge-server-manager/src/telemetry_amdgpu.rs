@@ -47,33 +47,42 @@ impl AmdGpuTelemetry {
 
 impl GpuTelemetry for AmdGpuTelemetry {
     fn free_vram_bytes(&self, id: &GpuId) -> Result<u64, TelemetryError> {
-        let device_path = self.devices.get(id.0 as usize).ok_or(TelemetryError::DeviceNotFound {
-            device: id.clone(),
-        })?;
+        let device_path = self
+            .devices
+            .get(id.0 as usize)
+            .ok_or(TelemetryError::DeviceNotFound { device: id.clone() })?;
 
-        let total_str = fs::read_to_string(device_path.join("mem_info_vram_total")).map_err(|e| {
-            TelemetryError::FfiError { message: format!("Failed to read vram_total: {}", e) }
-        })?;
+        let total_str =
+            fs::read_to_string(device_path.join("mem_info_vram_total")).map_err(|e| {
+                TelemetryError::FfiError { message: format!("Failed to read vram_total: {}", e) }
+            })?;
         let used_str = fs::read_to_string(device_path.join("mem_info_vram_used")).map_err(|e| {
             TelemetryError::FfiError { message: format!("Failed to read vram_used: {}", e) }
         })?;
 
-        let total: u64 = total_str.trim().parse().unwrap_or(0);
-        let used: u64 = used_str.trim().parse().unwrap_or(0);
+        let total: u64 = total_str.trim().parse().map_err(|e| TelemetryError::FfiError {
+            message: format!("Failed to parse vram_total: {}", e),
+        })?;
+        let used: u64 = used_str.trim().parse().map_err(|e| TelemetryError::FfiError {
+            message: format!("Failed to parse vram_used: {}", e),
+        })?;
 
         Ok(total.saturating_sub(used))
     }
 
     fn utilization_percent(&self, id: &GpuId) -> Result<u8, TelemetryError> {
-        let device_path = self.devices.get(id.0 as usize).ok_or(TelemetryError::DeviceNotFound {
-            device: id.clone(),
-        })?;
+        let device_path = self
+            .devices
+            .get(id.0 as usize)
+            .ok_or(TelemetryError::DeviceNotFound { device: id.clone() })?;
 
         let busy_str = fs::read_to_string(device_path.join("gpu_busy_percent")).map_err(|e| {
             TelemetryError::FfiError { message: format!("Failed to read gpu_busy_percent: {}", e) }
         })?;
 
-        let busy: u8 = busy_str.trim().parse().unwrap_or(0);
+        let busy: u8 = busy_str.trim().parse().map_err(|e| TelemetryError::FfiError {
+            message: format!("Failed to parse gpu_busy_percent: {}", e),
+        })?;
         Ok(busy)
     }
 
@@ -86,7 +95,10 @@ impl GpuTelemetry for AmdGpuTelemetry {
                         message: format!("Failed to read vram_total for device {}: {}", i, e),
                     }
                 })?;
-            let total_vram_bytes: u64 = total_str.trim().parse().unwrap_or(0);
+            let total_vram_bytes: u64 =
+                total_str.trim().parse().map_err(|e| TelemetryError::FfiError {
+                    message: format!("Failed to parse vram_total for device {}: {}", i, e),
+                })?;
 
             // Attempt to get a friendly name, fallback to "AMD GPU"
             // There isn't a direct standard sysfs file for the friendly product name in amdgpu

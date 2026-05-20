@@ -59,31 +59,30 @@ pub fn create_telemetry(backend_override: Option<&str>) -> std::sync::Arc<dyn Gp
     if let Some(backend) = backend_override {
         match backend {
             #[cfg(feature = "telemetry-nvml")]
-            "nvml" => {
-                match crate::telemetry_nvml::NvmlTelemetry::new() {
-                    Ok(t) => {
-                        tracing::info!("Using NVML telemetry backend");
-                        return std::sync::Arc::new(t);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to initialize NVML telemetry: {}", e);
-                    }
+            "nvml" => match crate::telemetry_nvml::NvmlTelemetry::new() {
+                Ok(t) => {
+                    tracing::info!("Using NVML telemetry backend");
+                    return std::sync::Arc::new(t);
                 }
-            }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize NVML telemetry: {}", e);
+                }
+            },
             #[cfg(feature = "telemetry-amdgpu")]
-            "amdgpu" => {
-                match crate::telemetry_amdgpu::AmdGpuTelemetry::new() {
-                    Ok(t) => {
-                        tracing::info!("Using AMDGPU sysfs telemetry backend");
-                        return std::sync::Arc::new(t);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to initialize AMDGPU telemetry: {}", e);
-                    }
+            "amdgpu" => match crate::telemetry_amdgpu::AmdGpuTelemetry::new() {
+                Ok(t) => {
+                    tracing::info!("Using AMDGPU sysfs telemetry backend");
+                    return std::sync::Arc::new(t);
                 }
-            }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize AMDGPU telemetry: {}", e);
+                }
+            },
             other => {
-                tracing::warn!("Requested telemetry backend '{}' is unknown or not compiled in", other);
+                tracing::warn!(
+                    "Requested telemetry backend '{}' is unknown or not compiled in",
+                    other
+                );
             }
         }
     } else {
