@@ -400,6 +400,8 @@ pub struct GlobalConfig {
     pub api_key: Option<String>,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
+    #[serde(default)]
+    pub telemetry_backend: Option<String>,
 }
 
 impl Default for GlobalConfig {
@@ -417,6 +419,7 @@ impl Default for GlobalConfig {
             restart_stagger_secs: default_restart_stagger_secs(),
             api_key: None,
             state_dir: default_state_dir(),
+            telemetry_backend: None,
         }
     }
 }
@@ -860,6 +863,7 @@ wal_checkpoint_mode = "truncate"
                 restart_stagger_secs: 1,
                 api_key: Some("secret".to_string()),
                 state_dir: PathBuf::from("/tmp/test"),
+                telemetry_backend: Some("nvml".to_string()),
             },
             grpc: GrpcConfig {
                 tls_cert: Some(PathBuf::from("cert.pem")),

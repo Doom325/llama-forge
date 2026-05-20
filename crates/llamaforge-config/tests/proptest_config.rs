@@ -57,6 +57,7 @@ fn arb_global_config() -> impl Strategy<Value = GlobalConfig> {
         1..60u64,
         proptest::option::of("[a-zA-Z0-9]{8,16}"),
         arb_path_buf(),
+        proptest::option::of("nvml|amdgpu"),
     )
         .prop_map(
             |(
@@ -71,6 +72,7 @@ fn arb_global_config() -> impl Strategy<Value = GlobalConfig> {
                 restart_stagger_secs,
                 api_key,
                 state_dir,
+                telemetry_backend,
             )| GlobalConfig {
                 bind_address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 grpc_port,
@@ -84,6 +86,7 @@ fn arb_global_config() -> impl Strategy<Value = GlobalConfig> {
                 restart_stagger_secs,
                 api_key,
                 state_dir,
+                telemetry_backend,
             },
         )
 }

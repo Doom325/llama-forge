@@ -16,6 +16,10 @@ pub(crate) mod process;
 pub(crate) mod state;
 pub(crate) mod task;
 pub(crate) mod telemetry;
+#[cfg(feature = "telemetry-amdgpu")]
+pub mod telemetry_amdgpu;
+#[cfg(feature = "telemetry-nvml")]
+pub mod telemetry_nvml;
 pub(crate) mod types;
 pub(crate) mod vram_estimate;
 
@@ -24,7 +28,7 @@ pub use instrumented::InstrumentedServerManager;
 pub use manager::ServerManager;
 pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
 pub use state::ServerStateSnapshot;
-pub use telemetry::{GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
+pub use telemetry::{create_telemetry, GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
 pub use types::{
     ClientRefreshEvent, ModelArchitecture, ServerCapabilities, ServerLifecycle, SlotState,
     SpeculativeMethod,
