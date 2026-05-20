@@ -36,7 +36,7 @@ use llamaforge_queue::pipeline::{run_scheduler, HealthTracker, RequestPipeline};
 use llamaforge_queue::queue::DispatchQueue;
 use llamaforge_routing::types::{ServerSnapshot, ServerStateView};
 use llamaforge_routing::Router;
-use llamaforge_server_manager::{ServerManager, StubTelemetry};
+use llamaforge_server_manager::ServerManager;
 use llamaforge_transport::TransportDeps;
 use llamaforge_types::ports::{SlotErasure, SlotNotifier};
 use llamaforge_types::traits::{AdmissionError, IncomingRequest, RouteValidator};
@@ -85,7 +85,8 @@ pub async fn build(
     );
 
     // 3) Server manager. Holds the lifecycle of `llama-server` instances.
-    let gpu_telemetry = Arc::new(StubTelemetry);
+    let backend_choice = config.snapshot().global.telemetry_backend.clone();
+    let gpu_telemetry = llamaforge_server_manager::create_telemetry(backend_choice.as_deref());
     let server_manager = Arc::new(ServerManager::new(
         gpu_telemetry,
         config.clone(),

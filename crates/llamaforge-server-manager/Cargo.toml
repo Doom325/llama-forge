@@ -39,9 +39,12 @@ serial_test = { workspace = true }
 
 [features]
 test-utils = ["dep:axum", "dep:tower"]
-gpu-nvml = []
-gpu-metal = []
-gpu-rocm = []
+telemetry-nvml = ["dep:nvml-wrapper"]
+telemetry-amdgpu = []
+
+[dependencies.nvml-wrapper]
+workspace = true
+optional = true
 
 [dependencies.axum]
 workspace = true

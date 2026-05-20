@@ -34,5 +34,9 @@ llamaforge-queue = { workspace = true }
 llamaforge-transport = { workspace = true }
 llamaforge-adapters = { workspace = true }
 
+[features]
+telemetry-nvml = ["llamaforge-server-manager/telemetry-nvml"]
+telemetry-amdgpu = ["llamaforge-server-manager/telemetry-amdgpu"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
