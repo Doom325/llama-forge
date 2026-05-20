@@ -23,10 +23,6 @@ impl InMemoryStore {
     pub fn replace_events(&self, new_events: Vec<AuditEvent>) {
         *self.events.lock() = new_events;
     }
-
-    pub fn get_all_request_metrics(&self) -> Vec<RequestMetrics> {
-        self.metrics.lock().clone()
-    }
 }
 
 impl private::Sealed for InMemoryStore {}
