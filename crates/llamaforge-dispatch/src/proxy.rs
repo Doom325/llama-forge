@@ -205,9 +205,8 @@ pub async fn proxy_task(
                                 if observed > prompt_tokens {
                                     prompt_tokens = observed;
                                 }
-                                
-                                if let Some(pred) = parsed.tokens_predicted {
-                                    if pred > tokens_predicted {
+
+                                if let Some(pred) = parsed.tokens_predicted {                                    if pred > tokens_predicted {
                                         tokens_predicted = pred;
                                     }
                                 } else {
