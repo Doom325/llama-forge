@@ -215,12 +215,12 @@ where
             map_config_checkpoint_mode(snap.gateway.wal_checkpoint_mode)
         }
     };
-    state
+    let result = state
         .store_maintenance
         .wal_checkpoint(mode)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(axum::http::StatusCode::OK.into_response())
+    Ok(axum::Json(result).into_response())
 }
 
 pub(crate) fn management_routes<CW, RMS, SM>(state: ManagementState<CW, RMS, SM>) -> Router

@@ -178,7 +178,7 @@ pub enum CheckpointMode {
 }
 
 /// Result of a WAL checkpoint operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckpointResult {
     pub pages_checkpointed: u32,
 }
