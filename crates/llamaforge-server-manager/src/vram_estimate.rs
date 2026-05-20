@@ -76,8 +76,13 @@ pub fn compute_vram_estimate(config: &ServerConfig, meta: &GgufMetadata) -> u64 
     let param_bytes = (meta.file_size_bytes as f64 * bits_per_param / 8.0) as u64;
 
     let bytes_per_elem = 2; // f16 typically
-    let ctx_size = config.ctx_size as u64;
-    let parallel_slots = config.parallel_slots as u64;
+    let ctx_size = if config.ctx_size == 0 {
+        // Fallback for VRAM estimation when auto-context is used.
+        // We assume 8192 if we don't have better info to avoid underestimating.
+        8192
+    } else {
+        config.ctx_size as u64
+    };
 
     // KV cache
     let embedding_per_head = meta.embedding_length / meta.head_count;
@@ -86,8 +91,7 @@ pub fn compute_vram_estimate(config: &ServerConfig, meta: &GgufMetadata) -> u64 
         * (meta.head_count_kv as u64)
         * (embedding_per_head as u64)
         * ctx_size
-        * bytes_per_elem
-        * parallel_slots;
+        * bytes_per_elem;
 
     let total = param_bytes + kv_cache_bytes;
 

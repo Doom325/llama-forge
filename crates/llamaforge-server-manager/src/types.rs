@@ -41,6 +41,8 @@ pub struct SlotState {
     #[serde(alias = "n_decoded_tokens", default)]
     pub n_decoded: Option<u32>,
     #[serde(default)]
+    pub n_ctx: Option<u32>,
+    #[serde(default)]
     pub prompt_hash: Option<u64>,
 }
 
@@ -98,6 +100,7 @@ mod tests {
             is_processing: false,
             n_past: Some(0),
             n_decoded: Some(0),
+            n_ctx: None,
             prompt_hash: Some(12345),
         };
         assert!(format!("{:?}", slot).contains("12345"));
