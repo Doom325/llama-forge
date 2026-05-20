@@ -33,6 +33,7 @@ pub struct ParsedChunk {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
 }
+
 #[derive(Deserialize)]
 struct LlamaResponse {
     content: String,
@@ -43,6 +44,8 @@ struct LlamaResponse {
     prompt_n: Option<u32>,
     #[serde(default)]
     tokens_processed: Option<u32>,
+    #[serde(default)]
+    tokens_predicted: Option<u32>,
 }
 
 /// Record for the audit log.
@@ -202,11 +205,19 @@ pub async fn proxy_task(
                                 if observed > prompt_tokens {
                                     prompt_tokens = observed;
                                 }
-                                tokens_predicted += 1; // S5: count tokens robustly
+
+                                if let Some(pred) = parsed.tokens_predicted {
+                                    if pred > tokens_predicted {
+                                        tokens_predicted = pred;
+                                    }
+                                } else {
+                                    tokens_predicted += 1;
+                                }
+
                                 chunks_to_send.push(ParsedChunk {
                                     text: parsed.content,
                                     stop: parsed.stop,
-                                    tokens_predicted: 1,
+                                    tokens_predicted: if parsed.stop { tokens_predicted } else { 1 },
                                     prompt_tokens: if parsed.stop { prompt_tokens } else { 0 },
                                     finish_reason: None,
                                 });

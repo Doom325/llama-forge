@@ -237,7 +237,7 @@ impl InferenceEngine for InferenceEngineAdapter {
                                         .unwrap_or_else(|| "stop".to_string());
                                     yield Ok(ChatCompletionChunk::Stop {
                                         finish_reason: reason,
-                                        output_tokens: tokens_emitted,
+                                        output_tokens: if parsed.tokens_predicted > 0 { parsed.tokens_predicted } else { tokens_emitted },
                                         prompt_tokens: parsed.prompt_tokens,
                                     });
                                     return;

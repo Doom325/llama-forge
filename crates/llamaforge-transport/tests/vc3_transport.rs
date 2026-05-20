@@ -227,6 +227,46 @@ async fn test_vc3_4_non_streaming_timeout() {
 }
 
 #[tokio::test]
+async fn test_issue_144_completion_tokens_match() {
+    let chunks = vec![
+        Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
+        Ok(ChatCompletionChunk::Token("Tok1".into())),
+        Ok(ChatCompletionChunk::Token("Tok2".into())),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 42,
+            prompt_tokens: 15,
+        }),
+    ];
+    let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
+    let (rv, qs, _, sc) = default_deps();
+    let (handles, _) = setup_test_server(|_| {}, rv, qs, ie, sc).await;
+
+    let client = Client::new();
+    let res = client
+        .post(http_url(&handles, "/v1/chat/completions"))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_str = res.text().await.unwrap();
+    let body_json: serde_json::Value = serde_json::from_str(&body_str).unwrap();
+
+    let completion_tokens = body_json["usage"]["completion_tokens"].as_u64().unwrap();
+    let prompt_tokens = body_json["usage"]["prompt_tokens"].as_u64().unwrap();
+    assert_eq!(completion_tokens, 42);
+    assert_eq!(prompt_tokens, 15);
+}
+
+#[tokio::test]
 async fn test_vc3_5_queue_full_returns_429() {
     struct MockQueueSubmitterFull;
     impl QueueSubmitter for MockQueueSubmitterFull {

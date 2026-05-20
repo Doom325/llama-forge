@@ -119,6 +119,32 @@ async fn test_6_10_successful_streaming() {
 }
 
 #[tokio::test]
+async fn test_terminal_chunk_tokens_predicted() {
+    let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![
+            Ok(Bytes::from("data: {\"content\":\"\",\"stop\":false}\n\n")), // Empty content chunk
+            Ok(Bytes::from("data: {\"content\":\"\",\"stop\":true,\"tokens_predicted\":42}\n\n")), // Terminal chunk
+        ])),
+        error_on_connect: Mutex::new(None),
+        delay: None,
+        chunk_delay: None,
+    });
+
+    proxy_task(token, client, req, tx, Arc::new(MockSlotNotifier), audit_tx, cancel, map).await;
+
+    let res1 = rx.recv().await.unwrap().unwrap();
+    assert_eq!(res1.text, "");
+    let res2 = rx.recv().await.unwrap().unwrap();
+    assert!(res2.stop);
+    assert_eq!(res2.tokens_predicted, 42);
+
+    let audit = audit_rx.recv().await.unwrap();
+    assert_eq!(audit.tokens_predicted, 42);
+    assert!(audit.success);
+}
+
+#[tokio::test]
 async fn test_6_11_cancellation_before_first_chunk() {
     let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
     let client = Arc::new(MockBackendClient {
