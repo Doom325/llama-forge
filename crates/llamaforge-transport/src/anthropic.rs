@@ -184,7 +184,7 @@ pub(crate) fn format_anthropic_event(
                 .to_string(),
             });
         }
-        ChatCompletionChunk::Stop { finish_reason, output_tokens } => {
+        ChatCompletionChunk::Stop { finish_reason, output_tokens, prompt_tokens } => {
             if state.phase == AnthropicStreamPhase::Init {
                 // Handle case where stream ended before any tokens were sent
                 state.transition(AnthropicStreamPhase::PreambleSent)?;
@@ -200,7 +200,7 @@ pub(crate) fn format_anthropic_event(
                             "model": model,
                             "stop_reason": null,
                             "stop_sequence": null,
-                            "usage": {"input_tokens": 0, "output_tokens": 0}
+                            "usage": {"input_tokens": prompt_tokens, "output_tokens": 0}
                         }
                     })
                     .to_string(),
@@ -240,7 +240,10 @@ pub(crate) fn format_anthropic_event(
                         "stop_reason": finish_reason,
                         "stop_sequence": null
                     },
-                    "usage": {"output_tokens": output_tokens}
+                    "usage": {
+                        "input_tokens": prompt_tokens,
+                        "output_tokens": output_tokens,
+                    }
                 })
                 .to_string(),
             });
@@ -341,8 +344,11 @@ mod tests {
         assert_eq!(events2.len(), 1);
         assert_eq!(events2[0].event_type, "content_block_delta");
 
-        let stop_chunk =
-            ChatCompletionChunk::Stop { finish_reason: "end_turn".to_string(), output_tokens: 0 };
+        let stop_chunk = ChatCompletionChunk::Stop {
+            finish_reason: "end_turn".to_string(),
+            output_tokens: 0,
+            prompt_tokens: 0,
+        };
         let events_stop =
             format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
         assert_eq!(events_stop.len(), 3);
@@ -355,8 +361,11 @@ mod tests {
     fn test_anthropic_stop_carries_output_tokens() {
         let mut state = AnthropicState::new();
         state.phase = AnthropicStreamPhase::ContentBlock;
-        let stop_chunk =
-            ChatCompletionChunk::Stop { finish_reason: "end_turn".to_string(), output_tokens: 17 };
+        let stop_chunk = ChatCompletionChunk::Stop {
+            finish_reason: "end_turn".to_string(),
+            output_tokens: 17,
+            prompt_tokens: 0,
+        };
         let events = format_anthropic_event("req_123", "claude", &stop_chunk, &mut state).unwrap();
         // The `message_delta` event carries `usage.output_tokens`.
         let delta = events.iter().find(|e| e.event_type == "message_delta").expect("message_delta");

@@ -220,6 +220,7 @@ async fn test_6_14_backpressure_timeout() {
             text: "".to_string(),
             stop: false,
             tokens_predicted: 0,
+            prompt_tokens: 0,
             finish_reason: None,
         }))
         .await

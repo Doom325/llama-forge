@@ -242,6 +242,7 @@ where
                 let mut full_text = String::new();
                 let mut finish_reason: Option<String> = None;
                 let mut completion_tokens: u32 = 0;
+                let mut prompt_tokens_acc: u32 = 0;
                 let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
@@ -251,19 +252,21 @@ where
                         Ok(llamaforge_types::ChatCompletionChunk::Stop {
                             finish_reason: reason,
                             output_tokens,
+                            prompt_tokens,
                         }) => {
                             finish_reason = Some(reason);
                             completion_tokens = output_tokens;
+                            prompt_tokens_acc = prompt_tokens;
                             saw_stop = true;
                         }
                         _ => {}
                     }
                 }
-                (full_text, finish_reason, completion_tokens, saw_stop)
+                (full_text, finish_reason, completion_tokens, prompt_tokens_acc, saw_stop)
             })
             .await
             .map_err(|_| ApiError::Timeout)?;
-        let (content, finish_reason, completion_tokens, saw_stop) = aggregated;
+        let (content, finish_reason, completion_tokens, prompt_tokens, saw_stop) = aggregated;
         // Warming-window guard: if the stream closed without ever
         // observing a terminal `Stop` chunk, the backend went away
         // mid-response (no Running server yet, or a crash). Return
@@ -290,15 +293,13 @@ where
                 },
                 "finish_reason": finish_reason,
             }],
-            // `prompt_tokens` isn't observed end-to-end in v1.0; the
-            // dispatch summary only carries completion tokens. We
-            // emit 0 for prompt tokens to keep the field present
-            // (OpenAI SDKs require the key) and document the gap in
-            // `docs/v1.1-deferred.md`.
+            // `prompt_tokens` is the upstream `tokens_evaluated`
+            // captured on the terminal stop chunk (#134). 0 only when
+            // the upstream didn't surface a value.
             "usage": {
-                "prompt_tokens": 0,
+                "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
-                "total_tokens": completion_tokens,
+                "total_tokens": prompt_tokens.saturating_add(completion_tokens),
             }
         }))
         .into_response())
@@ -498,6 +499,7 @@ where
                 let mut full_text = String::new();
                 let mut stop_reason: Option<String> = None;
                 let mut output_tokens: u32 = 0;
+                let mut input_tokens: u32 = 0;
                 let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
@@ -507,19 +509,21 @@ where
                         Ok(llamaforge_types::ChatCompletionChunk::Stop {
                             finish_reason,
                             output_tokens: tokens,
+                            prompt_tokens,
                         }) => {
                             stop_reason = Some(finish_reason);
                             output_tokens = tokens;
+                            input_tokens = prompt_tokens;
                             saw_stop = true;
                         }
                         _ => {}
                     }
                 }
-                (full_text, stop_reason, output_tokens, saw_stop)
+                (full_text, stop_reason, output_tokens, input_tokens, saw_stop)
             })
             .await
             .map_err(|_| ApiError::Timeout)?;
-        let (text, stop_reason, output_tokens, saw_stop) = aggregated;
+        let (text, stop_reason, output_tokens, input_tokens, saw_stop) = aggregated;
         if !saw_stop {
             return Err(ApiError::ServiceUnavailable { retry_after_secs: 1 });
         }
@@ -537,9 +541,8 @@ where
                 "model": model,
                 "stop_reason": stop_reason,
                 "stop_sequence": null,
-                // `input_tokens` isn't observed end-to-end in v1.0 — see
-                // `docs/v1.1-deferred.md`.
-                "usage": {"input_tokens": 0, "output_tokens": output_tokens}
+                // `input_tokens` is the upstream `tokens_evaluated` (#134).
+                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens}
             }))
             .into_response(),
         ))
@@ -833,7 +836,11 @@ mod tests {
         let chunks = vec![
             Ok(ChatCompletionChunk::Token("Hel".into())),
             Ok(ChatCompletionChunk::Token("lo".into())),
-            Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
+            Ok(ChatCompletionChunk::Stop {
+                finish_reason: "stop".to_string(),
+                output_tokens: 0,
+                prompt_tokens: 0,
+            }),
         ];
         let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
         let app = build_test_router(engine);
@@ -901,6 +908,7 @@ mod tests {
         let chunks = vec![Ok(ChatCompletionChunk::Stop {
             finish_reason: "stop".to_string(),
             output_tokens: 0,
+            prompt_tokens: 0,
         })];
         let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
         let app = build_test_router(engine);

@@ -68,6 +68,7 @@ fn default_deps() -> (
             chunks: std::sync::Mutex::new(vec![Ok(ChatCompletionChunk::Stop {
                 finish_reason: "stop".to_string(),
                 output_tokens: 0,
+                prompt_tokens: 0,
             })]),
             sleep_ms: 0,
         }),
@@ -135,7 +136,11 @@ async fn test_anthropic_state_machine_ordering() {
         Ok(ChatCompletionChunk::Token("Tok1".into())),
         Ok(ChatCompletionChunk::Token("Tok2".into())),
         Ok(ChatCompletionChunk::Token("Tok3".into())),
-        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 0,
+            prompt_tokens: 0,
+        }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _) = default_deps();

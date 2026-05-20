@@ -7,10 +7,11 @@
 //! caller-known fields (`model_name`, `requestor`, `task_type`,
 //! `received_at`) from the surrounding request context, derives
 //! durations from `duration`/`ttft`, and leaves request-pipeline-only
-//! fields (`effective_priority`, `prompt_tokens`,
-//! `dispatched_at`/`first_token_at`) as their sensible neutral
-//! defaults — those are populated upstream once the dispatch path
-//! grows the corresponding observations.
+//! fields (`effective_priority`, `dispatched_at`/`first_token_at`) as
+//! their sensible neutral defaults — those are populated upstream
+//! once the dispatch path grows the corresponding observations.
+//! `prompt_tokens` is now carried through from the dispatch audit
+//! record (#134).
 
 use chrono::{DateTime, Utc};
 use llamaforge_config::{RequestorId as ConfigRequestorId, TaskTypeId};
@@ -35,8 +36,15 @@ pub struct AuditContext {
 /// `AuditRecord`. The metrics crate's batch collector converts this
 /// into the on-disk `AuditEvent` and the latency aggregates.
 pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> MetricsAuditRecord {
-    let DispatchAuditRecord { request_id, server_id, duration, ttft, tokens_predicted, success } =
-        record;
+    let DispatchAuditRecord {
+        request_id,
+        server_id,
+        duration,
+        ttft,
+        tokens_predicted,
+        prompt_tokens,
+        success,
+    } = record;
 
     let now = Utc::now();
     let total_latency_ms = duration.as_secs_f64() * 1000.0;
@@ -45,6 +53,12 @@ pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> Metri
     let generation_duration_ms = ttft_ms.map(|t| (total_latency_ms - t).max(0.0));
     let generation_tps =
         generation_duration_ms.filter(|d| *d > 0.0).map(|d| (tokens_predicted as f64) * 1000.0 / d);
+    // Prompt TPS = prompt_tokens / TTFT. Only meaningful when both are
+    // observed and non-zero — TTFT is the time the upstream spent
+    // evaluating the prompt before emitting the first decoded token.
+    let prompt_tps = ttft_ms
+        .filter(|t| *t > 0.0 && prompt_tokens > 0)
+        .map(|t| (prompt_tokens as f64) * 1000.0 / t);
 
     let status = if success { RequestStatus::Completed } else { RequestStatus::Failed };
     let finish_reason = if success { Some("stop".to_string()) } else { None };
@@ -66,9 +80,9 @@ pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> Metri
         ttft_ms,
         generation_duration_ms,
         total_latency_ms,
-        prompt_tokens: 0,
+        prompt_tokens,
         completion_tokens: tokens_predicted,
-        prompt_tps: None,
+        prompt_tps,
         generation_tps,
         status,
         finish_reason,
@@ -109,12 +123,17 @@ mod tests {
             duration: Duration::from_millis(120),
             ttft: Some(Duration::from_millis(30)),
             tokens_predicted: 42,
+            prompt_tokens: 9,
             success: true,
         };
         let out = translate_audit(record, &ctx());
 
         assert_eq!(out.request_metrics.model_name, "test-model");
         assert_eq!(out.request_metrics.completion_tokens, 42);
+        assert_eq!(out.request_metrics.prompt_tokens, 9);
+        // prompt_tps = 9 / 0.030 = 300
+        let p_tps = out.request_metrics.prompt_tps.unwrap();
+        assert!((p_tps - 300.0).abs() < 1e-6);
         assert_eq!(out.request_metrics.status, RequestStatus::Completed);
         assert_eq!(out.request_metrics.finish_reason.as_deref(), Some("stop"));
         assert!((out.request_metrics.total_latency_ms - 120.0).abs() < 1e-6);
@@ -132,6 +151,7 @@ mod tests {
             duration: Duration::from_millis(10),
             ttft: None,
             tokens_predicted: 0,
+            prompt_tokens: 0,
             success: false,
         };
         let out = translate_audit(record, &ctx());

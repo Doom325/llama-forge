@@ -212,7 +212,8 @@ mod tests {
                 Ok(ChatCompletionChunk::Token("test".into())),
                 Ok(ChatCompletionChunk::Stop {
                     finish_reason: "stop".to_string(),
-                    output_tokens: 1,
+                    output_tokens: 42,
+                    prompt_tokens: 10,
                 }),
             ])))
         }
