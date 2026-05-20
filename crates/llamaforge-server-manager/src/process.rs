@@ -77,7 +77,9 @@ pub(crate) fn spawn_child_process(config: &ServerConfig) -> Result<ProcessHandle
     let mut cmd = Command::new(&config.binary_path);
     cmd.arg("--model").arg(&config.model_path);
     cmd.arg("--port").arg(config.port.to_string());
-    cmd.arg("--ctx-size").arg(config.ctx_size.to_string());
+    if config.ctx_size > 0 {
+        cmd.arg("--ctx-size").arg(config.ctx_size.to_string());
+    }
     cmd.arg("--parallel").arg(config.parallel_slots.to_string());
     if let Some(alias) = &config.alias {
         cmd.arg("--alias").arg(alias);

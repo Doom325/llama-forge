@@ -65,10 +65,10 @@ port = 8080
 backend = "llama_server"
 # GPU layers to offload (-1 for all).
 gpu_layers = -1
-# Number of parallel sequence slots.
-parallel_slots = 4
+# Number of parallel sequence slots (1 is safest, auto not fully supported natively without VRAM explosion on large contexts).
+parallel_slots = 1
 # Context size (0 for model default).
-ctx_size = 8192
+ctx_size = 0
 # KV cache quantization.
 cache_type_k = "f16"
 cache_type_v = "f16"
@@ -89,4 +89,4 @@ model_path = "models/tinyllama-1.1b.gguf"
 port = 8081
 gpu_layers = -1
 parallel_slots = 1
-ctx_size = 2048
+ctx_size = 0

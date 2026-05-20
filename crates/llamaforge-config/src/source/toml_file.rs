@@ -89,14 +89,7 @@ impl TomlFileConfigSource {
                 });
             }
 
-            // Rule 4: ctx_size > 0
-            if server.ctx_size == 0 {
-                return Err(ConfigLoadError::ValidationError {
-                    message: format!("ctx_size must be > 0 for server '{}'", id),
-                });
-            }
-
-            // Rule 5: parallel_slots > 0
+            // Rule 4: parallel_slots > 0
             if server.parallel_slots == 0 {
                 return Err(ConfigLoadError::ValidationError {
                     message: format!("parallel_slots must be > 0 for server '{}'", id),
@@ -428,19 +421,16 @@ check_interval_secs = 60
         // Rule 3: Empty model_path
         check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path=''\nport=8080\nctx_size=1", "empty model_path");
 
-        // Rule 4: ctx_size 0
-        check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
-
-        // Rule 5: parallel_slots 0
+        // Rule 4: parallel_slots 0
         check_val(
             "[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\nparallel_slots=0",
             "parallel_slots must be > 0",
         );
 
-        // Rule 6: Duplicate GPU ID
+        // Rule 5: Duplicate GPU ID
         check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=1\ndevices=[{gpu_id=0}, {gpu_id=0}]", "duplicate gpu_id 0");
 
-        // Rule 7: queue_default_timeout_secs 0
+        // Rule 6: queue_default_timeout_secs 0
         check_val(
             "[global]\nqueue_default_timeout_secs=0",
             "queue_default_timeout_secs must be > 0",
