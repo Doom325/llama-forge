@@ -81,6 +81,7 @@ fn default_deps() -> (
             chunks: std::sync::Mutex::new(vec![Ok(ChatCompletionChunk::Stop {
                 finish_reason: "stop".to_string(),
                 output_tokens: 0,
+                prompt_tokens: 0,
             })]),
             sleep_ms: 0,
         }),
@@ -93,7 +94,11 @@ async fn test_vc3_1_openai_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 0,
+            prompt_tokens: 0,
+        }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
@@ -124,7 +129,11 @@ async fn test_vc3_2_anthropic_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::QueueUpdate { position: 1 }),
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 0,
+            prompt_tokens: 0,
+        }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();
@@ -159,7 +168,11 @@ async fn test_vc3_2_anthropic_streaming_lifecycle() {
 async fn test_vc3_3_grpc_streaming_lifecycle() {
     let chunks = vec![
         Ok(ChatCompletionChunk::Token("Tok1".into())),
-        Ok(ChatCompletionChunk::Stop { finish_reason: "stop".to_string(), output_tokens: 0 }),
+        Ok(ChatCompletionChunk::Stop {
+            finish_reason: "stop".to_string(),
+            output_tokens: 0,
+            prompt_tokens: 0,
+        }),
     ];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
     let (rv, qs, _, sc) = default_deps();

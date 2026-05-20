@@ -166,6 +166,7 @@ async fn test_slot_released_before_audit_send() {
             duration: Duration::from_secs(1),
             ttft: None,
             tokens_predicted: 0,
+            prompt_tokens: 0,
             success: true,
         })
         .await

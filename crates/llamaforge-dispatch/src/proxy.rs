@@ -26,14 +26,23 @@ pub struct ParsedChunk {
     pub stop: bool,
     #[serde(default)]
     pub tokens_predicted: u32,
+    /// Upstream `tokens_evaluated` (prompt size). Non-zero only on the
+    /// terminal stop chunk; zero on intermediate token chunks.
+    #[serde(default)]
+    pub prompt_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
 }
-
 #[derive(Deserialize)]
 struct LlamaResponse {
     content: String,
     stop: bool,
+    #[serde(default)]
+    tokens_evaluated: Option<u32>,
+    #[serde(default)]
+    prompt_n: Option<u32>,
+    #[serde(default)]
+    tokens_processed: Option<u32>,
 }
 
 /// Record for the audit log.
@@ -44,6 +53,7 @@ pub struct AuditRecord {
     pub duration: Duration,
     pub ttft: Option<Duration>,
     pub tokens_predicted: u32,
+    pub prompt_tokens: u32,
     pub success: bool,
 }
 
@@ -75,6 +85,7 @@ pub async fn proxy_task(
     let mut phase = CancellationPhase::PreConnect;
     let mut ttft = None;
     let mut tokens_predicted = 0;
+    let mut prompt_tokens: u32 = 0;
     let id_slot = request.id_slot; // Copy before move
 
     metrics::gauge!("llamaforge_pending_dispatches").increment(1.0);
@@ -87,7 +98,7 @@ pub async fn proxy_task(
         biased;
         _ = cancel_token.cancelled() => {
             tracing::debug!("dispatch.cancelled");
-            cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, false, slot_notifier, audit_tx, slot_dispatch_map);
+            cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, prompt_tokens, false, slot_notifier, audit_tx, slot_dispatch_map);
             return;
         }
         res = connect_future => {
@@ -96,7 +107,7 @@ pub async fn proxy_task(
                 Err(e) => {
                     tracing::warn!(error = %e, "dispatch.failed");
                     let _ = response_tx.send(Err(StreamError::from(e))).await;
-                    cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, false, slot_notifier, audit_tx, slot_dispatch_map);
+                    cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, prompt_tokens, false, slot_notifier, audit_tx, slot_dispatch_map);
                     return;
                 }
             }
@@ -123,6 +134,7 @@ pub async fn proxy_task(
                         text: "".to_string(),
                         stop: true,
                         tokens_predicted: 0,
+                        prompt_tokens: 0,
                         finish_reason: Some("FINISH_REASON_UPSTREAM_FAILURE".to_string()),
                     })).await;
                 }
@@ -166,15 +178,36 @@ pub async fn proxy_task(
                                     text: "".to_string(),
                                     stop: true,
                                     tokens_predicted: 0,
+                                    prompt_tokens,
                                     finish_reason: None,
                                 });
                                 break;
                             } else if let Ok(parsed) = serde_json::from_str::<LlamaResponse>(data) {
+                                // llama-server only emits a non-null
+                                // `tokens_evaluated` (and its aliases) on
+                                // the terminal chunk. Latch the largest
+                                // value we observe across aliases so the
+                                // stop chunk carries the prompt-token
+                                // count regardless of the upstream's
+                                // field-name convention.
+                                let observed = [
+                                    parsed.tokens_evaluated,
+                                    parsed.prompt_n,
+                                    parsed.tokens_processed,
+                                ]
+                                .into_iter()
+                                .flatten()
+                                .max()
+                                .unwrap_or(0);
+                                if observed > prompt_tokens {
+                                    prompt_tokens = observed;
+                                }
                                 tokens_predicted += 1; // S5: count tokens robustly
                                 chunks_to_send.push(ParsedChunk {
                                     text: parsed.content,
                                     stop: parsed.stop,
                                     tokens_predicted: 1,
+                                    prompt_tokens: if parsed.stop { prompt_tokens } else { 0 },
                                     finish_reason: None,
                                 });
                             }
@@ -188,7 +221,7 @@ pub async fn proxy_task(
                         Ok(Ok(())) => {
                             if is_stop {
                                 // Break the loop, stream finished.
-                                return cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, success, slot_notifier, audit_tx, slot_dispatch_map);
+                                return cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, prompt_tokens, success, slot_notifier, audit_tx, slot_dispatch_map);
                             }
                         }
                         Ok(Err(_)) => {
@@ -218,6 +251,7 @@ pub async fn proxy_task(
         start_time,
         ttft,
         tokens_predicted,
+        prompt_tokens,
         success,
         slot_notifier,
         audit_tx,
@@ -234,6 +268,7 @@ fn cleanup(
     start_time: Instant,
     ttft: Option<Duration>,
     tokens_predicted: u32,
+    prompt_tokens: u32,
     success: bool,
     slot_notifier: Arc<dyn SlotNotifier>,
     audit_tx: mpsc::Sender<AuditRecord>,
@@ -255,11 +290,19 @@ fn cleanup(
         .increment(1);
     metrics::histogram!("llamaforge_dispatch_duration_seconds").record(duration.as_secs_f64());
     metrics::counter!("llamaforge_tokens_completion_total").increment(tokens_predicted as u64);
+    metrics::counter!("llamaforge_tokens_prompt_total").increment(prompt_tokens as u64);
     metrics::gauge!("llamaforge_pending_dispatches").decrement(1.0);
 
     // Audit record (fire and forget with timeout)
-    let audit_record =
-        AuditRecord { request_id, server_id, duration, ttft, tokens_predicted, success };
+    let audit_record = AuditRecord {
+        request_id,
+        server_id,
+        duration,
+        ttft,
+        tokens_predicted,
+        prompt_tokens,
+        success,
+    };
 
     tokio::spawn(async move {
         let _ = timeout(Duration::from_secs(10), audit_tx.send(audit_record)).await;
@@ -269,6 +312,7 @@ fn cleanup(
         duration_ms = duration.as_millis(),
         ttft_ms = ttft.map(|t| t.as_millis()),
         tokens = tokens_predicted,
+        prompt_tokens = prompt_tokens,
         "Dispatch completed"
     );
 }

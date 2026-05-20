@@ -455,8 +455,11 @@ pub enum ChatCompletionChunk {
     /// The final chunk with a finish reason and the cumulative
     /// generated-token count for the request. The token count is what
     /// the Anthropic shim reports as `usage.output_tokens` and what
-    /// OpenAI clients receive on the terminal chunk.
-    Stop { finish_reason: String, output_tokens: u32 },
+    /// OpenAI clients receive on the terminal chunk. `prompt_tokens` is
+    /// the upstream `tokens_evaluated` (input/prompt size) reported by
+    /// llama-server on its final chunk; 0 when the upstream did not
+    /// surface a value.
+    Stop { finish_reason: String, output_tokens: u32, prompt_tokens: u32 },
 }
 
 /// Error type for stream failures.

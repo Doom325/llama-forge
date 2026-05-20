@@ -238,6 +238,7 @@ impl InferenceEngine for InferenceEngineAdapter {
                                     yield Ok(ChatCompletionChunk::Stop {
                                         finish_reason: reason,
                                         output_tokens: tokens_emitted,
+                                        prompt_tokens: parsed.prompt_tokens,
                                     });
                                     return;
                                 } else if !parsed.text.is_empty() {
@@ -264,6 +265,9 @@ impl InferenceEngine for InferenceEngineAdapter {
                                     yield Ok(ChatCompletionChunk::Stop {
                                         finish_reason: "stop".to_string(),
                                         output_tokens: tokens_emitted,
+                                        // Backend closed without a stop chunk; no prompt
+                                        // token count was observed.
+                                        prompt_tokens: 0,
                                     });
                                 } else {
                                     yield Err(StreamError::BackendDisconnect);
