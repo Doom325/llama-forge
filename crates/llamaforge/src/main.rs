@@ -234,7 +234,7 @@ pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
             eprintln!();
             eprintln!("Validation rules (design §6.1):");
             eprintln!("  - Server ports must be unique across all [servers] entries");
-            eprintln!("  - Every server must have a non-empty binary_path, non-empty model_path, ctx_size > 0, parallel_slots > 0");
+            eprintln!("  - Every server must have a non-empty binary_path, non-empty model_path, parallel_slots > 0");
             eprintln!("  - device.gpu_id must be unique within each server");
             eprintln!("  - global.queue_default_timeout_secs must be > 0");
             eprintln!();

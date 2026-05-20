@@ -252,6 +252,7 @@ mod tests {
             is_processing: true,
             n_past: Some(100),
             n_decoded: Some(10),
+            n_ctx: None,
             prompt_hash: None,
         }];
 
@@ -277,6 +278,7 @@ mod tests {
             is_processing: false,
             n_past: Some(100),
             n_decoded: Some(10),
+            n_ctx: None,
             prompt_hash: None,
         }];
         assert!(
@@ -298,6 +300,7 @@ mod tests {
             is_processing: true,
             n_past: Some(100),
             n_decoded: Some(15),
+            n_ctx: None,
             prompt_hash: None,
         }];
         assert!(
@@ -347,6 +350,7 @@ mod tests {
             is_processing: true,
             n_past: Some(100),
             n_decoded: Some(0),
+            n_ctx: None,
             prompt_hash: None,
         }];
         let mut empty_last = std::collections::HashMap::new();
@@ -384,6 +388,7 @@ mod tests {
             is_processing: true,
             n_past: None,
             n_decoded: None,
+            n_ctx: None,
             prompt_hash: None,
         }];
         let mut missing_last = std::collections::HashMap::new();
@@ -409,6 +414,7 @@ mod tests {
                 is_processing: true,
                 n_past: None,
                 n_decoded: None,
+                n_ctx: None,
                 prompt_hash: None,
             },
             crate::types::SlotState {
@@ -416,6 +422,7 @@ mod tests {
                 is_processing: true,
                 n_past: Some(100),
                 n_decoded: Some(20),
+                n_ctx: None,
                 prompt_hash: None,
             },
         ];
@@ -442,6 +449,7 @@ mod tests {
                 is_processing: true,
                 n_past: None,
                 n_decoded: None,
+                n_ctx: None,
                 prompt_hash: None,
             },
             crate::types::SlotState {
@@ -449,6 +457,7 @@ mod tests {
                 is_processing: true,
                 n_past: Some(100),
                 n_decoded: Some(10),
+                n_ctx: None,
                 prompt_hash: None,
             },
         ];

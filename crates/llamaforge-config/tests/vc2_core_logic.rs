@@ -153,7 +153,6 @@ async fn test_vc2_4_validation_rejects_bad_config() {
         "[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path=''\nport=8080\nctx_size=1",
         "empty model_path",
     );
-    check_val("[servers.\"00000000-0000-0000-0000-000000000001\"]\nbinary_path='llama-server'\nmodel_path='m1'\nport=8080\nctx_size=0", "ctx_size must be > 0");
 }
 
 #[tokio::test]

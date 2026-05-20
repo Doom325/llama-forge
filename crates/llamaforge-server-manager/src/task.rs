@@ -301,7 +301,7 @@ pub(crate) fn check_degradation(
     sample_count: usize,
     baseline: Option<f64>,
     slots: &[SlotState],
-    ctx_size: u32,
+    resolved_ctx_size: u32,
     restart_on_degradation: bool,
     consecutive_degraded_ticks: &mut u32,
 ) -> DegradationAction {
@@ -311,7 +311,8 @@ pub(crate) fn check_degradation(
     }
 
     for slot in slots {
-        if slot.is_processing && slot.n_past.unwrap_or(ctx_size) < (ctx_size / 10) {
+        if slot.is_processing && slot.n_past.unwrap_or(resolved_ctx_size) < (resolved_ctx_size / 10)
+        {
             *consecutive_degraded_ticks = 0;
             return DegradationAction::None;
         }
@@ -583,6 +584,23 @@ async fn monitor_loop(
                 if let Ok(resp) = client.get(&url).send().await {
                     if let Ok(slots) = resp.json::<Vec<SlotState>>().await {
                         if let Some(mut state) = mgr.servers.get_mut(server_id) {
+                            // Backfill resolved_ctx_size from n_ctx if the user set ctx_size=0
+                            if state.ctx_size == 0 {
+                                if let Some(first_slot) = slots.first() {
+                                    if let Some(n_ctx) = first_slot.n_ctx {
+                                        let inferred_total = n_ctx * state.parallel_slots;
+                                        if state.resolved_ctx_size != inferred_total {
+                                            tracing::info!(
+                                                server.id = %server_id,
+                                                inferred_ctx_size = inferred_total,
+                                                "Backfilled resolved_ctx_size from /slots"
+                                            );
+                                            state.resolved_ctx_size = inferred_total;
+                                        }
+                                    }
+                                }
+                            }
+
                             let old_slots = std::mem::replace(&mut state.slots, slots);
                             for slot in old_slots {
                                 state.last_n_decoded.insert(slot.id, slot.n_decoded);
@@ -628,10 +646,10 @@ async fn monitor_loop(
                             tps_window.record(current_tps);
 
                             let mut slots = Vec::new();
-                            let mut ctx_size = 4096;
+                            let mut resolved_ctx_size = 4096;
                             if let Some(state) = mgr.servers.get(server_id) {
                                 slots = state.slots.clone();
-                                ctx_size = state.ctx_size;
+                                resolved_ctx_size = state.resolved_ctx_size;
                             }
 
                             let action = check_degradation(
@@ -639,7 +657,7 @@ async fn monitor_loop(
                                 tps_window.sample_count(),
                                 tps_window.mean_lifetime(),
                                 &slots,
-                                ctx_size,
+                                resolved_ctx_size,
                                 restart_on_degradation,
                                 &mut consecutive_degraded_ticks,
                             );
@@ -703,6 +721,7 @@ mod tests {
             is_processing: true,
             n_past: Some(100),
             n_decoded: Some(0),
+            n_ctx: None,
             prompt_hash: None,
         };
         let action =
@@ -716,6 +735,7 @@ mod tests {
             is_processing: true,
             n_past: Some(1000),
             n_decoded: Some(10),
+            n_ctx: None,
             prompt_hash: None,
         };
         let action = check_degradation(
