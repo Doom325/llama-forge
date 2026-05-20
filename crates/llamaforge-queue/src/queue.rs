@@ -461,6 +461,7 @@ mod tests {
                 cancel_token: CancellationToken::new(),
                 trace_context: None,
                 request_span: None,
+                admission_token: None,
             },
             rx,
         )

@@ -1457,6 +1457,7 @@ dependencies = [
  "llamaforge-routing",
  "llamaforge-types",
  "metrics",
+ "metrics-util 0.18.0",
  "opentelemetry",
  "proptest",
  "scopeguard",

@@ -130,6 +130,24 @@ impl fmt::Debug for IncomingRequest {
     }
 }
 
+/// Note: drives the global gauge, not a per-controller one.
+#[derive(Debug)]
+pub struct AdmissionToken;
+
+impl AdmissionToken {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        metrics::gauge!("llamaforge_admission_queued").increment(1.0);
+        Self
+    }
+}
+
+impl Drop for AdmissionToken {
+    fn drop(&mut self) {
+        metrics::gauge!("llamaforge_admission_queued").decrement(1.0);
+    }
+}
+
 pub struct AdmittedRequest {
     pub id: RequestId,
     pub payload: Arc<InferencePayload>,
@@ -150,6 +168,7 @@ pub struct AdmittedRequest {
     pub cancel_token: CancellationToken,
     pub trace_context: Option<opentelemetry::Context>,
     pub request_span: Option<tracing::Span>,
+    pub admission_token: Option<AdmissionToken>,
 }
 
 impl AdmittedRequest {
@@ -181,6 +200,7 @@ impl AdmittedRequest {
             cancel_token: req.cancel_token,
             trace_context: req.trace_context,
             request_span,
+            admission_token: Some(AdmissionToken::new()),
         }
     }
 }
@@ -205,10 +225,11 @@ pub struct QueuedRequest {
     pub cancel_token: CancellationToken,
     pub trace_context: Option<opentelemetry::Context>,
     pub request_span: Option<tracing::Span>,
+    pub admission_token: Option<AdmissionToken>,
 }
 
 impl QueuedRequest {
-    pub fn from_admitted(req: AdmittedRequest) -> Self {
+    pub fn from_admitted(mut req: AdmittedRequest) -> Self {
         Self {
             id: req.id,
             payload: req.payload,
@@ -229,6 +250,7 @@ impl QueuedRequest {
             cancel_token: req.cancel_token,
             trace_context: req.trace_context,
             request_span: req.request_span,
+            admission_token: req.admission_token.take(),
         }
     }
 }
