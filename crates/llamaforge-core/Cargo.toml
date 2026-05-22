@@ -52,3 +52,67 @@ uuid = { workspace = true, features = ["v7"] }
 filetime = { workspace = true }
 metrics-util = { workspace = true }
 tokio-stream = { workspace = true }
+
+# Integration tests preserve their original per-old-crate grouping under
+# tests/{config,queue,routing}/. Cargo doesn't auto-discover nested test
+# files, so each one needs an explicit [[test]] entry.
+
+[[test]]
+name = "config_design_doc_tests"
+path = "tests/config/design_doc_tests.rs"
+
+[[test]]
+name = "config_parse_examples"
+path = "tests/config/parse_examples.rs"
+
+[[test]]
+name = "config_proptest"
+path = "tests/config/proptest_config.rs"
+
+[[test]]
+name = "config_vc2_core_logic"
+path = "tests/config/vc2_core_logic.rs"
+
+[[test]]
+name = "config_vc3_full_component"
+path = "tests/config/vc3_full_component.rs"
+
+[[test]]
+name = "config_writeback_integration"
+path = "tests/config/writeback_integration.rs"
+
+[[test]]
+name = "queue_design_doc_tests"
+path = "tests/queue/design_doc_tests.rs"
+
+[[test]]
+name = "queue_pipeline_tests"
+path = "tests/queue/pipeline_tests.rs"
+
+[[test]]
+name = "queue_proptest"
+path = "tests/queue/proptest_queue.rs"
+
+[[test]]
+name = "queue_starvation_tests"
+path = "tests/queue/starvation_tests.rs"
+
+[[test]]
+name = "queue_tracing_tests"
+path = "tests/queue/tracing_tests.rs"
+
+[[test]]
+name = "queue_vc3_full_pipeline"
+path = "tests/queue/vc3_full_pipeline.rs"
+
+[[test]]
+name = "routing_design_doc_tests"
+path = "tests/routing/design_doc_tests.rs"
+
+[[test]]
+name = "routing_integration"
+path = "tests/routing/integration.rs"
+
+[[test]]
+name = "routing_vc2_routing"
+path = "tests/routing/vc2_routing.rs"
