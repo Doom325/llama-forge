@@ -2,7 +2,7 @@
 //!
 //! See design doc Section 2.7 for metrics definitions.
 
-use llamaforge_config::ServerId;
+use llamaforge_types::ServerId;
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
@@ -142,7 +142,7 @@ impl RequestMetricsRecorder for MetricsFacadeRecorder {
     }
 
     fn set_server_slots(&self, server_id: &ServerId, active: usize, total: usize) {
-        let sid = server_id.0.clone();
+        let sid = server_id.to_string();
         gauge!(
             "llamaforge_server_slots_active",
             "server_id" => sid.clone()
@@ -158,7 +158,7 @@ impl RequestMetricsRecorder for MetricsFacadeRecorder {
     fn record_server_restart(&self, server_id: &ServerId, reason: &str) {
         counter!(
             "llamaforge_server_restarts_total",
-            "server_id" => server_id.0.clone(),
+            "server_id" => server_id.to_string(),
             "reason" => reason.to_string()
         )
         .increment(1);

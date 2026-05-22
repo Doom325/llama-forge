@@ -1,4 +1,5 @@
 use llamaforge_config::{AppConfig, PriorityRulesConfig};
+use llamaforge_types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,7 +12,7 @@ fn test_parse_example_llamaforge_toml() {
         toml::from_str(&content).expect("failed to parse example llamaforge.toml");
 
     assert_eq!(config.global.http_port, 8000);
-    assert!(config.servers.contains_key(&"llama-3-8b".into()));
+    assert!(config.servers.contains_key(&ServerId::from_config_id("llama-3-8b")));
 }
 
 #[test]

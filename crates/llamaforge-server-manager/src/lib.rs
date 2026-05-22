@@ -1,3 +1,10 @@
+// PR1: ServerId became Copy after the unification. The .clone() calls on
+// ServerId in this crate are now suboptimal but harmless; the borrow
+// patterns they participate in (let bindings, dashmap inserts) would all
+// need to flip to *deref/by-value, which is out of scope for the type
+// unification. A follow-up PR can sweep them.
+#![allow(clippy::clone_on_copy)]
+
 //! Server Manager — supervises the lifecycle of `llama-server`
 //! processes (spawn with the full flag surface, health-check,
 //! restart-with-backoff, graceful drain) and exposes the live fleet

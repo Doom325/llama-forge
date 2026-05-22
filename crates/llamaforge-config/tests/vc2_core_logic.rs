@@ -1,7 +1,7 @@
 use llamaforge_config::{
-    ConfigHandle, ConfigLoadError, ConfigPaths, ConfigReader, ConfigWriter, ServerId,
-    TomlFileConfigSource,
+    ConfigHandle, ConfigLoadError, ConfigPaths, ConfigReader, ConfigWriter, TomlFileConfigSource,
 };
+use llamaforge_types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -72,7 +72,7 @@ ctx_size = 4096
     assert_eq!(snap.servers.len(), 2);
     assert_eq!(
         snap.servers
-            .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+            .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
             .unwrap()
             .lora_adapters
             .len(),
@@ -181,7 +181,10 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let snap = handle.snapshot();
-    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
+    let server = snap
+        .servers
+        .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
+        .unwrap();
 
     // Check defaults were populated
     assert_eq!(server.gpu_layers, -1);

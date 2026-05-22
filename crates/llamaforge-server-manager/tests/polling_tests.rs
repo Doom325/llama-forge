@@ -1,10 +1,11 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_metrics::create_metrics_pipeline;
 use llamaforge_server_manager::{
     ClientRefreshEvent, ServerLifecycle, ServerManager, TelemetryError,
 };
+use llamaforge_types::ServerId;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -103,7 +104,7 @@ async fn test_health_transition_and_refresh() {
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let (mgr, mut refresh_rx, token) = setup_manager(&tmp, port, true, 4096, "mock").await;
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     // Wait for it to become Running
     let mut is_running = false;
@@ -134,7 +135,7 @@ async fn test_consecutive_health_failures() {
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let (mgr, _, token) = setup_manager(&tmp, port, true, 4096, "mock,health_fail_after=1").await;
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     // Should reach Restarting
     let mut is_restarting = false;
@@ -162,7 +163,7 @@ async fn test_startup_grace_window() {
     // Return 503 for 8 seconds. This would normally cause 3 consecutive health
     // failures (at 2s, 4s, 6s) and trigger a restart if not for the grace window.
     let (mgr, _, token) = setup_manager(&tmp, port, true, 4096, "mock,startup_503_ms=8000").await;
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     let mut is_running = false;
     let mut restarted = false;

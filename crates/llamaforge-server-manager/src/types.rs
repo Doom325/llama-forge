@@ -1,7 +1,7 @@
 //! Domain types for Server Manager
 //! See design doc Section 2.3.
 
-use llamaforge_config::ServerId;
+use llamaforge_types::ServerId;
 pub use llamaforge_types::{ModelArchitecture, ServerLifecycle};
 use serde::{Deserialize, Serialize};
 
@@ -105,7 +105,8 @@ mod tests {
         };
         assert!(format!("{:?}", slot).contains("12345"));
 
-        let event = ClientRefreshEvent { server_id: ServerId("srv1".into()), new_port: 8080 };
+        let event =
+            ClientRefreshEvent { server_id: ServerId::from_config_id("srv1"), new_port: 8080 };
         assert!(format!("{:?}", event).contains("8080"));
     }
 

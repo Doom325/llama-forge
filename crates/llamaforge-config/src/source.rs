@@ -43,16 +43,19 @@ mod tests {
     #[test]
     fn test_in_memory_source_load_persist() {
         let mut config = AppConfig::default();
-        config
-            .servers
-            .insert(crate::types::ServerId::from("s1"), crate::types::ServerConfig::default());
+        config.servers.insert(
+            crate::types::ServerId::from_config_id("s1"),
+            crate::types::ServerConfig::default(),
+        );
         let source = InMemoryConfigSource::new(config.clone());
 
         let loaded = source.load().unwrap();
         assert_eq!(loaded, config);
 
-        let mutation =
-            ConfigMutation::SetLoraAdapters { server_id: ServerId::from("s1"), adapters: vec![] };
+        let mutation = ConfigMutation::SetLoraAdapters {
+            server_id: ServerId::from_config_id("s1"),
+            adapters: vec![],
+        };
 
         source.persist(&config, &mutation).unwrap();
         let updated = source.load().unwrap();

@@ -1,8 +1,9 @@
 use llamaforge_config::{
     AppConfig, ConfigHandle, ConfigLoadError, ConfigMutation, ConfigPaths, ConfigReader,
-    ConfigReloadError, ConfigWriter, InstrumentedConfigHandle, LoraAdapterConfig, ServerId,
+    ConfigReloadError, ConfigWriter, InstrumentedConfigHandle, LoraAdapterConfig,
     TomlFileConfigSource, WritebackError,
 };
+use llamaforge_types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,7 +75,7 @@ ctx_size = 4096
 
     // writeback
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -362,7 +363,7 @@ ctx_size = 2048
     let instrumented = setup_stack(main_path.clone(), PathBuf::new(), state_dir.clone()).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -398,7 +399,7 @@ ctx_size = 2048
     perms.set_readonly(true);
     fs::set_permissions(&state_dir, perms).unwrap();
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
     let err = instrumented.writeback(mutation).await.unwrap_err();
@@ -445,7 +446,7 @@ ctx_size = 2048
             tasks.push(tokio::spawn(async move {
                 let _ = handle
                     .writeback(ConfigMutation::SetLoraAdapters {
-                        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+                        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
                         adapters: vec![],
                     })
                     .await;
@@ -564,7 +565,7 @@ async fn test_vc3_15_memory_bounds() {
                 scale: 1.0,
             });
         }
-        config.servers.insert(ServerId::from(format!("s{}", i)), server);
+        config.servers.insert(ServerId::from_config_id(&format!("s{}", i)), server);
     }
 
     // Roughly estimate memory. A realistic config shouldn't be multiple MBs.

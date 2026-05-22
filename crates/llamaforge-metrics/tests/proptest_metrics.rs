@@ -2,17 +2,17 @@ use chrono::{Duration, TimeZone, Utc};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
-use llamaforge_config::ServerId;
 use llamaforge_metrics::{
     create_metrics_pipeline, AuditEvent, EventFilter, EventStore, EventType, MetricsConfig,
 };
+use llamaforge_types::ServerId;
 
 prop_compose! {
     fn arb_audit_event()(
         event_id in "[a-zA-Z0-9_-]{10,20}",
         event_type in prop_oneof![Just(EventType::Audit), Just(EventType::Telemetry)],
         event_kind in "[a-z_]{5,15}",
-        server_id in prop::option::of("[a-z0-9-]{5,10}").prop_map(|s| s.map(ServerId)),
+        server_id in prop::option::of("[a-z0-9-]{5,10}").prop_map(|s| s.map(|x| ServerId::from_config_id(&x))),
         timestamp in any::<u32>().prop_map(|t| Utc.timestamp_opt(t as i64, 0).unwrap()),
     ) -> AuditEvent {
         AuditEvent {

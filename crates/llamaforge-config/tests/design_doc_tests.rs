@@ -1,7 +1,8 @@
 use llamaforge_config::{
     ConfigHandle, ConfigLoadError, ConfigMutation, ConfigPaths, ConfigReader, ConfigWriter,
-    InstrumentedConfigHandle, LoraAdapterConfig, ServerId, TomlFileConfigSource, WritebackError,
+    InstrumentedConfigHandle, LoraAdapterConfig, TomlFileConfigSource, WritebackError,
 };
+use llamaforge_types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -78,7 +79,7 @@ parallel_slots = 4
     let instrumented = setup_stack(main_path.clone(), PathBuf::new(), state_dir.clone()).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
 
@@ -127,7 +128,10 @@ parallel_slots = 4
     let snap = instrumented.snapshot();
 
     assert_eq!(snap.global.grpc_port, 50051);
-    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
+    let server = snap
+        .servers
+        .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
+        .unwrap();
     assert_eq!(server.gpu_layers, -1);
 }
 
@@ -191,7 +195,7 @@ parallel_slots = 4
     perms.set_readonly(true);
     fs::set_permissions(&state_dir, perms).unwrap();
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
     };
     let err = instrumented.writeback(mutation).await.unwrap_err();

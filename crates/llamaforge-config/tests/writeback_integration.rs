@@ -1,7 +1,8 @@
 use llamaforge_config::{
     ConfigChange, ConfigHandle, ConfigMutation, ConfigPaths, ConfigReader, ConfigWriter,
-    LoraAdapterConfig, ServerConfigField, ServerId, TomlFileConfigSource, WritebackError,
+    LoraAdapterConfig, ServerConfigField, TomlFileConfigSource, WritebackError,
 };
+use llamaforge_types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,7 +36,7 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
 
@@ -45,7 +46,7 @@ ctx_size = 2048
     assert_eq!(diff.changes.len(), 1);
     match &diff.changes[0] {
         ConfigChange::ServerChanged { id, diff } => {
-            assert_eq!(id.0, "00000000-0000-0000-0000-000000000001");
+            assert_eq!(*id, ServerId::from_config_id("00000000-0000-0000-0000-000000000001"));
             assert!(diff.hot_reloadable());
             assert!(diff.fields_changed.contains(&ServerConfigField::LoraAdapters));
         }
@@ -54,7 +55,10 @@ ctx_size = 2048
 
     // Verify snapshot updated
     let snap = handle.snapshot();
-    let server = snap.servers.get(&ServerId::from("00000000-0000-0000-0000-000000000001")).unwrap();
+    let server = snap
+        .servers
+        .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
+        .unwrap();
     assert_eq!(server.lora_adapters.len(), 1);
     assert_eq!(server.lora_adapters[0].path, PathBuf::from("lora1.gguf"));
 
@@ -101,7 +105,7 @@ ctx_size = 2048
     let handle = ConfigHandle::load(source).unwrap();
 
     let mutation = ConfigMutation::SetLoraAdapters {
-        server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+        server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
         adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora1.gguf"), scale: 0.8 }],
     };
 

@@ -7,7 +7,8 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
+use llamaforge_types::ServerId;
 
 /// Unique identifier for an inference request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

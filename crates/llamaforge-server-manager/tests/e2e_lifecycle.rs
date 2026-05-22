@@ -1,8 +1,9 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_metrics::{create_metrics_pipeline, ProcessStore};
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
+use llamaforge_types::ServerId;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -80,7 +81,7 @@ async fn test_e2e_lifecycle() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("00000000-0000-0000-0000-000000000000".into());
+    let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
     let mut is_running = false;
@@ -210,7 +211,7 @@ async fn test_id_task_overflow() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("00000000-0000-0000-0000-000000000000".into());
+    let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
     let mut is_running = false;

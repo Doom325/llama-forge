@@ -243,8 +243,7 @@ impl Dispatcher {
         use llamaforge_config::ConfigReader;
         let grace_period = {
             let config = self.config.snapshot();
-            let config_server_id = llamaforge_config::ServerId::from(server_id.to_string());
-            if let Some(server_config) = config.servers.get(&config_server_id) {
+            if let Some(server_config) = config.servers.get(server_id) {
                 Duration::from_secs(30.max(server_config.ctx_size as u64 / 500))
             } else {
                 Duration::from_secs(30)

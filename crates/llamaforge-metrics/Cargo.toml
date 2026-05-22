@@ -12,6 +12,7 @@ test-fixtures = []
 
 [dependencies]
 llamaforge-config = { workspace = true }
+llamaforge-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

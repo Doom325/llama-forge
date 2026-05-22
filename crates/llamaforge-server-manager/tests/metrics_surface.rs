@@ -1,10 +1,11 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_metrics::create_metrics_pipeline;
 use llamaforge_server_manager::{
     InstrumentedServerManager, ServerLifecycle, ServerManager, TelemetryError,
 };
+use llamaforge_types::ServerId;
 use metrics_util::debugging::{DebuggingRecorder, Snapshot};
 use std::sync::Arc;
 use std::time::Duration;
@@ -107,7 +108,7 @@ async fn test_metrics_surface() {
     llamaforge_server_manager::spawn_metrics_poller(mgr_started.clone());
     let instrumented = InstrumentedServerManager::new(mgr_started.clone());
 
-    let srv_id = ServerId("srv_metrics".into());
+    let srv_id = ServerId::from_config_id("srv_metrics");
 
     // Wait for Running
     let mut is_running = false;

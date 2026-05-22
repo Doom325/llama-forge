@@ -1,8 +1,9 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_metrics::create_metrics_pipeline;
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
+use llamaforge_types::ServerId;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -85,7 +86,7 @@ async fn test_degradation_e2e_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId("srv_deg".into());
+    let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
     let mut is_running = false;
@@ -146,7 +147,7 @@ async fn test_degradation_e2e_no_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId("srv_deg".into());
+    let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
     let mut is_running = false;

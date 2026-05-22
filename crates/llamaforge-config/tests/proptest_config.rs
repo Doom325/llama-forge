@@ -2,16 +2,16 @@ use llamaforge_config::{
     compute_diff, AppConfig, Backend, CacheType, ConfigDiff, DeviceSpec, FairShareConfig,
     FlashAttnMode, GlobalConfig, GpuId, GrpcConfig, LogFormat, LogLevel, LoraAdapterConfig,
     ModelArchitecture, PreemptionConfig, PriorityRulesConfig, PrometheusConfig, RequestorId,
-    ServerConfig, ServerId, SpeculativeMethod, StarvationConfig, TaskClassName, TaskTypeId,
-    WebUiConfig,
+    ServerConfig, SpeculativeMethod, StarvationConfig, TaskClassName, TaskTypeId, WebUiConfig,
 };
+use llamaforge_types::ServerId;
 use proptest::collection::{hash_map, vec};
 use proptest::prelude::*;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
 fn arb_server_id() -> impl Strategy<Value = ServerId> {
-    "[a-z0-9]{1,8}".prop_map(|s| ServerId::from(s.to_string()))
+    "[a-z0-9]{1,8}".prop_map(|s| ServerId::from_config_id(&s))
 }
 
 fn arb_task_type_id() -> impl Strategy<Value = TaskTypeId> {

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use llamaforge_config::{GpuId, ServerId};
+use llamaforge_config::GpuId;
+use llamaforge_types::ServerId;
 
 use crate::types::{ServerCapabilities, ServerLifecycle, SlotState};
 
@@ -110,7 +111,7 @@ mod tests {
     #[test]
     fn test_server_state_snapshot_roundtrip() {
         let state = ServerState {
-            id: ServerId("srv1".into()),
+            id: ServerId::from_config_id("srv1"),
             lifecycle: ServerLifecycle::Running,
             pid: Some(1234),
             port: 8080,

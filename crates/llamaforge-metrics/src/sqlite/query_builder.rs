@@ -11,7 +11,7 @@ pub fn build_event_where(filter: &EventFilter) -> (String, Vec<Box<dyn ToSql + S
 
     if let Some(server_id) = &filter.server_id {
         clauses.push("server_id = ?");
-        params.push(Box::new(server_id.0.clone()));
+        params.push(Box::new(server_id.to_string()));
     }
 
     if let Some(event_type) = &filter.event_type {
@@ -51,7 +51,7 @@ pub fn build_metrics_where(filter: &MetricsFilter) -> (String, Vec<Box<dyn ToSql
 
     if let Some(server_id) = &filter.server_id {
         clauses.push("server_id = ?");
-        params.push(Box::new(server_id.0.clone()));
+        params.push(Box::new(server_id.to_string()));
     }
 
     if let Some(model_name) = &filter.model_name {

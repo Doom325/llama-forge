@@ -1,8 +1,9 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, TomlFileConfigSource};
 use llamaforge_metrics::{create_metrics_pipeline, ProcessStore};
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
+use llamaforge_types::ServerId;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -121,9 +122,9 @@ async fn test_multi_server_orchestration() {
     let start_time = tokio::time::Instant::now();
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_0_a = ServerId("srv_0_a".into());
-    let srv_0_b = ServerId("srv_0_b".into());
-    let srv_1 = ServerId("srv_1".into());
+    let srv_0_a = ServerId::from_config_id("srv_0_a");
+    let srv_0_b = ServerId::from_config_id("srv_0_b");
+    let srv_1 = ServerId::from_config_id("srv_1");
 
     let mut a_running_at = None;
     let mut b_running_at = None;

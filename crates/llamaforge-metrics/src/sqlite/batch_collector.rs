@@ -95,7 +95,7 @@ impl From<AuditRecord> for AuditEvent {
             event_id: uuid::Uuid::now_v7().to_string(),
             event_type: EventType::Audit,
             event_kind,
-            server_id: r.request_metrics.server_id.clone(),
+            server_id: r.request_metrics.server_id,
             request_id: Some(r.request_metrics.request_id.clone()),
             created_at: r.request_metrics.completed_at.unwrap_or(r.request_metrics.received_at),
             payload,

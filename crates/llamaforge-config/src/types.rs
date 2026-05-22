@@ -8,29 +8,13 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 
-/// Newtype wrapper for Server Identity.
-/// See design doc Section 2.6.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(transparent)]
-pub struct ServerId(pub String);
-
-impl fmt::Display for ServerId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<&str> for ServerId {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl From<String> for ServerId {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
+/// Canonical Server Identity, defined in `llamaforge-types`. Re-exported
+/// here so callers that only depend on `llamaforge-config` keep a stable
+/// import path. The Uuid-backed type derives slugs from `[servers.<key>]`
+/// TOML tables via `ServerId::from_config_id`; see
+/// [`crate::handle::validate_server_id_slug`] for the load-time rule that
+/// gates which strings are accepted as slugs.
+pub use llamaforge_types::ServerId;
 
 /// Newtype wrapper for Task Type Identity.
 /// See design doc Section 2.6.
@@ -180,6 +164,28 @@ fn default_lookup_ngram_size() -> u32 {
     2
 }
 
+/// Deserialize `[servers.<key>]` tables: validate each raw TOML key
+/// against `validate_server_id_slug` *before* converting to the
+/// UUID-backed `ServerId`. Without this hook the slug shape is lost
+/// (the conversion is one-way), so a bogus key like `"has space"`
+/// would silently become a UUIDv5 and pass validation. Running the
+/// rule on the raw String preserves the load-time contract from when
+/// `ServerId` was itself a String.
+fn deserialize_servers_map<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<ServerId, ServerConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: HashMap<String, ServerConfig> = HashMap::deserialize(deserializer)?;
+    let mut out = HashMap::with_capacity(raw.len());
+    for (slug, cfg) in raw {
+        crate::handle::validate_server_id_slug(&slug).map_err(serde::de::Error::custom)?;
+        out.insert(ServerId::from_config_id(&slug), cfg);
+    }
+    Ok(out)
+}
+
 /// Model architecture classification.
 /// See design doc Section 2.6.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,7 +235,7 @@ pub struct AppConfig {
     pub web_ui: WebUiConfig,
     #[serde(default)]
     pub cors: CorsConfig,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_servers_map")]
     pub servers: HashMap<ServerId, ServerConfig>,
     #[serde(default)]
     pub priority_rules: PriorityRulesConfig,
@@ -834,7 +840,7 @@ wal_checkpoint_mode = "truncate"
     fn test_app_config_serde_roundtrip() {
         let mut config = AppConfig::default();
         config.servers.insert(
-            ServerId::from("llama-3"),
+            ServerId::from_config_id("llama-3"),
             ServerConfig {
                 model_path: PathBuf::from("models/llama-3.gguf"),
                 port: 8080,
@@ -899,7 +905,7 @@ wal_checkpoint_mode = "truncate"
         };
 
         config.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig {
                 binary_path: PathBuf::from("/usr/local/bin/llama-server"),
                 model_path: PathBuf::from("model.gguf"),

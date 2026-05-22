@@ -1,10 +1,11 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, TomlFileConfigSource};
 use llamaforge_metrics::create_metrics_pipeline;
 use llamaforge_server_manager::{
     InstrumentedServerManager, ServerLifecycle, ServerManager, TelemetryError,
 };
+use llamaforge_types::ServerId;
 use metrics_util::debugging::{DebuggingRecorder, Snapshot};
 use std::sync::Arc;
 use std::time::Duration;
@@ -125,7 +126,7 @@ async fn test_scenario_full_stack() {
     llamaforge_server_manager::spawn_metrics_poller(mgr_started.clone());
     let instrumented = InstrumentedServerManager::new(mgr_started.clone());
 
-    let srv_id = ServerId("srv_scenario".into());
+    let srv_id = ServerId::from_config_id("srv_scenario");
 
     // Wait for Running
     let mut is_running = false;

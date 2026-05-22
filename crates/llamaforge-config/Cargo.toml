@@ -23,6 +23,7 @@ parking_lot.workspace = true
 metrics.workspace = true
 async-trait.workspace = true
 uuid = { workspace = true }
+llamaforge-types = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true

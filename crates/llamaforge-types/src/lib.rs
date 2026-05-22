@@ -158,8 +158,32 @@ impl fmt::Display for SlotId {
 /// A unique identifier for a `llama-server` process.
 ///
 /// See design doc Section 2.3.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// `Serialize` emits the inner UUID as a hyphenated string so SQLite
+/// columns and Prometheus labels stay textual. `Deserialize` accepts any
+/// string and routes through [`ServerId::from_config_id`] so config
+/// slugs like `gemma3-27b` and pre-derived UUIDs both round-trip.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ServerId(Uuid);
+
+impl Serialize for ServerId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ServerId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(Self::from_config_id(&s))
+    }
+}
 
 /// The lifecycle state of a managed server process.
 /// See design doc Section 2.3.
@@ -313,6 +337,19 @@ mod tests {
         let s = "019e389b-57a2-7fe0-b74b-1d1038ad1134";
         let id = ServerId::from_config_id(s);
         assert_eq!(id.as_uuid(), Uuid::parse_str(s).unwrap());
+    }
+
+    #[test]
+    fn server_id_serde_roundtrip_via_slug() {
+        // TOML key like [servers.gemma3-27b] arrives as a String.
+        let derived = ServerId::from_config_id("gemma3-27b");
+        let json = serde_json::to_string(&derived).unwrap();
+        // Serialized form is the UUID hyphenated string.
+        assert_eq!(json, format!("\"{}\"", derived.as_uuid()));
+        // Re-deserialising the UUID string is idempotent (UUID parse
+        // path of from_config_id preserves the value).
+        let again: ServerId = serde_json::from_str(&json).unwrap();
+        assert_eq!(again, derived);
     }
 
     #[test]

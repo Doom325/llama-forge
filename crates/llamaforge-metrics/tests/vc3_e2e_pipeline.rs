@@ -2,17 +2,18 @@ use chrono::Utc;
 use std::time::Duration;
 use tempfile::TempDir;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     create_metrics_pipeline, telemetry_drops, AuditRecord, EventFilter, EventStore, EventType,
     ManagedProcess, MetricsConfig, ProcessId, ProcessStore, RequestId, RequestMetrics,
     RequestStatus, TelemetryEvent, TelemetryEventKind,
 };
+use llamaforge_types::ServerId;
 
 fn dummy_telemetry(i: u32) -> TelemetryEvent {
     TelemetryEvent {
         kind: TelemetryEventKind::ServerStarted,
-        server_id: Some(ServerId(format!("s{}", i))),
+        server_id: Some(ServerId::from_config_id(&format!("s{}", i))),
         timestamp: Utc::now(),
         payload: serde_json::json!({"i": i}),
     }
@@ -90,7 +91,8 @@ async fn test_vc3_1_producer_storage_query() {
     pipeline.ingest.send_telemetry(dummy_telemetry(1));
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let filter = EventFilter { server_id: Some(ServerId("s1".to_string())), ..Default::default() };
+    let filter =
+        EventFilter { server_id: Some(ServerId::from_config_id("s1")), ..Default::default() };
     let events = pipeline.store.query_events(&filter, None, None).await.unwrap();
     assert_eq!(events.len(), 1);
 
@@ -224,7 +226,7 @@ async fn test_vc3_6_process_tracking_roundtrip() {
         .store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(123),
-            server_id: ServerId("s1".to_string()),
+            server_id: ServerId::from_config_id("s1"),
             started_at: Utc::now(),
             cmdline: "cmd".to_string(),
             port: 8080,

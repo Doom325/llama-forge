@@ -3,12 +3,13 @@ use std::sync::mpsc;
 use chrono::{TimeZone, Utc};
 use tempfile::TempDir;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, GroupByField, MetricsConfig,
     MetricsFilter, RequestId, RequestMetrics, RequestMetricsStore, RequestStatus,
     SqliteMetricsStore,
 };
+use llamaforge_types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();
@@ -42,7 +43,7 @@ async fn test_metrics_queries() {
         metrics.push(RequestMetrics {
             request_id: RequestId(format!("req-{}", i)),
             model_name: if i < 5 { "modelA".to_string() } else { "modelB".to_string() },
-            server_id: Some(ServerId(if i % 2 == 0 { "s1".to_string() } else { "s2".to_string() })),
+            server_id: Some(ServerId::from_config_id(if i % 2 == 0 { "s1" } else { "s2" })),
             slot_id: None,
             task_type: TaskTypeId("test".to_string()),
             requestor: RequestorId(if i < 3 { "u1".to_string() } else { "u2".to_string() }),
@@ -91,7 +92,8 @@ async fn test_metrics_queries() {
         .unwrap();
     assert_eq!(agg.len(), 2); // s1, s2
 
-    let s1_agg = agg.iter().find(|a| a.group_key == "server_id=s1").unwrap();
+    let s1_key = format!("server_id={}", ServerId::from_config_id("s1"));
+    let s1_agg = agg.iter().find(|a| a.group_key == s1_key).unwrap();
     assert_eq!(s1_agg.request_count, 5); // 0, 2, 4, 6, 8 -> 100, 300, 500, 700, 900
     assert_eq!(s1_agg.avg_total_latency_ms, Some(500.0));
     assert_eq!(s1_agg.sum_prompt_tokens, 50);
