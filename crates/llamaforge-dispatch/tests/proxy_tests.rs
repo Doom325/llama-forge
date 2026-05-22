@@ -6,7 +6,7 @@ use llamaforge_dispatch::proxy::{proxy_task, AuditRecord};
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::token::DispatchToken;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_types::ports::SlotNotifier;
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -53,7 +53,7 @@ impl BackendClient for MockBackendClient {
 
 struct MockSlotNotifier;
 impl SlotNotifier for MockSlotNotifier {
-    fn notify_slot_available(&self, _server_id: &ServerId) {}
+    fn notify_slot_available(&self) {}
 }
 
 #[allow(clippy::type_complexity)]
@@ -268,7 +268,7 @@ struct OrderSlotNotifier {
 }
 
 impl SlotNotifier for OrderSlotNotifier {
-    fn notify_slot_available(&self, _server_id: &ServerId) {
+    fn notify_slot_available(&self) {
         let _ = self.tx.try_send(());
     }
 }

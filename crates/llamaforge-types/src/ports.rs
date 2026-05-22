@@ -26,9 +26,3 @@ pub enum SlotError {
     #[error("Server {server_id} unreachable")]
     ServerUnreachable { server_id: ServerId },
 }
-
-/// Interface for notifying the scheduler when a slot becomes available.
-pub trait SlotNotifier: Send + Sync {
-    /// Notify that a slot has become available on the given server.
-    fn notify_slot_available(&self, server_id: &ServerId);
-}

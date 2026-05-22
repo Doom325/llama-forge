@@ -3,7 +3,7 @@
 //! See design doc Section 2.2
 
 use crate::tracker::DispatchTracker;
-use llamaforge_types::ports::SlotNotifier;
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId};
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ impl Drop for DispatchToken {
             self.tracker.remove(&self.request_id);
             // Safety net for panics. The primary path calls `notify_slot_available` explicitly
             // after `release()`.
-            self.slot_notifier.notify_slot_available(&self.server_id);
+            self.slot_notifier.notify_slot_available();
         }
     }
 }
@@ -74,7 +74,7 @@ mod tests {
 
     struct MockSlotNotifier;
     impl SlotNotifier for MockSlotNotifier {
-        fn notify_slot_available(&self, _server_id: &ServerId) {}
+        fn notify_slot_available(&self) {}
     }
 
     #[test]
