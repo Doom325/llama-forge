@@ -436,7 +436,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::error::ApiError;
+    use crate::transport::error::ApiError;
     use llamaforge_core::config::source::memory::InMemoryConfigSource;
     use llamaforge_core::config::ConfigHandle;
     use llamaforge_core::config::{AppConfig, GlobalConfig};
@@ -619,7 +619,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         // Bind ephemeral port so the test isn't flaky on port-collisions.
@@ -682,7 +682,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

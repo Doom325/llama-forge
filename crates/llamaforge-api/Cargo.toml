@@ -74,3 +74,42 @@ proptest = { workspace = true }
 serial_test.workspace = true
 llamaforge-core = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true, features = ["test-utils", "test-fixtures"] }
+
+# Integration test targets. The three predecessor crates each had tests
+# at the top level of tests/; after the merge they live under
+# tests/transport/ and tests/dispatch/ (PLAN.md PR3 task 3.2). Cargo
+# only auto-discovers tests at tests/*.rs, so nested files need
+# explicit [[test]] entries. Names are prefixed with the old crate
+# name to disambiguate the two design_doc_tests.rs files.
+
+[[test]]
+name = "api_transport_design_doc_tests"
+path = "tests/transport/design_doc_tests.rs"
+
+[[test]]
+name = "api_transport_vc3"
+path = "tests/transport/vc3_transport.rs"
+
+[[test]]
+name = "api_dispatch_design_doc_tests"
+path = "tests/dispatch/design_doc_tests.rs"
+
+[[test]]
+name = "api_dispatch_proptest"
+path = "tests/dispatch/proptest_dispatch.rs"
+
+[[test]]
+name = "api_dispatch_proxy_tests"
+path = "tests/dispatch/proxy_tests.rs"
+
+[[test]]
+name = "api_dispatch_reconciliation"
+path = "tests/dispatch/reconciliation_tests.rs"
+
+[[test]]
+name = "api_dispatch_stress"
+path = "tests/dispatch/stress.rs"
+
+[[test]]
+name = "api_dispatch_vc3_pipeline"
+path = "tests/dispatch/vc3_dispatch_pipeline.rs"

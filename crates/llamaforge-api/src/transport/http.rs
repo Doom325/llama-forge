@@ -1070,7 +1070,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitterFull),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         let app = build_router(state);

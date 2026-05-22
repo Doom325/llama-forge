@@ -321,8 +321,8 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::client::BackendResponseStream;
-    use super::error::DispatchError;
+    use crate::dispatch::client::BackendResponseStream;
+    use crate::dispatch::error::DispatchError;
     use llamaforge_core::config::TomlFileConfigSource;
     use llamaforge_core::types::RequestId;
     use uuid::Uuid;
