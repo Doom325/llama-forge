@@ -1,15 +1,15 @@
 //! Module: router
 
+use crate::config::{ConfigHandle, ConfigReader};
 use crate::routing::error::RoutingConstraint;
 use crate::routing::types::{RoutingReason, ServerSnapshot, ServerStateView, SlotTarget};
 use crate::routing::{
     CapacityChecker, DispatchCountView, RequestCapabilities, RequestView, RoutingDecision,
     RoutingError, ServerSelector,
 };
-use dashmap::DashMap;
-use crate::config::{ConfigHandle, ConfigReader};
 use crate::types::traits::{AdmissionError, RouteValidator};
 use crate::types::{ModelAlias, ModelTarget, ServerId};
+use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -42,9 +42,9 @@ impl Router {
             server_state,
             dispatch_counts,
             round_robin: DashMap::new(),
-            affinity_cache: std::sync::Mutex::new(crate::routing::affinity::SessionAffinityCache::new(
-                max_entries as usize,
-            )),
+            affinity_cache: std::sync::Mutex::new(
+                crate::routing::affinity::SessionAffinityCache::new(max_entries as usize),
+            ),
             started_at: std::time::Instant::now(),
         }
     }
@@ -341,9 +341,9 @@ impl Router {
             Err(e) => {
                 if let RoutingError::ModelUnavailable { ref server_states, .. } = e {
                     let all_starting = !server_states.is_empty()
-                        && server_states.iter().all(|(_, state)| {
-                            *state == crate::types::ServerLifecycle::Starting
-                        });
+                        && server_states
+                            .iter()
+                            .all(|(_, state)| *state == crate::types::ServerLifecycle::Starting);
                     if all_starting {
                         let wait_secs = self.config.snapshot().routing.startup_wait_secs;
                         if self.started_at.elapsed().as_secs() < wait_secs {

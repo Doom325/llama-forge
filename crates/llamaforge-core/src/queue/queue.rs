@@ -1,5 +1,5 @@
-use crate::queue::types::{DispatchCandidate, QueueDepthInfo, QueuedRequest, TierLabel};
 use crate::config::ConfigHandle;
+use crate::queue::types::{DispatchCandidate, QueueDepthInfo, QueuedRequest, TierLabel};
 use crate::types::{ModelAlias, ModelTarget, RequestId};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -235,7 +235,10 @@ impl DispatchQueue {
         }
     }
 
-    pub fn enqueue(&self, req: crate::queue::types::AdmittedRequest) -> crate::queue::types::QueuePosition {
+    pub fn enqueue(
+        &self,
+        req: crate::queue::types::AdmittedRequest,
+    ) -> crate::queue::types::QueuePosition {
         let id = req.id;
         let prio = req.effective_priority;
         let model_target = req.model_target.clone();
@@ -438,7 +441,10 @@ mod tests {
     fn mock_admitted_with_rx(
         prio: u32,
         model: &str,
-    ) -> (crate::queue::types::AdmittedRequest, oneshot::Receiver<crate::queue::types::DispatchResult>) {
+    ) -> (
+        crate::queue::types::AdmittedRequest,
+        oneshot::Receiver<crate::queue::types::DispatchResult>,
+    ) {
         let (tx, rx) = oneshot::channel();
         (
             crate::queue::types::AdmittedRequest {

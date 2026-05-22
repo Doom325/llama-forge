@@ -1,4 +1,6 @@
 use bytes::Bytes;
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream};
 use llamaforge_dispatch::dispatcher::CompletionRequest;
 use llamaforge_dispatch::error::{DispatchError, StreamError};
@@ -6,8 +8,6 @@ use llamaforge_dispatch::proxy::{proxy_task, AuditRecord};
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::token::DispatchToken;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_core::types::traits::SlotNotifier;
-use llamaforge_core::types::{RequestId, ServerId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -369,11 +369,11 @@ async fn test_6_18_ttft_metric() {
 }
 
 use llamaforge_core::config::ConfigHandle;
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::routing::RoutingDecision;
 use llamaforge_dispatch::client::ClientManager;
 use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_core::routing::types::ServerStateView;
-use llamaforge_core::routing::RoutingDecision;
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
@@ -403,9 +403,11 @@ fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
     let trackers = Arc::new(DispatchTrackerRegistry::new());
     let slot_map = Arc::new(SlotDispatchMap::new());
     let config = Arc::new(
-        ConfigHandle::load(Arc::new(llamaforge_core::config::source::memory::InMemoryConfigSource::new(
-            llamaforge_core::config::AppConfig::default(),
-        )))
+        ConfigHandle::load(Arc::new(
+            llamaforge_core::config::source::memory::InMemoryConfigSource::new(
+                llamaforge_core::config::AppConfig::default(),
+            ),
+        ))
         .unwrap(),
     );
     let (metrics_tx, _) = tokio::sync::mpsc::channel(1);

@@ -111,9 +111,10 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                 })
             }
             Err(e) => match e {
-                llamaforge_core::queue::error::AdmissionError::QueueFull { retry_after_secs, .. } => {
-                    Err(AdmissionError::RateLimited { retry_after_secs })
-                }
+                llamaforge_core::queue::error::AdmissionError::QueueFull {
+                    retry_after_secs,
+                    ..
+                } => Err(AdmissionError::RateLimited { retry_after_secs }),
                 llamaforge_core::queue::error::AdmissionError::RequestorLimit { .. } => {
                     Err(AdmissionError::RateLimited { retry_after_secs: 5 })
                 }
@@ -122,11 +123,11 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                         reason: format!("No server for model: {}", model),
                     })
                 }
-                llamaforge_core::queue::error::AdmissionError::UnauthorizedTaskType { task_type } => {
-                    Err(AdmissionError::InvalidRequest {
-                        reason: format!("Unauthorized task type: {}", task_type),
-                    })
-                }
+                llamaforge_core::queue::error::AdmissionError::UnauthorizedTaskType {
+                    task_type,
+                } => Err(AdmissionError::InvalidRequest {
+                    reason: format!("Unauthorized task type: {}", task_type),
+                }),
                 llamaforge_core::queue::error::AdmissionError::PriorityOutOfRange { priority } => {
                     Err(AdmissionError::InvalidRequest {
                         reason: format!("Priority out of range: {}", priority),

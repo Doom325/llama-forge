@@ -5,11 +5,11 @@ use axum::{
     Json, Router,
 };
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
-use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use llamaforge_core::types::{
     traits::{QueueSubmitter, ServerControl},
     RequestId, ServerId,
 };
+use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use std::sync::Arc;
 
 use crate::error::ApiError;

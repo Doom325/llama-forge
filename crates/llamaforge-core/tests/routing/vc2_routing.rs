@@ -91,7 +91,10 @@ fn test_vc2_3_session_affinity_lifecycle() {
     // 1. Initial request -> no affinity, scores and picks s1 (4 slots vs 1)
     let dec1 = router.select_server(&req).unwrap();
     assert_eq!(*dec1.server_id(), s1_id);
-    assert!(matches!(dec1.reason(), llamaforge_core::routing::types::RoutingReason::HighestScore { .. }));
+    assert!(matches!(
+        dec1.reason(),
+        llamaforge_core::routing::types::RoutingReason::HighestScore { .. }
+    ));
 
     // 2. Next request -> affinity hit for s1
     let dec2 = router.select_server(&req).unwrap();
@@ -107,7 +110,10 @@ fn test_vc2_3_session_affinity_lifecycle() {
     // 4. Request again -> affinity miss, falls back to scoring (s1 still best)
     let dec3 = router.select_server(&req).unwrap();
     assert_eq!(*dec3.server_id(), s1_id);
-    assert!(matches!(dec3.reason(), llamaforge_core::routing::types::RoutingReason::HighestScore { .. }));
+    assert!(matches!(
+        dec3.reason(),
+        llamaforge_core::routing::types::RoutingReason::HighestScore { .. }
+    ));
 }
 
 // VC-2.4

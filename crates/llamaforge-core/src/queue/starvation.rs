@@ -1,7 +1,7 @@
+use crate::config::{ConfigHandle, ConfigReader};
 use crate::queue::admission::AdmissionController;
 use crate::queue::queue::DispatchQueue;
 use crate::queue::types::DispatchResult;
-use crate::config::{ConfigHandle, ConfigReader};
 use crate::types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
 use std::sync::Arc;
 use std::time::Duration;

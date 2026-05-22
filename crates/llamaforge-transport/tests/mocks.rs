@@ -1,7 +1,6 @@
 use futures_core::Stream;
 use std::pin::Pin;
 
-use llamaforge_transport::InferenceEngine;
 use llamaforge_core::types::{
     traits::{
         AdmissionError, IncomingRequest, MetricsExporter, QueueError, QueueSnapshot,
@@ -9,6 +8,7 @@ use llamaforge_core::types::{
     },
     ChatCompletionChunk, RequestId, ServerId, StreamError,
 };
+use llamaforge_transport::InferenceEngine;
 
 pub struct MockEngine {
     pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,

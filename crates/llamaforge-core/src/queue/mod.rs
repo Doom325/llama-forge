@@ -14,6 +14,10 @@ pub mod admission;
 pub mod config;
 pub mod error;
 pub mod pipeline;
+// The inner `queue` module shares its parent name. It holds the
+// dispatch-queue implementation proper; the file name is preserved to
+// keep git blame intact.
+#[allow(clippy::module_inception)]
 pub mod queue;
 pub mod starvation;
 pub mod types;

@@ -4,12 +4,12 @@ use chrono::{TimeZone, Utc};
 use tempfile::TempDir;
 
 use llamaforge_core::config::{RequestorId, TaskTypeId};
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, GroupByField, MetricsConfig,
     MetricsFilter, RequestId, RequestMetrics, RequestMetricsStore, RequestStatus,
     SqliteMetricsStore,
 };
-use llamaforge_core::types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();

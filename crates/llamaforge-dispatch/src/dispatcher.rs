@@ -8,12 +8,12 @@ use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
 use dashmap::DashMap;
 use llamaforge_core::config::ConfigHandle;
-use llamaforge_metrics::MetricsIngest;
 use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::routing::RoutingDecision;
 use llamaforge_core::types::ports::SlotErasure;
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
+use llamaforge_metrics::MetricsIngest;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -341,7 +341,12 @@ mod tests {
 
     struct MockClientManager;
     impl ClientManager for MockClientManager {
-        fn refresh(&self, _server_id: &ServerId, _event: llamaforge_core::types::ClientRefreshEvent) {}
+        fn refresh(
+            &self,
+            _server_id: &ServerId,
+            _event: llamaforge_core::types::ClientRefreshEvent,
+        ) {
+        }
     }
 
     struct MockServerStateView;

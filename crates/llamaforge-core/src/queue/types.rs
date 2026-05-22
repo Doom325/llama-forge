@@ -1,5 +1,5 @@
-use chrono::{DateTime, Utc};
 use crate::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;

@@ -13,11 +13,19 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_core::routing::RequestCapabilities) -> bool {
+    fn serves_model(
+        &self,
+        t: &ModelTarget,
+        c: &llamaforge_core::routing::RequestCapabilities,
+    ) -> bool {
         self.has_idle_slot(t, c)
     }
 
-    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_core::routing::RequestCapabilities) -> bool {
+    fn has_idle_slot(
+        &self,
+        _: &ModelTarget,
+        _: &llamaforge_core::routing::RequestCapabilities,
+    ) -> bool {
         true
     }
 }

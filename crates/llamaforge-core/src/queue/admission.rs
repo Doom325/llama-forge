@@ -1,11 +1,11 @@
+use crate::config::{ConfigHandle, ConfigReader, TaskTypeId};
 use crate::queue::config::RequestorClassPolicy;
 use crate::queue::error::AdmissionError;
 use crate::queue::types::{AdmittedRequest, IncomingRequest, TaskType};
-use dashmap::DashMap;
-use crate::config::{ConfigHandle, ConfigReader, TaskTypeId};
 use crate::routing::CapacityChecker;
 use crate::types::traits::{AdmissionAccounting, DequeueReason};
 use crate::types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
+use dashmap::DashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;

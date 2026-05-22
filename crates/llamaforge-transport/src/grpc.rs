@@ -1,6 +1,7 @@
 use futures_core::future::BoxFuture;
 use futures_util::StreamExt;
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
+use llamaforge_core::types::traits::{QueueSubmitter, RouteValidator, ServerControl};
 use llamaforge_proto::inference::inference_service_server::{
     InferenceService, InferenceServiceServer,
 };
@@ -13,7 +14,6 @@ use llamaforge_proto::management::{
     QueueStatusRequest, QueueStatusResponse, ReloadConfigRequest, ReloadConfigResponse,
     StartServerRequest, StartServerResponse, StopServerRequest, StopServerResponse,
 };
-use llamaforge_core::types::traits::{QueueSubmitter, RouteValidator, ServerControl};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -486,9 +486,9 @@ mod tests {
     }
 
     use futures_util::stream;
+    use llamaforge_core::types::{ChatCompletionChunk, StreamError};
     use llamaforge_proto::inference::inference_service_client::InferenceServiceClient;
     use llamaforge_proto::inference::InferenceRequest;
-    use llamaforge_core::types::{ChatCompletionChunk, StreamError};
 
     struct MockEngine {
         chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
@@ -561,8 +561,10 @@ mod tests {
         fn submit(
             &self,
             _req: llamaforge_core::types::traits::IncomingRequest,
-        ) -> Result<llamaforge_core::types::traits::QueueTicket, llamaforge_core::types::traits::AdmissionError>
-        {
+        ) -> Result<
+            llamaforge_core::types::traits::QueueTicket,
+            llamaforge_core::types::traits::AdmissionError,
+        > {
             Ok(llamaforge_core::types::traits::QueueTicket {
                 request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
@@ -578,8 +580,10 @@ mod tests {
         }
         fn status(
             &self,
-        ) -> Result<llamaforge_core::types::traits::QueueSnapshot, llamaforge_core::types::traits::QueueError>
-        {
+        ) -> Result<
+            llamaforge_core::types::traits::QueueSnapshot,
+            llamaforge_core::types::traits::QueueError,
+        > {
             Ok(llamaforge_core::types::traits::QueueSnapshot {
                 depth: 0,
                 estimated_throughput_req_sec: 1.0,

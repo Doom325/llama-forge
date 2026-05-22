@@ -52,8 +52,7 @@ async fn test_instrumented_handle_tracing_fields() {
     // Initialize global subscriber if not already done.
     // (Owns this integration test binary outright, so it cannot collide
     // with other subscribers.)
-    let _ =
-        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TestLayer));
+    let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TestLayer));
 
     RECORDED.store(false, Ordering::SeqCst);
 

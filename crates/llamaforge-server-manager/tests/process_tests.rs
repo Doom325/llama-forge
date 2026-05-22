@@ -2,9 +2,9 @@
 
 use chrono::Utc;
 use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{create_metrics_pipeline, ManagedProcess, ProcessId, ProcessStore};
 use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
-use llamaforge_core::types::ServerId;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -15,7 +15,10 @@ impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_core::config::GpuId) -> Result<u64, TelemetryError> {
         Ok(10 * 1024 * 1024 * 1024)
     }
-    fn utilization_percent(&self, _id: &llamaforge_core::config::GpuId) -> Result<u8, TelemetryError> {
+    fn utilization_percent(
+        &self,
+        _id: &llamaforge_core::config::GpuId,
+    ) -> Result<u8, TelemetryError> {
         Ok(0)
     }
     fn list_devices(&self) -> Result<Vec<llamaforge_server_manager::GpuDevice>, TelemetryError> {

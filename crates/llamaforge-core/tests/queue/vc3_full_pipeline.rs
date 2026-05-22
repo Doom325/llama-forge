@@ -5,7 +5,9 @@ use llamaforge_core::queue::queue::DispatchQueue;
 use llamaforge_core::queue::starvation::start_background_tasks;
 use llamaforge_core::queue::types::{DispatchResult, IncomingRequest, TaskType};
 use llamaforge_core::routing::{CapacityChecker, RoutingDecision, ServerSelector};
-use llamaforge_core::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
+use llamaforge_core::types::{
+    ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId,
+};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,11 +16,19 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_core::routing::RequestCapabilities) -> bool {
+    fn serves_model(
+        &self,
+        t: &ModelTarget,
+        c: &llamaforge_core::routing::RequestCapabilities,
+    ) -> bool {
         self.has_idle_slot(t, c)
     }
 
-    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_core::routing::RequestCapabilities) -> bool {
+    fn has_idle_slot(
+        &self,
+        _: &ModelTarget,
+        _: &llamaforge_core::routing::RequestCapabilities,
+    ) -> bool {
         true
     }
 }

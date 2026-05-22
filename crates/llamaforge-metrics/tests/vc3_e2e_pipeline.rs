@@ -3,12 +3,12 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use llamaforge_core::config::{RequestorId, TaskTypeId};
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{
     create_metrics_pipeline, telemetry_drops, AuditRecord, EventFilter, EventStore, EventType,
     ManagedProcess, MetricsConfig, ProcessId, ProcessStore, RequestId, RequestMetrics,
     RequestStatus, TelemetryEvent, TelemetryEventKind,
 };
-use llamaforge_core::types::ServerId;
 
 fn dummy_telemetry(i: u32) -> TelemetryEvent {
     TelemetryEvent {
@@ -73,7 +73,8 @@ async fn create_test_pipeline(config: &MetricsConfig) -> llamaforge_metrics::Met
     let paths = llamaforge_core::config::ConfigPaths::new(config_path, priority_rules, state_dir);
     let source = llamaforge_core::config::TomlFileConfigSource::new(paths);
     let handle = llamaforge_core::config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
-    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> = std::sync::Arc::new(handle);
+    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> =
+        std::sync::Arc::new(handle);
     create_metrics_pipeline(config, reader).unwrap()
 }
 
@@ -206,7 +207,8 @@ async fn test_vc3_5_dual_instance_prevention() {
     let paths = llamaforge_core::config::ConfigPaths::new(config_path, priority_rules, state_dir);
     let source = llamaforge_core::config::TomlFileConfigSource::new(paths);
     let handle = llamaforge_core::config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
-    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> = std::sync::Arc::new(handle);
+    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> =
+        std::sync::Arc::new(handle);
 
     let result = llamaforge_metrics::create_metrics_pipeline(&config, reader);
     assert!(matches!(result, Err(llamaforge_metrics::StoreError::Unavailable { .. })));

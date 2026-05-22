@@ -18,15 +18,17 @@ use futures_core::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
-use llamaforge_metrics::MetricsIngest;
 use llamaforge_core::routing::{Router, RoutingDecision};
-use llamaforge_transport::InferenceEngine;
-use llamaforge_core::types::traits::{DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter};
+use llamaforge_core::types::traits::{
+    DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
+};
 use llamaforge_core::types::{
     ChatCompletionChunk, ChatCompletionRequest, GenerationParams, ModelAlias, ModelTarget,
     RequestId, RequestorClass, RequestorId, Role, StreamError,
 };
+use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
+use llamaforge_metrics::MetricsIngest;
+use llamaforge_transport::InferenceEngine;
 
 /// Adapter implementing [`InferenceEngine`] by composing the queue, router,
 /// dispatcher and metrics layers. See module-level docs.
@@ -288,10 +290,6 @@ impl InferenceEngine for InferenceEngineAdapter {
 mod tests {
     use super::*;
     use futures_util::StreamExt;
-    use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-    use llamaforge_dispatch::error::DispatchError as DispatchCrateError;
-    use llamaforge_dispatch::slot_map::SlotDispatchMap;
-    use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
     use llamaforge_core::routing::types::ServerStateView;
     use llamaforge_core::types::ports::{SlotErasure, SlotError};
     use llamaforge_core::types::traits::SlotNotifier;
@@ -299,6 +297,10 @@ mod tests {
         AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
     };
     use llamaforge_core::types::{ClientRefreshEvent, Message, RequestId, ServerId, SlotId};
+    use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+    use llamaforge_dispatch::error::DispatchError as DispatchCrateError;
+    use llamaforge_dispatch::slot_map::SlotDispatchMap;
+    use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Mutex as AsyncMutex};

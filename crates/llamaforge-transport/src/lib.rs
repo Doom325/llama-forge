@@ -23,8 +23,8 @@ pub use middleware::LargeBodyConcurrencyLimit;
 
 use futures_core::Stream;
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
-use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use llamaforge_core::types::{ChatCompletionChunk, ChatCompletionRequest, StreamError};
+use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -243,10 +243,16 @@ mod tests {
         async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
             Ok(vec![])
         }
-        async fn start_server(&self, _id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
+        async fn start_server(
+            &self,
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), ServerError> {
             Ok(())
         }
-        async fn stop_server(&self, _id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
+        async fn stop_server(
+            &self,
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), ServerError> {
             Ok(())
         }
     }

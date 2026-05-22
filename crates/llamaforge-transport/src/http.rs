@@ -6,7 +6,9 @@ use axum::{
 };
 use futures_util::stream::StreamExt;
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
-use llamaforge_core::types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
+use llamaforge_core::types::traits::{
+    MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
+};
 use std::sync::Arc;
 use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
 
@@ -78,9 +80,9 @@ pub(crate) fn build_incoming_request(
         request_id,
         requestor_id: llamaforge_core::types::RequestorId::new("anonymous".into()),
         requestor_class: llamaforge_core::types::RequestorClass::new("default".into()),
-        model_target: llamaforge_core::types::ModelTarget::Exact(llamaforge_core::types::ModelAlias::new(
-            std::sync::Arc::from(req.model.as_str()),
-        )),
+        model_target: llamaforge_core::types::ModelTarget::Exact(
+            llamaforge_core::types::ModelAlias::new(std::sync::Arc::from(req.model.as_str())),
+        ),
         capabilities: Default::default(),
         messages: req.messages.clone(),
         params: Default::default(),
@@ -106,7 +108,9 @@ fn compute_retry_after(qs: &dyn QueueSubmitter) -> u32 {
 
 pub(crate) async fn openai_chat_completion_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<
+        llamaforge_core::types::RequestId,
+    >,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
 where
@@ -311,7 +315,9 @@ where
 
 pub(crate) async fn openai_completion_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<
+        llamaforge_core::types::RequestId,
+    >,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
 where
@@ -359,7 +365,9 @@ where
 
 pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<
+        llamaforge_core::types::RequestId,
+    >,
     headers: axum::http::HeaderMap,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>

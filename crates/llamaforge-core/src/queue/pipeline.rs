@@ -206,21 +206,11 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
     // and then send ShuttingDown.
     struct DrainChecker;
     impl CapacityChecker for DrainChecker {
-        fn serves_model(
-            &self,
-            t: &ModelTarget,
-            c: &crate::routing::RequestCapabilities,
-        ) -> bool {
+        fn serves_model(&self, t: &ModelTarget, c: &crate::routing::RequestCapabilities) -> bool {
             self.has_idle_slot(t, c)
         }
 
-        fn has_idle_slot(
-            &self,
-
-            _: &ModelTarget,
-
-            _: &crate::routing::RequestCapabilities,
-        ) -> bool {
+        fn has_idle_slot(&self, _: &ModelTarget, _: &crate::routing::RequestCapabilities) -> bool {
             true
         }
     }
