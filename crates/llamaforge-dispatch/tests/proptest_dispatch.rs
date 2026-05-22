@@ -55,7 +55,9 @@ impl SlotErasure for MockSlotErasure {
 
 fn create_dispatcher() -> Dispatcher {
     let mut app_config = AppConfig::default();
-    app_config.servers.insert(llamaforge_config::ServerId::from("s1"), ServerConfig::default());
+    app_config
+        .servers
+        .insert(llamaforge_types::ServerId::from_config_id("s1"), ServerConfig::default());
 
     let config =
         Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());

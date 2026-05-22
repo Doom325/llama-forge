@@ -19,7 +19,6 @@ use llamaforge_dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use llamaforge_metrics::{
     AuditRecord as MetricsAuditRecord, RequestId as MetricsRequestId, RequestMetrics, RequestStatus,
 };
-use llamaforge_types::ServerId as TypesServerId;
 
 /// Context the dispatch `AuditRecord` doesn't carry but the metrics
 /// `RequestMetrics` needs. Populated by the caller (typically the
@@ -66,7 +65,7 @@ pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> Metri
     let request_metrics = RequestMetrics {
         request_id: MetricsRequestId::from(request_id.as_uuid().to_string()),
         model_name: ctx.model_name.clone(),
-        server_id: Some(types_to_metrics_server_id(server_id)),
+        server_id: Some(server_id),
         slot_id: None,
         task_type: ctx.task_type.clone(),
         requestor: ctx.requestor.clone(),
@@ -94,13 +93,6 @@ pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> Metri
     MetricsAuditRecord { request_metrics }
 }
 
-/// `dispatch::AuditRecord` carries `llamaforge_types::ServerId` (UUID);
-/// `metrics::RequestMetrics::server_id` is `llamaforge_config::ServerId`
-/// (stringified UUID). Reconcile via the UUID hyphenated form.
-fn types_to_metrics_server_id(id: TypesServerId) -> llamaforge_config::ServerId {
-    llamaforge_config::ServerId(id.as_uuid().to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,7 +111,7 @@ mod tests {
     fn translate_success_record() {
         let record = DispatchAuditRecord {
             request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
-            server_id: TypesServerId::new(uuid::Uuid::now_v7()),
+            server_id: llamaforge_types::ServerId::new(uuid::Uuid::now_v7()),
             duration: Duration::from_millis(120),
             ttft: Some(Duration::from_millis(30)),
             tokens_predicted: 42,
@@ -147,7 +139,7 @@ mod tests {
     fn translate_failed_record_has_no_finish_reason() {
         let record = DispatchAuditRecord {
             request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
-            server_id: TypesServerId::new(uuid::Uuid::now_v7()),
+            server_id: llamaforge_types::ServerId::new(uuid::Uuid::now_v7()),
             duration: Duration::from_millis(10),
             ttft: None,
             tokens_predicted: 0,

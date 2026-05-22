@@ -68,7 +68,7 @@ fn create_dispatcher(
     srv_id: ServerId,
 ) -> Dispatcher {
     let mut app_config = AppConfig::default();
-    let config_srv_id = llamaforge_config::ServerId::from(srv_id.to_string());
+    let config_srv_id = llamaforge_types::ServerId::from_config_id(&srv_id.to_string());
     let srv_cfg = ServerConfig { ctx_size, ..Default::default() };
     app_config.servers.insert(config_srv_id, srv_cfg);
 

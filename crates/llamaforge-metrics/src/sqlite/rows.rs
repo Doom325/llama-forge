@@ -3,7 +3,8 @@
 //! Maps database flat rows to typed domain objects.
 
 use chrono::{DateTime, Utc};
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
+use llamaforge_types::ServerId;
 
 use crate::traits::ConfigOverlay;
 use crate::types::{
@@ -29,7 +30,7 @@ impl TryFrom<AuditEventRow> for AuditEvent {
     fn try_from(row: AuditEventRow) -> Result<Self, Self::Error> {
         let event_type: EventType =
             serde_json::from_value(serde_json::Value::String(row.event_type))?;
-        let server_id = row.server_id.map(ServerId);
+        let server_id = row.server_id.map(|s| ServerId::from_config_id(&s));
         let request_id = row.request_id.map(RequestId);
         let created_at = DateTime::parse_from_rfc3339(&row.created_at)?.with_timezone(&Utc);
         let payload = serde_json::from_str(&row.payload)?;
@@ -55,7 +56,7 @@ impl From<AuditEvent> for AuditEventRow {
                 EventType::Telemetry => "telemetry".to_string(),
             },
             event_kind: event.event_kind,
-            server_id: event.server_id.map(|s| s.0),
+            server_id: event.server_id.map(|s| s.to_string()),
             request_id: event.request_id.map(|r| r.0),
             created_at: event.created_at.to_rfc3339(),
             payload: serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string()),
@@ -115,7 +116,7 @@ impl TryFrom<RequestMetricsRow> for RequestMetrics {
         Ok(Self {
             request_id: RequestId(row.request_id),
             model_name: row.model_name,
-            server_id: row.server_id.map(ServerId),
+            server_id: row.server_id.map(|s| ServerId::from_config_id(&s)),
             slot_id: row.slot_id.map(|v| v as u32),
             task_type: TaskTypeId(row.task_type),
             requestor: RequestorId(row.requestor),
@@ -151,7 +152,7 @@ impl From<RequestMetrics> for RequestMetricsRow {
         Self {
             request_id: m.request_id.0,
             model_name: m.model_name,
-            server_id: m.server_id.map(|s| s.0),
+            server_id: m.server_id.map(|s| s.to_string()),
             slot_id: m.slot_id.map(|v| v as i64),
             task_type: m.task_type.0,
             requestor: m.requestor.0,
@@ -207,7 +208,7 @@ impl TryFrom<ManagedProcessRow> for ManagedProcess {
     fn try_from(row: ManagedProcessRow) -> Result<Self, Self::Error> {
         Ok(Self {
             pid: ProcessId(row.pid as u32),
-            server_id: ServerId(row.server_id),
+            server_id: ServerId::from_config_id(&row.server_id),
             started_at: DateTime::parse_from_rfc3339(&row.started_at)?.with_timezone(&Utc),
             cmdline: row.cmdline,
             port: row.port,
@@ -220,7 +221,7 @@ impl From<ManagedProcess> for ManagedProcessRow {
     fn from(p: ManagedProcess) -> Self {
         Self {
             pid: p.pid.0 as i64,
-            server_id: p.server_id.0,
+            server_id: p.server_id.to_string(),
             started_at: p.started_at.to_rfc3339(),
             cmdline: p.cmdline,
             port: p.port,
@@ -283,7 +284,7 @@ impl TryFrom<ConfigOverlayRow> for ConfigOverlay {
 
     fn try_from(row: ConfigOverlayRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            server_id: ServerId(row.server_id),
+            server_id: ServerId::from_config_id(&row.server_id),
             overlay_key: row.overlay_key,
             value: row.value,
             applied_at: DateTime::parse_from_rfc3339(&row.applied_at)?.with_timezone(&Utc),
@@ -294,7 +295,7 @@ impl TryFrom<ConfigOverlayRow> for ConfigOverlay {
 impl From<ConfigOverlay> for ConfigOverlayRow {
     fn from(c: ConfigOverlay) -> Self {
         Self {
-            server_id: c.server_id.0,
+            server_id: c.server_id.to_string(),
             overlay_key: c.overlay_key,
             value: c.value,
             applied_at: c.applied_at.to_rfc3339(),

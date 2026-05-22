@@ -9,12 +9,13 @@ use tempfile::TempDir;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::time::sleep;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     batch_collector_main, create_read_pool, open_and_migrate, writer_thread_main, AuditRecord,
     EventFilter, EventStore, EventType, MetricsConfig, MetricsFilter, RequestId, RequestMetrics,
     RequestMetricsStore, RequestStatus, SqliteMetricsStore, TelemetryEvent, TelemetryEventKind,
 };
+use llamaforge_types::ServerId;
 
 async fn setup_full_pipeline() -> (
     TempDir,
@@ -68,7 +69,7 @@ async fn test_vc2_1_and_2_write_read_roundtrip() {
         telemetry_tx
             .send(TelemetryEvent {
                 kind: TelemetryEventKind::ServerStarted,
-                server_id: Some(ServerId("s1".to_string())),
+                server_id: Some(ServerId::from_config_id("s1")),
                 timestamp: Utc::now(),
                 payload: serde_json::json!({"i": i}),
             })
@@ -83,7 +84,7 @@ async fn test_vc2_1_and_2_write_read_roundtrip() {
                 request_metrics: RequestMetrics {
                     request_id: RequestId(format!("req-{}", i)),
                     model_name: "test".to_string(),
-                    server_id: Some(ServerId("s1".to_string())),
+                    server_id: Some(ServerId::from_config_id("s1")),
                     slot_id: None,
                     task_type: TaskTypeId("test".to_string()),
                     requestor: RequestorId("u1".to_string()),
@@ -193,7 +194,7 @@ async fn test_vc2_4_filter_accuracy() {
                 request_metrics: RequestMetrics {
                     request_id: RequestId(format!("req-{}", i)),
                     model_name: "test".to_string(),
-                    server_id: Some(ServerId(server_id)),
+                    server_id: Some(ServerId::from_config_id(&server_id)),
                     slot_id: None,
                     task_type: TaskTypeId("test".to_string()),
                     requestor: RequestorId("u1".to_string()),
@@ -224,11 +225,11 @@ async fn test_vc2_4_filter_accuracy() {
     sleep(Duration::from_millis(300)).await;
 
     let filter =
-        EventFilter { server_id: Some(ServerId("server-0".to_string())), ..Default::default() };
+        EventFilter { server_id: Some(ServerId::from_config_id("server-0")), ..Default::default() };
     let events = store.query_events(&filter, None, None).await.unwrap();
     assert_eq!(events.len(), 10);
     for e in events {
-        assert_eq!(e.server_id.unwrap().0, "server-0");
+        assert_eq!(e.server_id.unwrap(), ServerId::from_config_id("server-0"));
     }
 }
 
@@ -244,7 +245,7 @@ async fn test_vc2_5_aggregate_accuracy() {
                 request_metrics: RequestMetrics {
                     request_id: RequestId(format!("req-{}", i)),
                     model_name: "test".to_string(),
-                    server_id: Some(ServerId("s1".to_string())),
+                    server_id: Some(ServerId::from_config_id("s1")),
                     slot_id: None,
                     task_type: TaskTypeId("test".to_string()),
                     requestor: RequestorId("u1".to_string()),

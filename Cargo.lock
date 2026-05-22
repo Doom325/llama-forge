@@ -1327,6 +1327,7 @@ version = "0.1.0-draft"
 dependencies = [
  "arc-swap",
  "async-trait",
+ "llamaforge-types",
  "metrics",
  "nix",
  "parking_lot",
@@ -1416,6 +1417,7 @@ dependencies = [
  "deadpool-sync",
  "llamaforge-config",
  "llamaforge-metrics",
+ "llamaforge-types",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util 0.18.0",

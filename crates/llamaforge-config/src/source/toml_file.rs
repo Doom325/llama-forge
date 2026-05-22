@@ -4,7 +4,7 @@
 
 use crate::error::{ConfigLoadError, WritebackError};
 use crate::source::ConfigSource;
-use crate::types::{AppConfig, ConfigMutation, ConfigPaths, PriorityRulesConfig};
+use crate::types::{AppConfig, ConfigMutation, ConfigPaths, PriorityRulesConfig, ServerId};
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::Write;
@@ -157,10 +157,23 @@ impl TomlFileConfigSource {
                         source: "missing [servers] table".into(),
                     })?;
 
+                // Now that `ServerId` is UUID-backed, the original TOML
+                // slug key is no longer recoverable from the mutation.
+                // Iterate the `[servers]` table and match by re-applying
+                // `ServerId::from_config_id` (the same coercion the
+                // deserializer uses). Linear in fleet size; the fleet is
+                // small so this is fine.
+                let slug_key: String = servers
+                    .iter()
+                    .find_map(|(slug, _)| {
+                        (ServerId::from_config_id(slug) == *server_id).then(|| slug.to_string())
+                    })
+                    .ok_or(WritebackError::ServerNotFound)?;
+
                 let server = servers
-                    .get_mut(&server_id.0)
+                    .get_mut(&slug_key)
                     .and_then(|v| v.as_table_like_mut())
-                    .ok_or_else(|| WritebackError::ServerNotFound)?;
+                    .ok_or(WritebackError::ServerNotFound)?;
 
                 let mut lora_array = toml_edit::Array::new();
                 for adapter in adapters {
@@ -360,7 +373,7 @@ check_interval_secs = 60
         assert_eq!(
             config
                 .servers
-                .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+                .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
                 .unwrap()
                 .port,
             8080
@@ -520,7 +533,7 @@ ctx_size = 2048
         let config = source.load().unwrap();
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+            server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
             adapters: vec![LoraAdapterConfig { path: PathBuf::from("lora.gguf"), scale: 1.0 }],
         };
 
@@ -535,7 +548,7 @@ ctx_size = 2048
         let updated_config = source.load().unwrap();
         let s1 = updated_config
             .servers
-            .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+            .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
             .unwrap();
         assert_eq!(s1.lora_adapters.len(), 1);
         assert_eq!(s1.lora_adapters[0].path, PathBuf::from("lora.gguf"));

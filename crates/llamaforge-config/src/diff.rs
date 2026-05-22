@@ -172,17 +172,17 @@ pub fn compute_diff(old: &AppConfig, new: &AppConfig) -> ConfigDiff {
         if let Some(old_server) = old.servers.get(id) {
             if old_server != new_server {
                 let diff = compute_server_diff(old_server, new_server);
-                changes.push(ConfigChange::ServerChanged { id: id.clone(), diff });
+                changes.push(ConfigChange::ServerChanged { id: *id, diff });
             }
         } else {
-            changes.push(ConfigChange::ServerAdded { id: id.clone() });
+            changes.push(ConfigChange::ServerAdded { id: *id });
         }
     }
 
     // Servers removed
     for id in old.servers.keys() {
         if !new.servers.contains_key(id) {
-            changes.push(ConfigChange::ServerRemoved { id: id.clone() });
+            changes.push(ConfigChange::ServerRemoved { id: *id });
         }
     }
 
@@ -262,14 +262,14 @@ mod tests {
         let old = AppConfig::default();
         let mut new = AppConfig::default();
         new.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig { model_path: PathBuf::from("m1.gguf"), port: 8080, ..Default::default() },
         );
 
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);
         match &diff.changes[0] {
-            ConfigChange::ServerAdded { id } => assert_eq!(id.0, "s1"),
+            ConfigChange::ServerAdded { id } => assert_eq!(*id, ServerId::from_config_id("s1")),
             _ => panic!("expected ServerAdded"),
         }
     }
@@ -278,7 +278,7 @@ mod tests {
     fn test_compute_diff_server_removed() {
         let mut old = AppConfig::default();
         old.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig { model_path: PathBuf::from("m1.gguf"), port: 8080, ..Default::default() },
         );
         let new = AppConfig::default();
@@ -286,7 +286,7 @@ mod tests {
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);
         match &diff.changes[0] {
-            ConfigChange::ServerRemoved { id } => assert_eq!(id.0, "s1"),
+            ConfigChange::ServerRemoved { id } => assert_eq!(*id, ServerId::from_config_id("s1")),
             _ => panic!("expected ServerRemoved"),
         }
     }
@@ -295,17 +295,17 @@ mod tests {
     fn test_compute_diff_server_changed_restart() {
         let mut old = AppConfig::default();
         old.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig { model_path: PathBuf::from("m1.gguf"), port: 8080, ..Default::default() },
         );
         let mut new = old.clone();
-        new.servers.get_mut(&ServerId::from("s1")).unwrap().port = 8081;
+        new.servers.get_mut(&ServerId::from_config_id("s1")).unwrap().port = 8081;
 
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);
         match &diff.changes[0] {
             ConfigChange::ServerChanged { id, diff } => {
-                assert_eq!(id.0, "s1");
+                assert_eq!(*id, ServerId::from_config_id("s1"));
                 assert!(diff.requires_restart());
                 assert!(diff.fields_changed.contains(&ServerConfigField::Port));
             }
@@ -317,7 +317,7 @@ mod tests {
     fn test_compute_diff_server_changed_hot_reload() {
         let mut old = AppConfig::default();
         old.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig {
                 model_path: PathBuf::from("m1.gguf"),
                 lora_adapters: vec![LoraAdapterConfig {
@@ -328,14 +328,14 @@ mod tests {
             },
         );
         let mut new = old.clone();
-        new.servers.get_mut(&ServerId::from("s1")).unwrap().lora_adapters =
+        new.servers.get_mut(&ServerId::from_config_id("s1")).unwrap().lora_adapters =
             vec![LoraAdapterConfig { path: PathBuf::from("l1.gguf"), scale: 0.8 }];
 
         let diff = compute_diff(&old, &new);
         assert_eq!(diff.changes.len(), 1);
         match &diff.changes[0] {
             ConfigChange::ServerChanged { id, diff } => {
-                assert_eq!(id.0, "s1");
+                assert_eq!(*id, ServerId::from_config_id("s1"));
                 assert!(!diff.requires_restart());
                 assert!(diff.hot_reloadable());
                 assert!(diff.fields_changed.contains(&ServerConfigField::LoraAdapters));
@@ -398,15 +398,15 @@ mod tests {
     fn test_compute_diff_multi_change() {
         let mut old = AppConfig::default();
         old.servers.insert(
-            ServerId::from("s1"),
+            ServerId::from_config_id("s1"),
             ServerConfig { model_path: PathBuf::from("m1.gguf"), port: 8080, ..Default::default() },
         );
 
         let mut new = old.clone();
         new.global.http_port = 9000;
-        new.servers.remove(&ServerId::from("s1"));
+        new.servers.remove(&ServerId::from_config_id("s1"));
         new.servers.insert(
-            ServerId::from("s2"),
+            ServerId::from_config_id("s2"),
             ServerConfig { model_path: PathBuf::from("m2.gguf"), port: 8081, ..Default::default() },
         );
 
@@ -416,11 +416,11 @@ mod tests {
         let has_s1_removed = diff
             .changes
             .iter()
-            .any(|c| matches!(c, ConfigChange::ServerRemoved { id } if id.0 == "s1"));
+            .any(|c| matches!(c, ConfigChange::ServerRemoved { id } if *id == ServerId::from_config_id("s1")));
         let has_s2_added = diff
             .changes
             .iter()
-            .any(|c| matches!(c, ConfigChange::ServerAdded { id } if id.0 == "s2"));
+            .any(|c| matches!(c, ConfigChange::ServerAdded { id } if *id == ServerId::from_config_id("s2")));
 
         assert!(has_global);
         assert!(has_s1_removed);

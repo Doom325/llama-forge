@@ -7,12 +7,13 @@ use tempfile::TempDir;
 use tokio::sync::oneshot;
 use tracing::Span;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     open_and_migrate, writer_thread_main, AuditEvent, CheckpointMode, ConfigSnapshot,
     ConfigSnapshotTrigger, EventType, ManagedProcess, ProcessId, RequestId, RequestMetrics,
     RequestStatus, StoreError, WriterCommand, WriterTestHandle,
 };
+use llamaforge_types::ServerId;
 
 fn spawn_writer(failure_threshold: u32) -> (TempDir, WriterTestHandle) {
     let temp_dir = TempDir::new().unwrap();
@@ -106,7 +107,7 @@ async fn test_writer_command_dispatch() {
     let (reply_tx, reply_rx) = oneshot::channel();
     let proc = ManagedProcess {
         pid: ProcessId(123),
-        server_id: ServerId("s1".to_string()),
+        server_id: ServerId::from_config_id("s1"),
         started_at: Utc::now(),
         cmdline: "cmd".to_string(),
         port: 8080,

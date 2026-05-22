@@ -5,17 +5,18 @@ use std::time::Duration;
 use chrono::Utc;
 use tempfile::TempDir;
 
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     audit_drops, create_metrics_pipeline, telemetry_drops, AuditRecord, AuditSendError,
     EventFilter, EventStore, EventType, MetricsConfig, RequestId, RequestMetrics, RequestStatus,
     TelemetryEvent, TelemetryEventKind,
 };
+use llamaforge_types::ServerId;
 
 fn dummy_telemetry() -> TelemetryEvent {
     TelemetryEvent {
         kind: TelemetryEventKind::ServerStarted,
-        server_id: Some(ServerId("s1".to_string())),
+        server_id: Some(ServerId::from_config_id("s1")),
         timestamp: Utc::now(),
         payload: serde_json::json!({}),
     }

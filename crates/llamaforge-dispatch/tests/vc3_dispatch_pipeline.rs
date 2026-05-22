@@ -105,7 +105,7 @@ struct TestContext {
 fn setup_context() -> TestContext {
     let server_id = ServerId::new(Uuid::now_v7());
     let mut app_config = AppConfig::default();
-    let config_srv_id = llamaforge_config::ServerId::from(server_id.to_string());
+    let config_srv_id = llamaforge_types::ServerId::from_config_id(&server_id.to_string());
     app_config.servers.insert(config_srv_id, ServerConfig::default());
 
     let config =

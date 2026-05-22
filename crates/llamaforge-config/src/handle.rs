@@ -63,11 +63,10 @@ pub struct ConfigHandle {
 impl ConfigHandle {
     /// Load the initial configuration and construct the handle.
     pub fn load(source: Arc<dyn ConfigSource>) -> Result<Self, ConfigLoadError> {
+        // Slug validation runs in the `servers` deserializer (see
+        // `types::deserialize_servers_map`); by the time `source.load()`
+        // returns, every key has already been gated.
         let config = source.load()?;
-
-        for server_id in config.servers.keys() {
-            validate_server_id_slug(&server_id.0)?;
-        }
 
         let (change_tx, _) = broadcast::channel(16);
 
@@ -212,18 +211,20 @@ mod tests {
     use crate::source::memory::InMemoryConfigSource;
     use crate::types::{ServerConfig, ServerId};
 
+    /// Round-trip a candidate slug through TOML deserialization so the
+    /// `validate_server_id_slug` rule in `deserialize_servers_map` is
+    /// exercised. Returns the inner `ConfigLoadError::ValidationError`
+    /// (re-wrapped through `toml::de::Error`) on rejection.
     fn make_handle_with_server_id(id: &str) -> Result<ConfigHandle, ConfigLoadError> {
-        let mut config = AppConfig::default();
-        config.servers.insert(
-            ServerId::from(id),
-            ServerConfig {
-                binary_path: std::path::PathBuf::from("/usr/local/bin/llama-server"),
-                model_path: std::path::PathBuf::from("/tmp/model.gguf"),
-                ctx_size: 1024,
-                parallel_slots: 1,
-                ..Default::default()
-            },
+        // Build TOML by hand so the [servers.<slug>] table carries the
+        // raw, un-escaped key. `toml::Value::to_string` quotes the key
+        // and would mask shape issues we want the validator to catch.
+        let toml_str = format!(
+            "[servers.\"{}\"]\nbinary_path = \"/usr/local/bin/llama-server\"\nmodel_path = \"/tmp/model.gguf\"\nport = 8080\nctx_size = 1024\nparallel_slots = 1\n",
+            id.replace('\\', "\\\\").replace('"', "\\\"")
         );
+        let config: AppConfig = toml::from_str(&toml_str)
+            .map_err(|e| ConfigLoadError::ValidationError { message: e.to_string() })?;
         ConfigHandle::load(Arc::new(InMemoryConfigSource::new(config)))
     }
 
@@ -288,7 +289,7 @@ mod tests {
         // Mutate the underlying source out-of-band (simulating file edit)
         let mut new_config = config.clone();
         new_config.servers.insert(
-            ServerId::from("new_server"),
+            ServerId::from_config_id("new_server"),
             ServerConfig { port: 8080, ..Default::default() },
         );
         // Replace inner directly for the test
@@ -297,7 +298,7 @@ mod tests {
         let diff = handle.reload().await.unwrap();
         assert_eq!(diff.changes.len(), 1);
         assert!(
-            matches!(&diff.changes[0], ConfigChange::ServerAdded { id } if id.0 == "new_server")
+            matches!(&diff.changes[0], ConfigChange::ServerAdded { id } if *id == ServerId::from_config_id("new_server"))
         );
 
         // Verify snapshot updated
@@ -408,7 +409,7 @@ mod tests {
     async fn test_config_handle_writeback_happy_path() {
         let mut config = AppConfig::default();
         config.servers.insert(
-            ServerId::from("00000000-0000-0000-0000-000000000001"),
+            ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
             ServerConfig::default(),
         );
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
@@ -416,7 +417,7 @@ mod tests {
         let mut rx = handle.subscribe();
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+            server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
             adapters: vec![crate::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,
@@ -428,7 +429,7 @@ mod tests {
 
         match &diff.changes[0] {
             ConfigChange::ServerChanged { id, diff } => {
-                assert_eq!(id.0, "00000000-0000-0000-0000-000000000001");
+                assert_eq!(*id, ServerId::from_config_id("00000000-0000-0000-0000-000000000001"));
                 assert!(diff.hot_reloadable());
             }
             _ => panic!("Expected ServerChanged"),
@@ -437,7 +438,7 @@ mod tests {
         let snap = handle.snapshot();
         assert_eq!(
             snap.servers
-                .get(&ServerId::from("00000000-0000-0000-0000-000000000001"))
+                .get(&ServerId::from_config_id("00000000-0000-0000-0000-000000000001"))
                 .unwrap()
                 .lora_adapters
                 .len(),
@@ -456,7 +457,7 @@ mod tests {
         let mut rx = handle.subscribe();
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("invalid"),
+            server_id: ServerId::from_config_id("invalid"),
             adapters: vec![],
         };
 
@@ -504,7 +505,7 @@ mod tests {
         let h2 = handle.clone();
         let task2 = tokio::spawn(async move {
             let mutation = ConfigMutation::SetLoraAdapters {
-                server_id: ServerId::from("invalid"), // will fail fast if not serialized
+                server_id: ServerId::from_config_id("invalid"), // will fail fast if not serialized
                 adapters: vec![],
             };
             let start = std::time::Instant::now();

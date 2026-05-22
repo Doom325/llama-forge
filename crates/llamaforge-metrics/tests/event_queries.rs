@@ -3,11 +3,11 @@ use std::sync::mpsc;
 use chrono::{TimeZone, Utc};
 use tempfile::TempDir;
 
-use llamaforge_config::ServerId;
 use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, AuditEvent, EventFilter, EventStore,
     EventType, MetricsConfig, RequestId, SqliteMetricsStore,
 };
+use llamaforge_types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();
@@ -39,8 +39,11 @@ async fn test_event_queries() {
 
     for i in 0..10 {
         let event_type = if i % 2 == 0 { EventType::Audit } else { EventType::Telemetry };
-        let server_id =
-            if i < 5 { Some(ServerId("s1".to_string())) } else { Some(ServerId("s2".to_string())) };
+        let server_id = if i < 5 {
+            Some(ServerId::from_config_id("s1"))
+        } else {
+            Some(ServerId::from_config_id("s2"))
+        };
 
         events.push(AuditEvent {
             event_id: format!("evt-{}", i),
@@ -63,14 +66,14 @@ async fn test_event_queries() {
     // Query by server_id
     let res = store
         .query_events(
-            &EventFilter { server_id: Some(ServerId("s1".to_string())), ..Default::default() },
+            &EventFilter { server_id: Some(ServerId::from_config_id("s1")), ..Default::default() },
             None,
             None,
         )
         .await
         .unwrap();
     assert_eq!(res.len(), 5);
-    assert!(res.iter().all(|e| e.server_id.as_ref().unwrap().0 == "s1"));
+    assert!(res.iter().all(|e| e.server_id.as_ref() == Some(&ServerId::from_config_id("s1"))));
 
     // Query by event_type
     let res = store

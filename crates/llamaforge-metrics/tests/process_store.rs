@@ -3,11 +3,11 @@ use std::sync::mpsc;
 use chrono::Utc;
 use tempfile::TempDir;
 
-use llamaforge_config::ServerId;
 use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, ManagedProcess, MetricsConfig,
     ProcessId, ProcessStore, SqliteMetricsStore,
 };
+use llamaforge_types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();
@@ -38,7 +38,7 @@ async fn test_process_store() {
         store
             .upsert_managed_process(&ManagedProcess {
                 pid: ProcessId(i),
-                server_id: ServerId(format!("s{}", i)),
+                server_id: ServerId::from_config_id(&format!("s{}", i)),
                 started_at: Utc::now(),
                 cmdline: "cmd".to_string(),
                 port: 8080,
@@ -65,7 +65,7 @@ async fn test_process_store() {
     store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(1),
-            server_id: ServerId("s1-updated".to_string()),
+            server_id: ServerId::from_config_id("s1-updated"),
             started_at: Utc::now(),
             cmdline: "cmd2".to_string(),
             port: 8080,
@@ -77,5 +77,5 @@ async fn test_process_store() {
     let procs = store.list_managed_processes().await.unwrap();
     assert_eq!(procs.len(), 2); // still 2
     let p1 = procs.iter().find(|p| p.pid.0 == 1).unwrap();
-    assert_eq!(p1.server_id.0, "s1-updated");
+    assert_eq!(p1.server_id, ServerId::from_config_id("s1-updated"));
 }

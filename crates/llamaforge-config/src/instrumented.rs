@@ -127,7 +127,7 @@ impl ConfigWriter for InstrumentedConfigHandle {
 
         let span = tracing::Span::current();
         let server_id_string = match &mutation {
-            ConfigMutation::SetLoraAdapters { server_id, .. } => server_id.0.clone(),
+            ConfigMutation::SetLoraAdapters { server_id, .. } => server_id.to_string(),
         };
         span.record("config.mutation_type", "SetLoraAdapters");
         span.record("config.server_id", server_id_string.as_str());
@@ -200,7 +200,7 @@ mod tests {
         assert!(diff.changes.is_empty());
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("missing"),
+            server_id: ServerId::from_config_id("missing"),
             adapters: vec![],
         };
         let err = instrumented.writeback(mutation).await.unwrap_err();
@@ -251,7 +251,7 @@ mod tests {
 
         let mut config = AppConfig::default();
         config.servers.insert(
-            ServerId::from("00000000-0000-0000-0000-000000000001"),
+            ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
             crate::types::ServerConfig::default(),
         );
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
@@ -259,7 +259,7 @@ mod tests {
         let instrumented = InstrumentedConfigHandle::new(handle);
 
         let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from("00000000-0000-0000-0000-000000000001"),
+            server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
             adapters: vec![crate::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,

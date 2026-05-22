@@ -1,12 +1,13 @@
 //! Tests for converting domain objects to/from SQLite rows.
 
 use chrono::Utc;
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     AuditEvent, AuditEventRow, ConfigOverlay, ConfigOverlayRow, ConfigSnapshot, ConfigSnapshotRow,
     ConfigSnapshotTrigger, EventType, ManagedProcess, ManagedProcessRow, ProcessId, RequestId,
     RequestMetrics, RequestMetricsRow, RequestStatus,
 };
+use llamaforge_types::ServerId;
 
 #[test]
 fn test_audit_event_roundtrip() {
@@ -14,7 +15,7 @@ fn test_audit_event_roundtrip() {
         event_id: "evt-123".to_string(),
         event_type: EventType::Audit,
         event_kind: "request_completed".to_string(),
-        server_id: Some(ServerId("s1".to_string())),
+        server_id: Some(ServerId::from_config_id("s1")),
         request_id: Some(RequestId("req-1".to_string())),
         created_at: Utc::now(),
         payload: serde_json::json!({"tokens": 100}),
@@ -34,7 +35,7 @@ fn test_request_metrics_roundtrip() {
     let metrics = RequestMetrics {
         request_id: RequestId("req-42".to_string()),
         model_name: "llama-3-8b".to_string(),
-        server_id: Some(ServerId("gpu-1".to_string())),
+        server_id: Some(ServerId::from_config_id("gpu-1")),
         slot_id: Some(4),
         task_type: TaskTypeId("chat".to_string()),
         requestor: RequestorId("user-A".to_string()),
@@ -76,7 +77,7 @@ fn test_request_metrics_roundtrip() {
 fn test_managed_process_roundtrip() {
     let proc = ManagedProcess {
         pid: ProcessId(1234),
-        server_id: ServerId("srv1".into()),
+        server_id: ServerId::from_config_id("srv1"),
         started_at: Utc::now(),
         cmdline: "cmd".to_string(),
         port: 8080,
@@ -110,7 +111,7 @@ fn test_config_snapshot_roundtrip() {
 #[test]
 fn test_config_overlay_roundtrip() {
     let overlay = ConfigOverlay {
-        server_id: ServerId("s3".to_string()),
+        server_id: ServerId::from_config_id("s3"),
         overlay_key: "api_key".to_string(),
         value: "secret".to_string(),
         applied_at: Utc::now(),

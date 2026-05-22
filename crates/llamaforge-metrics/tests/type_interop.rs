@@ -1,18 +1,19 @@
-use llamaforge_config::{RequestorId, ServerId, TaskTypeId};
+use llamaforge_config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     AuditRecord, ManagedProcess, ProcessId, RequestId, RequestMetrics, RequestStatus,
 };
+use llamaforge_types::ServerId;
 
 #[test]
 fn test_type_interop() {
-    let server_id = ServerId::from("server-1");
+    let server_id = ServerId::from_config_id("server-1");
     let task_type = TaskTypeId::from("task-chat");
     let requestor = RequestorId::from("user-42");
 
     let req_metrics = RequestMetrics {
         request_id: RequestId::from("req-999"),
         model_name: "llama-3".to_string(),
-        server_id: Some(server_id.clone()),
+        server_id: Some(server_id),
         slot_id: Some(1),
         task_type,
         requestor,
@@ -37,11 +38,11 @@ fn test_type_interop() {
     };
 
     let audit_record = AuditRecord { request_metrics: req_metrics.clone() };
-    assert_eq!(audit_record.request_metrics.server_id, Some(server_id.clone()));
+    assert_eq!(audit_record.request_metrics.server_id, Some(server_id));
 
     let process = ManagedProcess {
         pid: ProcessId(100),
-        server_id: server_id.clone(),
+        server_id,
         started_at: chrono::Utc::now(),
         cmdline: "cmd".to_string(),
         port: 8080,

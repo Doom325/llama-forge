@@ -7,7 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use llamaforge_config::{ConfigDiff, ConfigHandle, ConfigReader, GpuId, ServerConfig, ServerId};
+use llamaforge_config::{ConfigDiff, ConfigHandle, ConfigReader, GpuId, ServerConfig};
+use llamaforge_types::ServerId;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -725,7 +726,7 @@ mod tests {
 
         let expected_bytes = compute_vram_estimate(&server_config, &meta);
 
-        let srv_id = ServerId("srv_vram".into());
+        let srv_id = ServerId::from_config_id("srv_vram");
         manager.servers.insert(
             srv_id.clone(),
             ServerState {
@@ -780,7 +781,7 @@ mod tests {
         let token = CancellationToken::new();
 
         let manager = ServerManager::new(telemetry, config, ingest, metrics, token);
-        let srv_id = ServerId("srv1".into());
+        let srv_id = ServerId::from_config_id("srv1");
 
         manager.servers.insert(
             srv_id.clone(),

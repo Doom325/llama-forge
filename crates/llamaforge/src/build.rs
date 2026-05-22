@@ -15,8 +15,10 @@
 //!   reconciliation path consume.
 //! * `routing::ServerStateView` is satisfied by `ServerStateAdapter`,
 //!   which projects `server-manager::ServerStateSnapshot` into the
-//!   routing-layer `ServerSnapshot` via
-//!   [`config_server_id_to_types_id`].
+//!   routing-layer `ServerSnapshot`. After the ServerId unification
+//!   (PR1), `config::ServerId` and `types::ServerId` are the same
+//!   `Uuid`-backed newtype, so the projection no longer requires a
+//!   bridge function.
 
 use std::sync::Arc;
 
@@ -132,9 +134,8 @@ pub async fn build(
     {
         let snap = config.snapshot();
         for (cfg_id, server_cfg) in snap.servers.iter() {
-            let types_id = config_server_id_to_types_id(cfg_id);
             backend_client
-                .add_server(types_id, server_cfg)
+                .add_server(*cfg_id, server_cfg)
                 .map_err(|e| anyhow::anyhow!("register backend client for {}: {}", cfg_id, e))?;
         }
     }
@@ -186,18 +187,9 @@ pub async fn build(
 }
 
 /// Bridges `server-manager::ServerStateSnapshot` to the routing layer's
-/// `ServerSnapshot`. The two `ServerId` types are reconciled via
-/// [`config_server_id_to_types_id`]: load-time validation in
-/// `ConfigHandle::load` (`handle.rs:27-35`) guarantees every
-/// `config::ServerId` is UUID-shaped, so the parse is infallible by
-/// construction — the lone `.expect` cites that invariant.
-///
-/// `all_servers()` is called per routing decision (hot path). The
-/// projection is `O(n)` over the fleet plus one `Uuid::parse_str` per
-/// server. With v1's expected fleet size (low single digits) the cost
-/// is unmeasurable; a caching layer ("parse once on snapshot diff,
-/// store the `types::ServerId` alongside") is the obvious next step
-/// once PR9b's load tests show numbers.
+/// `ServerSnapshot`. After the ServerId unification (PR1) the two
+/// `ServerId` types are the same `Uuid`-backed newtype, so the
+/// projection is now a straight field-by-field copy with no parse.
 struct ServerStateAdapter {
     manager: Arc<ServerManager>,
 }
@@ -214,8 +206,7 @@ impl ServerStateView for ServerStateAdapter {
         self.manager
             .all_servers()
             .into_iter()
-            .map(|(config_id, snap)| {
-                let id = config_server_id_to_types_id(&config_id);
+            .map(|(id, snap)| {
                 let models: std::collections::HashSet<ModelAlias> =
                     std::iter::once(snap.model_alias.clone())
                         .chain(snap.capabilities.models.iter().cloned())
@@ -247,12 +238,4 @@ impl ServerStateView for ServerStateAdapter {
             })
             .collect()
     }
-}
-
-/// Convert a load-validated `config::ServerId` (slug or UUID) to the
-/// routing-layer `types::ServerId`. UUID-shaped slugs are preserved
-/// verbatim; arbitrary slugs are hashed to a stable UUIDv5 — see
-/// `llamaforge_types::ServerId::from_config_id`.
-fn config_server_id_to_types_id(s: &llamaforge_config::ServerId) -> llamaforge_types::ServerId {
-    llamaforge_types::ServerId::from_config_id(s.0.as_str())
 }

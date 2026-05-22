@@ -1,10 +1,11 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, ServerId, TomlFileConfigSource};
+use llamaforge_config::{ConfigHandle, ConfigPaths, ConfigWriter, TomlFileConfigSource};
 use llamaforge_metrics::create_metrics_pipeline;
 use llamaforge_server_manager::{
     InstrumentedServerManager, ServerLifecycle, ServerManager, TelemetryError,
 };
+use llamaforge_types::ServerId;
 use metrics_util::debugging::{DebuggingRecorder, Snapshot};
 use std::sync::Arc;
 use std::time::Duration;

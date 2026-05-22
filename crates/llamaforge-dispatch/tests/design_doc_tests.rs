@@ -90,7 +90,7 @@ fn create_dispatcher(
     cm: Arc<MockClientManager>,
 ) -> Dispatcher {
     let mut app_config = AppConfig::default();
-    let config_srv_id = llamaforge_config::ServerId::from(srv_id.to_string());
+    let config_srv_id = llamaforge_types::ServerId::from_config_id(&srv_id.to_string());
     app_config.servers.insert(config_srv_id, ServerConfig::default());
 
     let config =

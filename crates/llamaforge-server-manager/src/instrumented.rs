@@ -9,7 +9,8 @@ use crate::error::ServerManagerError;
 use crate::manager::ServerManager;
 use crate::state::ServerStateSnapshot;
 use crate::types::{ClientRefreshEvent, SlotState};
-use llamaforge_config::{GpuId, ServerConfig, ServerId};
+use llamaforge_config::{GpuId, ServerConfig};
+use llamaforge_types::ServerId;
 
 /// Observability decorator around `ServerManager`.
 /// Enforces R26: Domain logic is free of telemetry.

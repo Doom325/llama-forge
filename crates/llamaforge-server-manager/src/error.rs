@@ -1,7 +1,8 @@
 //! Error types for Server Manager
 //! See design doc Section 2.4.
 
-use llamaforge_config::{GpuId, ServerId};
+use llamaforge_config::GpuId;
+use llamaforge_types::ServerId;
 
 /// Errors that can occur within the Server Manager component.
 /// See design doc Section 2.4.
@@ -33,8 +34,9 @@ mod tests {
 
     #[test]
     fn test_error_formatting() {
-        let err = ServerManagerError::ServerNotFound { id: ServerId("srv1".into()) };
-        assert_eq!(err.to_string(), "Server not found: srv1");
+        let id = ServerId::from_config_id("srv1");
+        let err = ServerManagerError::ServerNotFound { id };
+        assert_eq!(err.to_string(), format!("Server not found: {}", id));
 
         let err = ServerManagerError::ConfigInvalid { message: "bad path".into() };
         assert_eq!(err.to_string(), "Invalid configuration: bad path");
