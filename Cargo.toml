@@ -2,12 +2,13 @@
 resolver = "2"
 members = [
     "crates/llamaforge",
-    "crates/llamaforge-config",
+    "crates/llamaforge-core",
     "crates/llamaforge-proto",
     "crates/llamaforge-metrics",
     "crates/llamaforge-server-manager",
-    "crates/llamaforge-types",
-    "crates/llamaforge-queue", "crates/llamaforge-routing", "crates/llamaforge-dispatch", "crates/llamaforge-transport", "crates/llamaforge-adapters",
+    "crates/llamaforge-dispatch",
+    "crates/llamaforge-transport",
+    "crates/llamaforge-adapters",
     "crates/mock-llama",
     "crates/llamaforge-e2e",
 ]
@@ -25,11 +26,8 @@ serial_test = "3"
 clap = { version = "4.5.61", features = ["derive", "env"] }
 # Wired in as components land. Versions are pinned conservatively;
 # bump deliberately, not opportunistically.
-llamaforge-config = { path = "crates/llamaforge-config", version = "0.1.0-draft" }
+llamaforge-core = { path = "crates/llamaforge-core", version = "0.1.0-draft" }
 llamaforge-metrics = { path = "crates/llamaforge-metrics", version = "0.1.0-draft" }
-llamaforge-types = { path = "crates/llamaforge-types", version = "0.1.0-draft" }
-llamaforge-queue = { path = "crates/llamaforge-queue", version = "0.1.0-draft" }
-llamaforge-routing = { path = "crates/llamaforge-routing", version = "0.1.0-draft" }
 llamaforge-proto = { path = "crates/llamaforge-proto", version = "0.1.0-draft" }
 mock-llama = { path = "crates/mock-llama", version = "0.1.0-draft" }
 llamaforge-server-manager = { path = "crates/llamaforge-server-manager", version = "0.1.0-draft" }
