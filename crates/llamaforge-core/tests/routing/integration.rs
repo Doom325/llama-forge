@@ -87,7 +87,7 @@ fn test_slot_target_auto() {
 #[tokio::test]
 async fn test_config_hot_reload_weights() {
     std::env::set_var("RUST_LOG", "llamaforge_routing=warn");
-    use llamaforge_config::ConfigWriter;
+    use llamaforge_core::config::ConfigWriter;
     let mut s1 = default_server("model1");
     s1.kv_usage = 0.9;
     s1.idle_slots = 1; // score depends on kv usage vs idle slots
@@ -214,7 +214,7 @@ fn test_mutex_poison_recovery() {
     let req = MockRequest {
         model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
         caps: Default::default(),
-        session: Some(llamaforge_types::SessionId::new("sess1").unwrap()),
+        session: Some(llamaforge_core::types::SessionId::new("sess1").unwrap()),
     };
 
     let dec = router.select_server(&req);
@@ -236,7 +236,7 @@ fn test_affinity_and_fallback() {
     let req = MockRequest {
         model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
         caps: Default::default(),
-        session: Some(llamaforge_types::SessionId::new("sess1").unwrap()),
+        session: Some(llamaforge_core::types::SessionId::new("sess1").unwrap()),
     };
 
     // First request should pick the best score. s1 has 4 idle slots, s2 has 0.
@@ -274,7 +274,7 @@ fn test_affinity_and_fallback() {
     let req2 = MockRequest {
         model: ModelTarget::Exact(ModelAlias::new(Arc::from("model1"))),
         caps: Default::default(),
-        session: Some(llamaforge_types::SessionId::new("sess2").unwrap()),
+        session: Some(llamaforge_core::types::SessionId::new("sess2").unwrap()),
     };
 
     // Dispatches to s2_free because s1_full has 0 effective slots.

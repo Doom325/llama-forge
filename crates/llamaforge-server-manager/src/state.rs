@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use llamaforge_config::GpuId;
-use llamaforge_types::ServerId;
+use llamaforge_core::config::GpuId;
+use llamaforge_core::types::ServerId;
 
 use crate::types::{ServerCapabilities, ServerLifecycle, SlotState};
 

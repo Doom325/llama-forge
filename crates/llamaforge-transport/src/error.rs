@@ -53,22 +53,22 @@ pub enum ApiError {
 /// default instead of `0`.
 const QUEUE_FULL_FALLBACK_RETRY_SECS: u32 = 30;
 
-impl From<llamaforge_types::traits::AdmissionError> for ApiError {
-    fn from(err: llamaforge_types::traits::AdmissionError) -> Self {
+impl From<llamaforge_core::types::traits::AdmissionError> for ApiError {
+    fn from(err: llamaforge_core::types::traits::AdmissionError) -> Self {
         match err {
-            llamaforge_types::traits::AdmissionError::QueueFull => {
+            llamaforge_core::types::traits::AdmissionError::QueueFull => {
                 ApiError::QueueFull { retry_after_secs: QUEUE_FULL_FALLBACK_RETRY_SECS }
             }
-            llamaforge_types::traits::AdmissionError::RateLimited { retry_after_secs } => {
+            llamaforge_core::types::traits::AdmissionError::RateLimited { retry_after_secs } => {
                 ApiError::QueueFull { retry_after_secs }
             }
-            llamaforge_types::traits::AdmissionError::InvalidRequest { reason } => {
+            llamaforge_core::types::traits::AdmissionError::InvalidRequest { reason } => {
                 ApiError::InvalidBody(reason)
             }
-            llamaforge_types::traits::AdmissionError::Cancelled => {
+            llamaforge_core::types::traits::AdmissionError::Cancelled => {
                 ApiError::Internal("Request cancelled during admission".to_string())
             }
-            llamaforge_types::traits::AdmissionError::NoServerForModel { .. } => {
+            llamaforge_core::types::traits::AdmissionError::NoServerForModel { .. } => {
                 ApiError::ModelNotFound
             }
         }

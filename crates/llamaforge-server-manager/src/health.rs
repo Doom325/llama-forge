@@ -3,7 +3,7 @@
 
 use crate::telemetry::{GpuTelemetry, TelemetryError};
 use crate::types::SlotState;
-use llamaforge_config::GpuId;
+use llamaforge_core::config::GpuId;
 use std::collections::HashMap;
 use tokio::process::Command;
 
@@ -223,13 +223,13 @@ mod tests {
         impl crate::telemetry::GpuTelemetry for MockTelemetry {
             fn free_vram_bytes(
                 &self,
-                _id: &llamaforge_config::GpuId,
+                _id: &llamaforge_core::config::GpuId,
             ) -> Result<u64, TelemetryError> {
                 Ok(0)
             }
             fn utilization_percent(
                 &self,
-                _id: &llamaforge_config::GpuId,
+                _id: &llamaforge_core::config::GpuId,
             ) -> Result<u8, TelemetryError> {
                 match &self.util {
                     Ok(v) => Ok(*v),
@@ -242,7 +242,7 @@ mod tests {
             }
         }
 
-        let gpu_id = llamaforge_config::GpuId(0);
+        let gpu_id = llamaforge_core::config::GpuId(0);
         let pid = std::process::id(); // Use own PID for CPU check
         let mut last_n_decoded = std::collections::HashMap::new();
         last_n_decoded.insert(0, Some(10));

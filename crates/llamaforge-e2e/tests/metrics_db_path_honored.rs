@@ -24,13 +24,13 @@ metrics_db_path = "{explicit}"
     let config_path = config_dir.join("llamaforge.toml");
     std::fs::write(&config_path, toml)?;
 
-    let paths = llamaforge_config::ConfigPaths::new(
+    let paths = llamaforge_core::config::ConfigPaths::new(
         config_path.clone(),
         config_dir.join("priority_rules.toml"),
         config_dir.join("state"),
     );
-    let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
-    let handle = Arc::new(llamaforge_config::ConfigHandle::load(source)?);
+    let source = Arc::new(llamaforge_core::config::TomlFileConfigSource::new(paths));
+    let handle = Arc::new(llamaforge_core::config::ConfigHandle::load(source)?);
 
     let shutdown = CancellationToken::new();
     let (deps, bg) = llamaforge::build(handle, shutdown.clone()).await?;

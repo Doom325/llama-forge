@@ -1,9 +1,9 @@
-use llamaforge_config::{
+use llamaforge_core::config::{
     AppConfig, ConfigHandle, ConfigLoadError, ConfigMutation, ConfigPaths, ConfigReader,
     ConfigReloadError, ConfigWriter, InstrumentedConfigHandle, LoraAdapterConfig,
     TomlFileConfigSource, WritebackError,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -258,7 +258,7 @@ ctx_size = 4096
     // snapshot or broadcasting. v1.0 contract — see the
     // pre-swap gate in `ConfigHandle::reload` and the
     // staged-apply v1.1-deferred entry.
-    use llamaforge_config::{ConfigReloadError, ServerConfigField};
+    use llamaforge_core::config::{ConfigReloadError, ServerConfigField};
     match instrumented.reload().await {
         Err(ConfigReloadError::RestartRequired { fields }) => {
             assert!(
@@ -305,7 +305,7 @@ alias = "new_alias"
 
     let diff = instrumented.reload().await.unwrap();
     assert_eq!(diff.changes.len(), 1);
-    use llamaforge_config::ConfigChange;
+    use llamaforge_core::config::ConfigChange;
     match &diff.changes[0] {
         ConfigChange::ServerChanged { diff, .. } => {
             assert!(!diff.requires_restart());
@@ -525,7 +525,7 @@ ctx_size = 2048
 
 #[tokio::test]
 async fn test_vc3_14_cached_config_reader_consistency() {
-    use llamaforge_config::CachedConfigReader;
+    use llamaforge_core::config::CachedConfigReader;
 
     let dir = tempdir().unwrap();
     let main_path = dir.path().join("llamaforge.toml");
@@ -555,7 +555,7 @@ ctx_size = 2048
 async fn test_vc3_15_memory_bounds() {
     let mut config = AppConfig::default();
     for i in 0..100 {
-        let mut server = llamaforge_config::ServerConfig {
+        let mut server = llamaforge_core::config::ServerConfig {
             model_path: PathBuf::from(format!("model_{}.gguf", i)),
             ..Default::default()
         };

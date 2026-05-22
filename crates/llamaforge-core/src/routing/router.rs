@@ -1,15 +1,15 @@
 //! Module: router
 
-use crate::error::RoutingConstraint;
-use crate::types::{RoutingReason, ServerSnapshot, ServerStateView, SlotTarget};
-use crate::{
+use crate::routing::error::RoutingConstraint;
+use crate::routing::types::{RoutingReason, ServerSnapshot, ServerStateView, SlotTarget};
+use crate::routing::{
     CapacityChecker, DispatchCountView, RequestCapabilities, RequestView, RoutingDecision,
     RoutingError, ServerSelector,
 };
 use dashmap::DashMap;
-use llamaforge_config::{ConfigHandle, ConfigReader};
-use llamaforge_types::traits::{AdmissionError, RouteValidator};
-use llamaforge_types::{ModelAlias, ModelTarget, ServerId};
+use crate::config::{ConfigHandle, ConfigReader};
+use crate::types::traits::{AdmissionError, RouteValidator};
+use crate::types::{ModelAlias, ModelTarget, ServerId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -21,7 +21,7 @@ pub struct Router {
     server_state: Arc<dyn ServerStateView>,
     dispatch_counts: Arc<dyn DispatchCountView>,
     round_robin: DashMap<ModelAlias, AtomicU64>,
-    affinity_cache: std::sync::Mutex<crate::affinity::SessionAffinityCache>,
+    affinity_cache: std::sync::Mutex<crate::routing::affinity::SessionAffinityCache>,
     started_at: std::time::Instant,
 }
 
@@ -42,7 +42,7 @@ impl Router {
             server_state,
             dispatch_counts,
             round_robin: DashMap::new(),
-            affinity_cache: std::sync::Mutex::new(crate::affinity::SessionAffinityCache::new(
+            affinity_cache: std::sync::Mutex::new(crate::routing::affinity::SessionAffinityCache::new(
                 max_entries as usize,
             )),
             started_at: std::time::Instant::now(),
@@ -53,7 +53,7 @@ impl Router {
     #[allow(dead_code)]
     fn get_affinity(
         &self,
-        session_id: &llamaforge_types::SessionId,
+        session_id: &crate::types::SessionId,
         available: &[ServerId],
     ) -> Option<ServerId> {
         let mut guard = match self.affinity_cache.lock() {
@@ -68,7 +68,7 @@ impl Router {
 
     /// Records a routing decision into the affinity cache.
     #[allow(dead_code)]
-    fn set_affinity(&self, session_id: llamaforge_types::SessionId, server_id: ServerId) {
+    fn set_affinity(&self, session_id: crate::types::SessionId, server_id: ServerId) {
         let mut guard = match self.affinity_cache.lock() {
             Ok(g) => g,
             Err(poisoned) => {
@@ -133,7 +133,7 @@ impl Router {
         let mut server_states = Vec::new();
         for server in &model_matches {
             server_states.push((server.id, server.lifecycle));
-            if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
+            if server.lifecycle == crate::types::ServerLifecycle::Running {
                 running.push(server.clone());
             }
         }
@@ -208,7 +208,7 @@ impl Router {
     fn score_server(
         &self,
         server: &ServerSnapshot,
-        weights: &crate::weights::RoutingWeights,
+        weights: &crate::routing::weights::RoutingWeights,
     ) -> f64 {
         let total_slots = server.total_slots;
         let free_ratio = if total_slots == 0 {
@@ -219,7 +219,7 @@ impl Router {
             effective_free as f64 / total_slots as f64
         };
 
-        let is_recurrent = server.architecture == llamaforge_types::ModelArchitecture::Recurrent;
+        let is_recurrent = server.architecture == crate::types::ModelArchitecture::Recurrent;
 
         let (kv_component, affinity_component) = if is_recurrent {
             (0.0, 0.0)
@@ -305,7 +305,7 @@ impl Router {
 
             serves_model = true;
 
-            if server.lifecycle == llamaforge_types::ServerLifecycle::Running {
+            if server.lifecycle == crate::types::ServerLifecycle::Running {
                 let in_flight = self.dispatch_counts.in_flight_count(&server.id);
                 let effective_free = server.idle_slots.saturating_sub(in_flight as u32);
                 if effective_free > 0 {
@@ -342,7 +342,7 @@ impl Router {
                 if let RoutingError::ModelUnavailable { ref server_states, .. } = e {
                     let all_starting = !server_states.is_empty()
                         && server_states.iter().all(|(_, state)| {
-                            *state == llamaforge_types::ServerLifecycle::Starting
+                            *state == crate::types::ServerLifecycle::Starting
                         });
                     if all_starting {
                         let wait_secs = self.config.snapshot().routing.startup_wait_secs;
@@ -425,7 +425,7 @@ impl Router {
             Ok(w) => w,
             Err(e) => {
                 tracing::warn!(error = %e, "routing.weights_invalid");
-                crate::weights::RoutingWeights::default()
+                crate::routing::weights::RoutingWeights::default()
             }
         };
 
@@ -548,7 +548,7 @@ impl RouteValidator for Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llamaforge_types::LoraAdapterId;
+    use crate::types::LoraAdapterId;
     use std::collections::HashSet;
 
     struct MockServerStateView {
@@ -580,12 +580,12 @@ mod tests {
     fn create_mock_router(servers: Vec<ServerSnapshot>, dispatch: MockDispatchCountView) -> Router {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), "[global]\n").unwrap();
-        let paths = llamaforge_config::ConfigPaths::new(
+        let paths = crate::config::ConfigPaths::new(
             tmp.path().to_path_buf(),
             tmp.path().to_path_buf(),
             tmp.path().parent().unwrap().to_path_buf(),
         );
-        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
+        let source = Arc::new(crate::config::TomlFileConfigSource::new(paths));
         let config = Arc::new(ConfigHandle::load(source).unwrap());
 
         Router::new(config, Arc::new(MockServerStateView { servers }), Arc::new(dispatch))
@@ -596,14 +596,14 @@ mod tests {
         models.insert(ModelAlias::new(Arc::from(alias)));
         ServerSnapshot {
             id: ServerId::new(uuid::Uuid::now_v7()),
-            lifecycle: llamaforge_types::ServerLifecycle::Running,
+            lifecycle: crate::types::ServerLifecycle::Running,
             models,
             capabilities: HashSet::new(),
             lora_adapters: HashSet::new(),
             multimodal: false,
             embedding: false,
             reranking: false,
-            architecture: llamaforge_types::ModelArchitecture::Llama,
+            architecture: crate::types::ModelArchitecture::Llama,
             total_slots: 4,
             idle_slots: 4,
             kv_usage: 0.0,
@@ -614,7 +614,7 @@ mod tests {
     struct MockRequest {
         model: ModelTarget,
         caps: RequestCapabilities,
-        session: Option<llamaforge_types::SessionId>,
+        session: Option<crate::types::SessionId>,
     }
     impl RequestView for MockRequest {
         fn model_target(&self) -> &ModelTarget {
@@ -623,7 +623,7 @@ mod tests {
         fn capabilities(&self) -> &RequestCapabilities {
             &self.caps
         }
-        fn session_id(&self) -> Option<&llamaforge_types::SessionId> {
+        fn session_id(&self) -> Option<&crate::types::SessionId> {
             self.session.as_ref()
         }
     }
@@ -655,7 +655,7 @@ mod tests {
         dispatch.counts.insert(s1.id, 2);
 
         let router = create_mock_router(vec![s1.clone()], dispatch);
-        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        let score = router.score_server(&s1, &crate::routing::weights::RoutingWeights::default());
 
         // Effective free = max(0, 3 - 2) = 1.
         // free_ratio = 1 / 4 = 0.25.
@@ -702,7 +702,7 @@ mod tests {
         s1.total_slots = 0;
 
         let router = create_mock_router(vec![s1.clone()], MockDispatchCountView::new());
-        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        let score = router.score_server(&s1, &crate::routing::weights::RoutingWeights::default());
 
         assert!(score.is_finite());
         // w_slots * 0.0 + 0.2 + 0.2 = 0.4
@@ -712,10 +712,10 @@ mod tests {
     #[test]
     fn test_recurrent_model_zeroes_kv_affinity() {
         let mut s1 = default_server(1, "model1");
-        s1.architecture = llamaforge_types::ModelArchitecture::Recurrent;
+        s1.architecture = crate::types::ModelArchitecture::Recurrent;
 
         let router = create_mock_router(vec![s1.clone()], MockDispatchCountView::new());
-        let score = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        let score = router.score_server(&s1, &crate::routing::weights::RoutingWeights::default());
 
         // score = 0.4 * (4/4) + 0.0 (KV) + 0.2 * (1.0) + 0.0 = 0.6
         assert!((score - 0.6).abs() < f64::EPSILON, "score was {}", score);
@@ -771,7 +771,7 @@ mod tests {
         let s2_id = s2.id;
         let router = create_mock_router(vec![s1.clone(), s2], MockDispatchCountView::new());
 
-        let score1 = router.score_server(&s1, &crate::weights::RoutingWeights::default());
+        let score1 = router.score_server(&s1, &crate::routing::weights::RoutingWeights::default());
         assert_eq!(score1, f64::NEG_INFINITY);
 
         let req = MockRequest {
@@ -794,7 +794,7 @@ mod tests {
         // available, so the dispatch path correctly fast-fails until
         // health checks promote the server to Running.
         let mut s1 = default_server(1, "model1");
-        s1.lifecycle = llamaforge_types::ServerLifecycle::Starting;
+        s1.lifecycle = crate::types::ServerLifecycle::Starting;
 
         let router = create_mock_router(vec![s1], MockDispatchCountView::new());
         let model = ModelTarget::Exact(ModelAlias::new(Arc::from("model1")));
@@ -812,8 +812,8 @@ mod tests {
 
         let router = create_mock_router(vec![s1.clone(), s2.clone()], MockDispatchCountView::new());
 
-        let score1 = router.score_server(&s1, &crate::weights::RoutingWeights::default());
-        let score2 = router.score_server(&s2, &crate::weights::RoutingWeights::default());
+        let score1 = router.score_server(&s1, &crate::routing::weights::RoutingWeights::default());
+        let score2 = router.score_server(&s2, &crate::routing::weights::RoutingWeights::default());
         assert_eq!(score1, f64::NEG_INFINITY);
         assert_eq!(score2, f64::NEG_INFINITY);
 

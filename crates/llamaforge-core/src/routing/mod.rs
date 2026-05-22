@@ -15,7 +15,7 @@ pub mod router;
 pub mod types;
 pub mod weights;
 
-use llamaforge_types::ModelTarget;
+use crate::types::ModelTarget;
 
 /// A read-only view of a request used by the routing layer.
 /// This prevents a bidirectional dependency or forcing the routing layer to know
@@ -28,14 +28,14 @@ pub trait RequestView: Send + Sync {
     fn capabilities(&self) -> &RequestCapabilities;
 
     /// The session ID for session affinity (if any).
-    fn session_id(&self) -> Option<&llamaforge_types::SessionId>;
+    fn session_id(&self) -> Option<&crate::types::SessionId>;
 }
 
 /// Breaks the bidirectional dependency between routing and dispatch crates.
 /// See design doc Section 2.1a.
 pub trait DispatchCountView: Send + Sync {
     /// Returns the number of in-flight requests for a given server.
-    fn in_flight_count(&self, server_id: &llamaforge_types::ServerId) -> usize;
+    fn in_flight_count(&self, server_id: &crate::types::ServerId) -> usize;
 }
 
 /// Used by Request Queue's admission gate (Component 04) and dispatch
@@ -66,7 +66,7 @@ pub trait ServerSelector: Send + Sync {
     fn select_server(&self, request: &dyn RequestView) -> Result<RoutingDecision, RoutingError>;
 }
 
-// Re-export key types from submodules so consumers can import from `llamaforge_routing::*`
+// Re-export key types from submodules so consumers can import from `crate::routing::*`
 pub use error::RoutingError;
 pub use router::Router;
 pub use types::{RequestCapabilities, RoutingDecision};

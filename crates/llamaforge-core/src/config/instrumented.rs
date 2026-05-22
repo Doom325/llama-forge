@@ -2,11 +2,11 @@
 //!
 //! See design doc Section 2.5 and 7.1.
 
-use crate::diff::ConfigDiff;
-use crate::error::{ConfigReloadError, WritebackError};
-use crate::handle::ConfigHandle;
-use crate::traits::{ConfigReader, ConfigWriter};
-use crate::types::{AppConfig, ConfigMutation};
+use crate::config::diff::ConfigDiff;
+use crate::config::error::{ConfigReloadError, WritebackError};
+use crate::config::handle::ConfigHandle;
+use crate::config::traits::{ConfigReader, ConfigWriter};
+use crate::config::types::{AppConfig, ConfigMutation};
 use arc_swap::Guard;
 use metrics::{counter, describe_counter, describe_histogram, histogram};
 use std::sync::Arc;
@@ -43,7 +43,7 @@ impl InstrumentedConfigHandle {
     }
 }
 
-impl crate::traits::private::Sealed for InstrumentedConfigHandle {}
+impl crate::config::traits::private::Sealed for InstrumentedConfigHandle {}
 
 impl ConfigReader for InstrumentedConfigHandle {
     // Hot path: zero instrumentation overhead.
@@ -181,8 +181,8 @@ impl ConfigWriter for InstrumentedConfigHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::memory::InMemoryConfigSource;
-    use crate::types::ServerId;
+    use crate::config::source::memory::InMemoryConfigSource;
+    use crate::config::types::ServerId;
 
     // A simple test to ensure it compiles and executes without panic.
     // Real tracing assertions are tricky in unit tests without a specific capture setup,
@@ -252,7 +252,7 @@ mod tests {
         let mut config = AppConfig::default();
         config.servers.insert(
             ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
-            crate::types::ServerConfig::default(),
+            crate::config::types::ServerConfig::default(),
         );
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
         let handle = ConfigHandle::load(source).unwrap();
@@ -260,7 +260,7 @@ mod tests {
 
         let mutation = ConfigMutation::SetLoraAdapters {
             server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
-            adapters: vec![crate::types::LoraAdapterConfig {
+            adapters: vec![crate::config::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,
             }],

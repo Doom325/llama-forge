@@ -1,8 +1,8 @@
 //! Thread-local cached reader for hot paths.
 //!
 //! See design doc Section 2.4.
-use crate::traits::ConfigReader;
-use crate::types::AppConfig;
+use crate::config::traits::ConfigReader;
+use crate::config::types::AppConfig;
 use arc_swap::cache::Cache;
 use arc_swap::ArcSwap;
 use std::sync::Arc;
@@ -28,8 +28,8 @@ impl CachedConfigReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::handle::ConfigHandle;
-    use crate::source::memory::InMemoryConfigSource;
+    use crate::config::handle::ConfigHandle;
+    use crate::config::source::memory::InMemoryConfigSource;
 
     #[test]
     fn test_cached_config_reader() {

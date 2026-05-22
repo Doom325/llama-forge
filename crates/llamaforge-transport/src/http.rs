@@ -5,8 +5,8 @@ use axum::{
     Router,
 };
 use futures_util::stream::StreamExt;
-use llamaforge_config::{ConfigReader, ConfigWriter};
-use llamaforge_types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
+use llamaforge_core::config::{ConfigReader, ConfigWriter};
+use llamaforge_core::types::traits::{MetricsExporter, QueueSubmitter, RouteValidator, ServerControl};
 use std::sync::Arc;
 use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
 
@@ -71,14 +71,14 @@ impl<CW, RMS, SM> axum::extract::FromRef<HttpAppState<CW, RMS, SM>> for Arc<dyn 
 /// gRPC `stream_inference` handler so routing sees the same view of
 /// the request that the inference engine does.
 pub(crate) fn build_incoming_request(
-    request_id: llamaforge_types::RequestId,
-    req: &llamaforge_types::ChatCompletionRequest,
-) -> llamaforge_types::traits::IncomingRequest {
-    llamaforge_types::traits::IncomingRequest {
+    request_id: llamaforge_core::types::RequestId,
+    req: &llamaforge_core::types::ChatCompletionRequest,
+) -> llamaforge_core::types::traits::IncomingRequest {
+    llamaforge_core::types::traits::IncomingRequest {
         request_id,
-        requestor_id: llamaforge_types::RequestorId::new("anonymous".into()),
-        requestor_class: llamaforge_types::RequestorClass::new("default".into()),
-        model_target: llamaforge_types::ModelTarget::Exact(llamaforge_types::ModelAlias::new(
+        requestor_id: llamaforge_core::types::RequestorId::new("anonymous".into()),
+        requestor_class: llamaforge_core::types::RequestorClass::new("default".into()),
+        model_target: llamaforge_core::types::ModelTarget::Exact(llamaforge_core::types::ModelAlias::new(
             std::sync::Arc::from(req.model.as_str()),
         )),
         capabilities: Default::default(),
@@ -106,7 +106,7 @@ fn compute_retry_after(qs: &dyn QueueSubmitter) -> u32 {
 
 pub(crate) async fn openai_chat_completion_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
 where
@@ -139,8 +139,8 @@ where
 
 async fn handle_openai_request<CW, RMS, SM>(
     state: HttpAppState<CW, RMS, SM>,
-    request_id: llamaforge_types::RequestId,
-    req: llamaforge_types::ChatCompletionRequest,
+    request_id: llamaforge_core::types::RequestId,
+    req: llamaforge_core::types::ChatCompletionRequest,
     stream: bool,
 ) -> Result<axum::response::Response, ApiError>
 where
@@ -159,7 +159,7 @@ where
             // `NoServerForModel` must surface as `404 model_not_found`, not
             // `429 queue_full` with a wrong `Retry-After`.
             match e {
-                llamaforge_types::traits::AdmissionError::QueueFull => {
+                llamaforge_core::types::traits::AdmissionError::QueueFull => {
                     let retry_after_secs = compute_retry_after(&*state.queue_submitter);
                     ApiError::QueueFull { retry_after_secs }
                 }
@@ -199,8 +199,8 @@ where
 
         struct StreamGuard<S> {
             inner: S,
-            request_id: llamaforge_types::RequestId,
-            queue_submitter: std::sync::Arc<dyn llamaforge_types::traits::QueueSubmitter>,
+            request_id: llamaforge_core::types::RequestId,
+            queue_submitter: std::sync::Arc<dyn llamaforge_core::types::traits::QueueSubmitter>,
             finished: bool,
         }
         impl<S> Drop for StreamGuard<S> {
@@ -249,10 +249,10 @@ where
                 let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
-                        Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
+                        Ok(llamaforge_core::types::ChatCompletionChunk::Token(t)) => {
                             full_text.push_str(&t);
                         }
-                        Ok(llamaforge_types::ChatCompletionChunk::Stop {
+                        Ok(llamaforge_core::types::ChatCompletionChunk::Stop {
                             finish_reason: reason,
                             output_tokens,
                             prompt_tokens,
@@ -311,7 +311,7 @@ where
 
 pub(crate) async fn openai_completion_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
 where
@@ -340,10 +340,10 @@ where
         serde_json::from_slice(&req_bytes).map_err(|e| ApiError::InvalidBody(e.to_string()))?
     };
 
-    let chat_req = llamaforge_types::ChatCompletionRequest {
+    let chat_req = llamaforge_core::types::ChatCompletionRequest {
         model: req_json.model,
-        messages: vec![llamaforge_types::Message {
-            role: llamaforge_types::Role::User,
+        messages: vec![llamaforge_core::types::Message {
+            role: llamaforge_core::types::Role::User,
             content: req_json.prompt,
         }],
         max_tokens: req_json.max_tokens,
@@ -359,7 +359,7 @@ where
 
 pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
-    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_types::RequestId>,
+    axum::extract::Extension(request_id): axum::extract::Extension<llamaforge_core::types::RequestId>,
     headers: axum::http::HeaderMap,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
@@ -414,7 +414,7 @@ where
         .route_validator
         .validate_routable(&incoming.model_target, &incoming.capabilities)
         .map_err(|e| match e {
-            llamaforge_types::traits::AdmissionError::QueueFull => {
+            llamaforge_core::types::traits::AdmissionError::QueueFull => {
                 let retry_after_secs = compute_retry_after(&*state.queue_submitter);
                 ApiError::QueueFull { retry_after_secs }
             }
@@ -460,8 +460,8 @@ where
 
         struct StreamGuard<S> {
             inner: S,
-            request_id: llamaforge_types::RequestId,
-            queue_submitter: std::sync::Arc<dyn llamaforge_types::traits::QueueSubmitter>,
+            request_id: llamaforge_core::types::RequestId,
+            queue_submitter: std::sync::Arc<dyn llamaforge_core::types::traits::QueueSubmitter>,
             finished: bool,
         }
         impl<S> Drop for StreamGuard<S> {
@@ -509,10 +509,10 @@ where
                 let mut saw_stop = false;
                 while let Some(chunk_res) = response_stream.next().await {
                     match chunk_res {
-                        Ok(llamaforge_types::ChatCompletionChunk::Token(t)) => {
+                        Ok(llamaforge_core::types::ChatCompletionChunk::Token(t)) => {
                             full_text.push_str(&t);
                         }
-                        Ok(llamaforge_types::ChatCompletionChunk::Stop {
+                        Ok(llamaforge_core::types::ChatCompletionChunk::Stop {
                             finish_reason,
                             output_tokens: tokens,
                             prompt_tokens,
@@ -693,8 +693,8 @@ mod tests {
         http::{Request, StatusCode},
     };
     use futures_core::Stream;
-    use llamaforge_config::{source::memory::InMemoryConfigSource, AppConfig, ConfigHandle};
-    use llamaforge_types::{
+    use llamaforge_core::config::{source::memory::InMemoryConfigSource, AppConfig, ConfigHandle};
+    use llamaforge_core::types::{
         traits::{
             AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueTicket, ServerSummary,
         },
@@ -713,10 +713,10 @@ mod tests {
     impl InferenceEngine for MockEngine {
         async fn chat_completion(
             &self,
-            _req: llamaforge_types::ChatCompletionRequest,
+            _req: llamaforge_core::types::ChatCompletionRequest,
         ) -> Result<
             Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
-            llamaforge_types::traits::DispatchError,
+            llamaforge_core::types::traits::DispatchError,
         > {
             let chunks = std::mem::take(&mut *self.chunks.lock().unwrap());
             let sleep_time = self.sleep_ms;
@@ -739,9 +739,9 @@ mod tests {
     impl RouteValidator for MockRouteValidator {
         fn validate_routable(
             &self,
-            _model: &llamaforge_types::ModelTarget,
-            _capabilities: &llamaforge_types::RequestCapabilities,
-        ) -> Result<(), llamaforge_types::traits::AdmissionError> {
+            _model: &llamaforge_core::types::ModelTarget,
+            _capabilities: &llamaforge_core::types::RequestCapabilities,
+        ) -> Result<(), llamaforge_core::types::traits::AdmissionError> {
             Ok(())
         }
     }
@@ -758,19 +758,19 @@ mod tests {
     impl ServerControl for MockServerControl {
         async fn list_servers(
             &self,
-        ) -> Result<Vec<ServerSummary>, llamaforge_types::traits::ServerError> {
+        ) -> Result<Vec<ServerSummary>, llamaforge_core::types::traits::ServerError> {
             Ok(vec![])
         }
         async fn start_server(
             &self,
             _id: &ServerId,
-        ) -> Result<(), llamaforge_types::traits::ServerError> {
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
         async fn stop_server(
             &self,
             _id: &ServerId,
-        ) -> Result<(), llamaforge_types::traits::ServerError> {
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
     }
@@ -780,9 +780,9 @@ mod tests {
         fn submit(
             &self,
             _req: IncomingRequest,
-        ) -> Result<QueueTicket, llamaforge_types::traits::AdmissionError> {
+        ) -> Result<QueueTicket, llamaforge_core::types::traits::AdmissionError> {
             Ok(QueueTicket {
-                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 events: tokio::sync::mpsc::channel(1).1,
@@ -1024,8 +1024,8 @@ mod tests {
         impl RouteValidator for MockRouteValidatorRejects {
             fn validate_routable(
                 &self,
-                _model: &llamaforge_types::ModelTarget,
-                _capabilities: &llamaforge_types::RequestCapabilities,
+                _model: &llamaforge_core::types::ModelTarget,
+                _capabilities: &llamaforge_core::types::RequestCapabilities,
             ) -> Result<(), AdmissionError> {
                 Err(AdmissionError::QueueFull)
             }
@@ -1041,7 +1041,7 @@ mod tests {
             fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
                 Err(AdmissionError::QueueFull)
             }
-            fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+            fn cancel(&self, _id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
                 Ok(())
             }
             fn status(&self) -> Result<QueueSnapshot, QueueError> {

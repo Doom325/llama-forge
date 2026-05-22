@@ -1,8 +1,8 @@
-use llamaforge_config::{
+use llamaforge_core::config::{
     ConfigChange, ConfigHandle, ConfigMutation, ConfigPaths, ConfigReader, ConfigWriter,
     LoraAdapterConfig, ServerConfigField, TomlFileConfigSource, WritebackError,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;

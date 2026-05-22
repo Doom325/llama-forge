@@ -385,7 +385,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    use crate::traits::{QueueSnapshot, ServerSummary};
+    use crate::types::traits::{QueueSnapshot, ServerSummary};
     use std::collections::HashMap;
 
     #[test]

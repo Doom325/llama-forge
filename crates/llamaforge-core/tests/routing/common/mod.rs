@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
-pub use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
-pub use llamaforge_routing::{
+pub use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+pub use llamaforge_core::routing::{
     DispatchCountView, RequestCapabilities, RequestView, Router, RoutingError,
 };
-pub use llamaforge_types::{ModelAlias, ModelTarget, ServerId, ServerLifecycle};
+pub use llamaforge_core::types::{ModelAlias, ModelTarget, ServerId, ServerLifecycle};
 pub use std::collections::HashSet;
 pub use std::sync::Arc;
 pub use std::time::Duration;
@@ -24,28 +24,28 @@ impl MockDispatchCountView {
     }
 }
 
-impl llamaforge_routing::DispatchCountView for MockDispatchCountView {
+impl llamaforge_core::routing::DispatchCountView for MockDispatchCountView {
     fn in_flight_count(&self, server_id: &ServerId) -> usize {
         self.counts.get(server_id).map(|r| *r).unwrap_or(0)
     }
 }
 
 pub struct MockServerStateView {
-    pub servers: std::sync::RwLock<Vec<llamaforge_routing::types::ServerSnapshot>>,
+    pub servers: std::sync::RwLock<Vec<llamaforge_core::routing::types::ServerSnapshot>>,
 }
 
 impl MockServerStateView {
-    pub fn new(servers: Vec<llamaforge_routing::types::ServerSnapshot>) -> Self {
+    pub fn new(servers: Vec<llamaforge_core::routing::types::ServerSnapshot>) -> Self {
         Self { servers: std::sync::RwLock::new(servers) }
     }
 
-    pub fn set_servers(&self, servers: Vec<llamaforge_routing::types::ServerSnapshot>) {
+    pub fn set_servers(&self, servers: Vec<llamaforge_core::routing::types::ServerSnapshot>) {
         *self.servers.write().unwrap() = servers;
     }
 }
 
-impl llamaforge_routing::types::ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+impl llamaforge_core::routing::types::ServerStateView for MockServerStateView {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
         self.servers.read().unwrap().clone()
     }
 }
@@ -53,7 +53,7 @@ impl llamaforge_routing::types::ServerStateView for MockServerStateView {
 pub struct MockRequest {
     pub model: ModelTarget,
     pub caps: RequestCapabilities,
-    pub session: Option<llamaforge_types::SessionId>,
+    pub session: Option<llamaforge_core::types::SessionId>,
 }
 
 impl RequestView for MockRequest {
@@ -63,7 +63,7 @@ impl RequestView for MockRequest {
     fn capabilities(&self) -> &RequestCapabilities {
         &self.caps
     }
-    fn session_id(&self) -> Option<&llamaforge_types::SessionId> {
+    fn session_id(&self) -> Option<&llamaforge_core::types::SessionId> {
         self.session.as_ref()
     }
 }
@@ -80,10 +80,10 @@ pub fn create_test_config() -> Arc<ConfigHandle> {
     Arc::new(ConfigHandle::load(source).unwrap())
 }
 
-pub fn default_server(alias: &str) -> llamaforge_routing::types::ServerSnapshot {
+pub fn default_server(alias: &str) -> llamaforge_core::routing::types::ServerSnapshot {
     let mut models = HashSet::new();
     models.insert(ModelAlias::new(Arc::from(alias)));
-    llamaforge_routing::types::ServerSnapshot {
+    llamaforge_core::routing::types::ServerSnapshot {
         id: ServerId::new(uuid::Uuid::now_v7()),
         lifecycle: ServerLifecycle::Running,
         models,
@@ -92,7 +92,7 @@ pub fn default_server(alias: &str) -> llamaforge_routing::types::ServerSnapshot 
         multimodal: false,
         embedding: false,
         reranking: false,
-        architecture: llamaforge_types::ModelArchitecture::Llama,
+        architecture: llamaforge_core::types::ModelArchitecture::Llama,
         total_slots: 4,
         idle_slots: 4,
         kv_usage: 0.0,

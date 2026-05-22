@@ -3,8 +3,8 @@
 //! See design doc Section 2.2
 
 use crate::tracker::DispatchTracker;
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId};
 use std::sync::Arc;
 
 /// RAII guard representing an actively dispatched request to a server.

@@ -1,9 +1,9 @@
-use crate::admission::AdmissionController;
-use crate::queue::DispatchQueue;
-use crate::types::{DispatchResult, IncomingRequest, QueueDepthInfo, QueuePosition};
-use llamaforge_routing::{CapacityChecker, ServerSelector};
-use llamaforge_types::traits::{AdmissionAccounting, DequeueReason};
-use llamaforge_types::{ModelTarget, RequestId, RequestorId};
+use crate::queue::admission::AdmissionController;
+use crate::queue::queue::DispatchQueue;
+use crate::queue::types::{DispatchResult, IncomingRequest, QueueDepthInfo, QueuePosition};
+use crate::routing::{CapacityChecker, ServerSelector};
+use crate::types::traits::{AdmissionAccounting, DequeueReason};
+use crate::types::{ModelTarget, RequestId, RequestorId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -45,7 +45,7 @@ impl RequestPipeline {
     pub fn submit(
         &self,
         req: IncomingRequest,
-    ) -> Result<QueuePosition, crate::error::AdmissionError> {
+    ) -> Result<QueuePosition, crate::queue::error::AdmissionError> {
         let admitted = self.admission.admit(req)?;
         // Note: enqueue is currently infallible, so rollback of admission counters is not needed.
         Ok(self.queue.enqueue(admitted))
@@ -209,7 +209,7 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
         fn serves_model(
             &self,
             t: &ModelTarget,
-            c: &llamaforge_routing::RequestCapabilities,
+            c: &crate::routing::RequestCapabilities,
         ) -> bool {
             self.has_idle_slot(t, c)
         }
@@ -219,7 +219,7 @@ async fn drain_queue(queue: &DispatchQueue, admission: &AdmissionController) {
 
             _: &ModelTarget,
 
-            _: &llamaforge_routing::RequestCapabilities,
+            _: &crate::routing::RequestCapabilities,
         ) -> bool {
             true
         }

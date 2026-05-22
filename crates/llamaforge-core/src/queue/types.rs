@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
+use crate::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -107,8 +107,8 @@ pub struct IncomingRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
-    pub capabilities: llamaforge_routing::RequestCapabilities,
-    pub session_id: Option<llamaforge_types::SessionId>,
+    pub capabilities: crate::routing::RequestCapabilities,
+    pub session_id: Option<crate::types::SessionId>,
     pub explicit_override: Option<u32>,
     pub response_tx: oneshot::Sender<DispatchResult>,
     pub cancel_token: CancellationToken,
@@ -155,8 +155,8 @@ pub struct AdmittedRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
-    pub capabilities: llamaforge_routing::RequestCapabilities,
-    pub session_id: Option<llamaforge_types::SessionId>,
+    pub capabilities: crate::routing::RequestCapabilities,
+    pub session_id: Option<crate::types::SessionId>,
     pub effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -212,8 +212,8 @@ pub struct QueuedRequest {
     pub requestor: RequestorId,
     pub requestor_class: RequestorClass,
     pub model_target: ModelTarget,
-    pub capabilities: llamaforge_routing::RequestCapabilities,
-    pub session_id: Option<llamaforge_types::SessionId>,
+    pub capabilities: crate::routing::RequestCapabilities,
+    pub session_id: Option<crate::types::SessionId>,
     pub current_effective_priority: u32,
     pub base_priority: u32,
     pub requestor_bonus: i32,
@@ -255,17 +255,17 @@ impl QueuedRequest {
     }
 }
 
-impl llamaforge_routing::RequestView for QueuedRequest {
+impl crate::routing::RequestView for QueuedRequest {
     fn model_target(&self) -> &ModelTarget {
         &self.model_target
     }
 
-    fn capabilities(&self) -> &llamaforge_routing::RequestCapabilities {
+    fn capabilities(&self) -> &crate::routing::RequestCapabilities {
         let Self { capabilities, .. } = self;
         capabilities
     }
 
-    fn session_id(&self) -> Option<&llamaforge_types::SessionId> {
+    fn session_id(&self) -> Option<&crate::types::SessionId> {
         let Self { session_id, .. } = self;
         session_id.as_ref()
     }
@@ -290,7 +290,7 @@ pub struct DispatchCandidate {
 }
 
 pub enum DispatchResult {
-    Dispatched(llamaforge_types::ServerId, Option<llamaforge_types::SlotId>),
+    Dispatched(crate::types::ServerId, Option<crate::types::SlotId>),
     TimedOut { waited: Duration },
     Cancelled,
     ShuttingDown,

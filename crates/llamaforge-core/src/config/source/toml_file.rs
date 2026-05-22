@@ -2,9 +2,9 @@
 //!
 //! See design doc Section 2.1 and 3.2 for the implementation strategy.
 
-use crate::error::{ConfigLoadError, WritebackError};
-use crate::source::ConfigSource;
-use crate::types::{AppConfig, ConfigMutation, ConfigPaths, PriorityRulesConfig, ServerId};
+use crate::config::error::{ConfigLoadError, WritebackError};
+use crate::config::source::ConfigSource;
+use crate::config::types::{AppConfig, ConfigMutation, ConfigPaths, PriorityRulesConfig, ServerId};
 use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::Write;
@@ -331,7 +331,7 @@ impl ConfigSource for TomlFileConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{LoraAdapterConfig, RequestorId, ServerId};
+    use crate::config::types::{LoraAdapterConfig, RequestorId, ServerId};
     use std::path::PathBuf;
     use tempfile::tempdir;
 

@@ -1,9 +1,9 @@
-use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
-use llamaforge_queue::admission::AdmissionController;
-use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
-use llamaforge_routing::CapacityChecker;
-use llamaforge_types::traits::{AdmissionAccounting, DequeueReason};
-use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
+use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+use llamaforge_core::queue::admission::AdmissionController;
+use llamaforge_core::queue::types::{DispatchResult, IncomingRequest, TaskType};
+use llamaforge_core::routing::CapacityChecker;
+use llamaforge_core::types::traits::{AdmissionAccounting, DequeueReason};
+use llamaforge_core::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -11,11 +11,11 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_core::routing::RequestCapabilities) -> bool {
         self.has_idle_slot(t, c)
     }
 
-    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_core::routing::RequestCapabilities) -> bool {
         true
     }
 }
@@ -121,5 +121,5 @@ fn test_queue_full() {
         Arc::new(AdmissionController::new(config, queue_depth, Arc::new(MockCapacityChecker)));
     let (req, _) = mock_incoming();
     let res = admission.admit(req);
-    assert!(matches!(res, Err(llamaforge_queue::error::AdmissionError::QueueFull { .. })));
+    assert!(matches!(res, Err(llamaforge_core::queue::error::AdmissionError::QueueFull { .. })));
 }

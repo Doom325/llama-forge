@@ -1,11 +1,11 @@
 use chrono::{TimeZone, Utc};
 
-use llamaforge_config::RequestorId;
+use llamaforge_core::config::RequestorId;
 use llamaforge_metrics::{build_event_where, build_group_by, build_metrics_where};
 use llamaforge_metrics::{
     EventFilter, EventType, GroupByField, MetricsFilter, RequestId, RequestStatus,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 
 #[test]
 fn test_build_event_where_empty() {

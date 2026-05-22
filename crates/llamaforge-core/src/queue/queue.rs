@@ -1,6 +1,6 @@
-use crate::types::{DispatchCandidate, QueueDepthInfo, QueuedRequest, TierLabel};
-use llamaforge_config::ConfigHandle;
-use llamaforge_types::{ModelAlias, ModelTarget, RequestId};
+use crate::queue::types::{DispatchCandidate, QueueDepthInfo, QueuedRequest, TierLabel};
+use crate::config::ConfigHandle;
+use crate::types::{ModelAlias, ModelTarget, RequestId};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::atomic::AtomicU32;
@@ -42,7 +42,7 @@ impl FlatPriorityQueue {
         Some(req)
     }
 
-    pub(crate) fn try_dispatch_scan<C: llamaforge_routing::CapacityChecker + ?Sized>(
+    pub(crate) fn try_dispatch_scan<C: crate::routing::CapacityChecker + ?Sized>(
         &mut self,
         capacity: &C,
     ) -> Option<(DispatchCandidate, u32)> {
@@ -182,7 +182,7 @@ impl SlidingWindowRate {
     pub(crate) fn record(&mut self) {
         let now = std::time::Instant::now();
         self.timestamps.push_back(now);
-        while self.timestamps.len() > crate::types::SLIDING_WINDOW_MAX_ENTRIES {
+        while self.timestamps.len() > crate::queue::types::SLIDING_WINDOW_MAX_ENTRIES {
             self.timestamps.pop_front();
         }
         self.prune(now);
@@ -235,7 +235,7 @@ impl DispatchQueue {
         }
     }
 
-    pub fn enqueue(&self, req: crate::types::AdmittedRequest) -> crate::types::QueuePosition {
+    pub fn enqueue(&self, req: crate::queue::types::AdmittedRequest) -> crate::queue::types::QueuePosition {
         let id = req.id;
         let prio = req.effective_priority;
         let model_target = req.model_target.clone();
@@ -260,14 +260,14 @@ impl DispatchQueue {
             None
         };
 
-        crate::types::QueuePosition {
+        crate::queue::types::QueuePosition {
             position: pos,
             estimated_wait_secs,
             tier_label: TierLabel::from_priority(prio),
         }
     }
 
-    pub fn try_dispatch<C: llamaforge_routing::CapacityChecker + ?Sized>(
+    pub fn try_dispatch<C: crate::routing::CapacityChecker + ?Sized>(
         &self,
         capacity: &C,
     ) -> Option<DispatchCandidate> {
@@ -315,13 +315,13 @@ impl DispatchQueue {
         self.dispatch_epoch.send_modify(|v| *v += 1);
         let (dummy_tx, _) = tokio::sync::oneshot::channel();
         let real_tx = std::mem::replace(&mut req.response_tx, dummy_tx);
-        let _ = real_tx.send(crate::types::DispatchResult::Cancelled);
+        let _ = real_tx.send(crate::queue::types::DispatchResult::Cancelled);
         Some(req)
     }
 
     pub fn boost(&self, id: RequestId, new_priority: u32) {
         let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
-        let clamped_priority = new_priority.min(crate::types::PRIORITY_CEILING);
+        let clamped_priority = new_priority.min(crate::queue::types::PRIORITY_CEILING);
         inner.re_key(id, clamped_priority);
     }
 
@@ -378,7 +378,7 @@ impl DispatchQueue {
     }
 }
 
-impl llamaforge_types::traits::SlotNotifier for DispatchQueue {
+impl crate::types::traits::SlotNotifier for DispatchQueue {
     fn notify_slot_available(&self) {
         self.notify_slot_available();
     }
@@ -387,9 +387,9 @@ impl llamaforge_types::traits::SlotNotifier for DispatchQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
-    use llamaforge_routing::CapacityChecker;
-    use llamaforge_types::{ModelAlias, RequestId, RequestorClass, RequestorId};
+    use crate::config::{ConfigPaths, TomlFileConfigSource};
+    use crate::routing::CapacityChecker;
+    use crate::types::{ModelAlias, RequestId, RequestorClass, RequestorId};
     use std::sync::Arc;
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
@@ -402,7 +402,7 @@ mod tests {
         fn serves_model(
             &self,
             target: &ModelTarget,
-            capabilities: &llamaforge_routing::RequestCapabilities,
+            capabilities: &crate::routing::RequestCapabilities,
         ) -> bool {
             // For the mock, "serves model" and "has idle slot" both
             // collapse to the allow-listed-models check.
@@ -411,7 +411,7 @@ mod tests {
         fn has_idle_slot(
             &self,
             target: &ModelTarget,
-            _capabilities: &llamaforge_routing::RequestCapabilities,
+            _capabilities: &crate::routing::RequestCapabilities,
         ) -> bool {
             match target {
                 ModelTarget::Exact(alias) => self.allowed_models.contains(alias),
@@ -438,13 +438,13 @@ mod tests {
     fn mock_admitted_with_rx(
         prio: u32,
         model: &str,
-    ) -> (crate::types::AdmittedRequest, oneshot::Receiver<crate::types::DispatchResult>) {
+    ) -> (crate::queue::types::AdmittedRequest, oneshot::Receiver<crate::queue::types::DispatchResult>) {
         let (tx, rx) = oneshot::channel();
         (
-            crate::types::AdmittedRequest {
+            crate::queue::types::AdmittedRequest {
                 id: RequestId::new(uuid::Uuid::now_v7()),
                 payload: Arc::new(()),
-                task_type: crate::types::TaskType::Background,
+                task_type: crate::queue::types::TaskType::Background,
                 requestor: RequestorId::new(Arc::from("user1")),
                 requestor_class: RequestorClass::new(Arc::from("default")),
                 model_target: ModelTarget::Exact(ModelAlias::new(Arc::from(model))),
@@ -467,7 +467,7 @@ mod tests {
         )
     }
 
-    fn mock_admitted(prio: u32, model: &str) -> crate::types::AdmittedRequest {
+    fn mock_admitted(prio: u32, model: &str) -> crate::queue::types::AdmittedRequest {
         mock_admitted_with_rx(prio, model).0
     }
 
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(q.depth().total, 0);
 
         let result = rx.await.unwrap();
-        assert!(matches!(result, crate::types::DispatchResult::Cancelled));
+        assert!(matches!(result, crate::queue::types::DispatchResult::Cancelled));
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
         let cap =
             MockCapacityChecker { allowed_models: vec![ModelAlias::new(Arc::from("model1"))] };
         let cand = q.try_dispatch(&cap).unwrap();
-        assert_eq!(cand.request.current_effective_priority, crate::types::PRIORITY_CEILING);
+        assert_eq!(cand.request.current_effective_priority, crate::queue::types::PRIORITY_CEILING);
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
         for _ in 0..3000 {
             rate.record();
         }
-        assert_eq!(rate.timestamps.len(), crate::types::SLIDING_WINDOW_MAX_ENTRIES);
+        assert_eq!(rate.timestamps.len(), crate::queue::types::SLIDING_WINDOW_MAX_ENTRIES);
     }
 
     #[tokio::test]

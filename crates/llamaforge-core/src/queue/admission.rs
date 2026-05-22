@@ -1,11 +1,11 @@
-use crate::config::RequestorClassPolicy;
-use crate::error::AdmissionError;
-use crate::types::{AdmittedRequest, IncomingRequest, TaskType};
+use crate::queue::config::RequestorClassPolicy;
+use crate::queue::error::AdmissionError;
+use crate::queue::types::{AdmittedRequest, IncomingRequest, TaskType};
 use dashmap::DashMap;
-use llamaforge_config::{ConfigHandle, ConfigReader, TaskTypeId};
-use llamaforge_routing::CapacityChecker;
-use llamaforge_types::traits::{AdmissionAccounting, DequeueReason};
-use llamaforge_types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
+use crate::config::{ConfigHandle, ConfigReader, TaskTypeId};
+use crate::routing::CapacityChecker;
+use crate::types::traits::{AdmissionAccounting, DequeueReason};
+use crate::types::{ModelAlias, ModelTarget, RequestorClass, RequestorId};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -204,7 +204,7 @@ impl AdmissionController {
             effective_priority = override_val;
         }
 
-        effective_priority = effective_priority.min(crate::types::PRIORITY_CEILING);
+        effective_priority = effective_priority.min(crate::queue::types::PRIORITY_CEILING);
 
         let queue_timeout = Duration::from_secs(policy.queue_timeout_secs.unwrap_or(300) as u64);
 
@@ -239,7 +239,7 @@ impl AdmissionController {
             tracing::debug!(
                 request_id = %admitted.id,
                 model = ?admitted.model_target,
-                tier = %crate::types::TierLabel::from_priority(admitted.effective_priority),
+                tier = %crate::queue::types::TierLabel::from_priority(admitted.effective_priority),
                 position = current_depth + 1, // rough estimate
                 "queue.admitted"
             );
@@ -323,9 +323,9 @@ impl AdmissionAccounting for AdmissionController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
-    use llamaforge_routing::CapacityChecker;
-    use llamaforge_types::RequestId;
+    use crate::config::{ConfigPaths, TomlFileConfigSource};
+    use crate::routing::CapacityChecker;
+    use crate::types::RequestId;
     use std::sync::atomic::AtomicU32;
     use tokio::sync::oneshot;
     use tokio_util::sync::CancellationToken;
@@ -338,14 +338,14 @@ mod tests {
         fn serves_model(
             &self,
             _target: &ModelTarget,
-            _capabilities: &llamaforge_routing::RequestCapabilities,
+            _capabilities: &crate::routing::RequestCapabilities,
         ) -> bool {
             self.capacity
         }
         fn has_idle_slot(
             &self,
             _target: &ModelTarget,
-            _capabilities: &llamaforge_routing::RequestCapabilities,
+            _capabilities: &crate::routing::RequestCapabilities,
         ) -> bool {
             self.capacity
         }

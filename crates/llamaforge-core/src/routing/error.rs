@@ -1,5 +1,5 @@
 //! Module: error
-use llamaforge_types::ServerId;
+use crate::types::ServerId;
 
 /// Constraint that caused a routing failure.
 ///
@@ -42,7 +42,7 @@ pub enum RoutingError {
     #[error("Model {model} is currently unavailable. Server states: {server_states:?}")]
     ModelUnavailable {
         model: String,
-        server_states: Vec<(ServerId, llamaforge_types::ServerLifecycle)>,
+        server_states: Vec<(ServerId, crate::types::ServerLifecycle)>,
     },
 }
 

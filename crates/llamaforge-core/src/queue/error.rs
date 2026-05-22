@@ -1,4 +1,4 @@
-use llamaforge_types::{ModelAlias, RequestId, RequestorId};
+use crate::types::{ModelAlias, RequestId, RequestorId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AdmissionError {
@@ -12,7 +12,7 @@ pub enum AdmissionError {
     NoServerForModel { model: ModelAlias },
 
     #[error("unauthorized task type '{task_type}' for requestor")]
-    UnauthorizedTaskType { task_type: crate::types::TaskType },
+    UnauthorizedTaskType { task_type: crate::queue::types::TaskType },
 
     #[error("priority '{priority}' out of range for requestor")]
     PriorityOutOfRange { priority: u32 },

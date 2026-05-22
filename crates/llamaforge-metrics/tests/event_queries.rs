@@ -7,7 +7,7 @@ use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, AuditEvent, EventFilter, EventStore,
     EventType, MetricsConfig, RequestId, SqliteMetricsStore,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();

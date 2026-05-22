@@ -2,11 +2,11 @@
 //!
 //! See design doc Section 2.3.
 
-use crate::diff::{compute_diff, ConfigDiff};
-use crate::error::{ConfigLoadError, ConfigReloadError, WritebackError};
-use crate::source::ConfigSource;
-use crate::traits::{ConfigReader, ConfigWriter};
-use crate::types::{AppConfig, ConfigMutation};
+use crate::config::diff::{compute_diff, ConfigDiff};
+use crate::config::error::{ConfigLoadError, ConfigReloadError, WritebackError};
+use crate::config::source::ConfigSource;
+use crate::config::traits::{ConfigReader, ConfigWriter};
+use crate::config::types::{AppConfig, ConfigMutation};
 use arc_swap::{ArcSwap, Guard};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -90,7 +90,7 @@ impl ConfigHandle {
     }
 }
 
-impl crate::traits::private::Sealed for ConfigHandle {}
+impl crate::config::traits::private::Sealed for ConfigHandle {}
 
 impl ConfigReader for ConfigHandle {
     fn snapshot(&self) -> Guard<Arc<AppConfig>> {
@@ -140,7 +140,7 @@ impl ConfigWriter for ConfigHandle {
         // *before* the swap + broadcast so callers see no side
         // effects — the on-disk file is the new truth, the running
         // orchestrator keeps the old config until restart.
-        let restart_required: Vec<crate::diff::ServerConfigField> = diff
+        let restart_required: Vec<crate::config::diff::ServerConfigField> = diff
             .servers_changed()
             .flat_map(|(_, d)| d.fields_changed.iter().copied())
             .filter(|f| f.requires_restart())
@@ -167,15 +167,15 @@ impl ConfigWriter for ConfigHandle {
         let mut new_config = (**current_guard).clone();
 
         match mutation.apply(&mut new_config) {
-            crate::types::MutationOutcome::TargetMissing => {
+            crate::config::types::MutationOutcome::TargetMissing => {
                 return Err(WritebackError::ServerNotFound)
             }
-            crate::types::MutationOutcome::Unchanged => {
+            crate::config::types::MutationOutcome::Unchanged => {
                 let diff = ConfigDiff::new(vec![]);
                 let _ = self.change_tx.send(Arc::new(diff.clone()));
                 return Ok(diff);
             }
-            crate::types::MutationOutcome::Applied => {}
+            crate::config::types::MutationOutcome::Applied => {}
         }
 
         // TODO(PR5/Design §3.2): In the full protocol, we should first attempt to apply
@@ -207,9 +207,9 @@ impl ConfigWriter for ConfigHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::ConfigChange;
-    use crate::source::memory::InMemoryConfigSource;
-    use crate::types::{ServerConfig, ServerId};
+    use crate::config::diff::ConfigChange;
+    use crate::config::source::memory::InMemoryConfigSource;
+    use crate::config::types::{ServerConfig, ServerId};
 
     /// Round-trip a candidate slug through TOML deserialization so the
     /// `validate_server_id_slug` rule in `deserialize_servers_map` is
@@ -333,7 +333,7 @@ mod tests {
             config: AppConfig,
             failed: AtomicBool,
         }
-        impl crate::source::private::Sealed for FailOnSecondSource {}
+        impl crate::config::source::private::Sealed for FailOnSecondSource {}
         impl ConfigSource for FailOnSecondSource {
             fn load(&self) -> Result<AppConfig, ConfigLoadError> {
                 if self.failed.swap(true, Ordering::SeqCst) {
@@ -418,7 +418,7 @@ mod tests {
 
         let mutation = ConfigMutation::SetLoraAdapters {
             server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
-            adapters: vec![crate::types::LoraAdapterConfig {
+            adapters: vec![crate::config::types::LoraAdapterConfig {
                 path: std::path::PathBuf::from("lora.gguf"),
                 scale: 1.0,
             }],
@@ -477,7 +477,7 @@ mod tests {
         struct SlowSource {
             config: AppConfig,
         }
-        impl crate::source::private::Sealed for SlowSource {}
+        impl crate::config::source::private::Sealed for SlowSource {}
         impl ConfigSource for SlowSource {
             fn load(&self) -> Result<AppConfig, ConfigLoadError> {
                 std::thread::sleep(std::time::Duration::from_millis(100));

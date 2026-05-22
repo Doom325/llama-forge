@@ -1,4 +1,4 @@
-use crate::{RequestId, ServerId, SlotId};
+use crate::types::{RequestId, ServerId, SlotId};
 use async_trait::async_trait;
 use thiserror::Error;
 

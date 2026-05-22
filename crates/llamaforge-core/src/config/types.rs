@@ -12,9 +12,9 @@ use std::path::PathBuf;
 /// here so callers that only depend on `llamaforge-config` keep a stable
 /// import path. The Uuid-backed type derives slugs from `[servers.<key>]`
 /// TOML tables via `ServerId::from_config_id`; see
-/// [`crate::handle::validate_server_id_slug`] for the load-time rule that
+/// [`crate::config::handle::validate_server_id_slug`] for the load-time rule that
 /// gates which strings are accepted as slugs.
-pub use llamaforge_types::ServerId;
+pub use crate::types::ServerId;
 
 /// Newtype wrapper for Task Type Identity.
 /// See design doc Section 2.6.
@@ -180,7 +180,7 @@ where
     let raw: HashMap<String, ServerConfig> = HashMap::deserialize(deserializer)?;
     let mut out = HashMap::with_capacity(raw.len());
     for (slug, cfg) in raw {
-        crate::handle::validate_server_id_slug(&slug).map_err(serde::de::Error::custom)?;
+        crate::config::handle::validate_server_id_slug(&slug).map_err(serde::de::Error::custom)?;
         out.insert(ServerId::from_config_id(&slug), cfg);
     }
     Ok(out)

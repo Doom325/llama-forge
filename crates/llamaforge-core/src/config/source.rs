@@ -9,8 +9,8 @@ pub(crate) mod memory;
 
 pub mod toml_file;
 
-use crate::error::{ConfigLoadError, WritebackError};
-use crate::types::{AppConfig, ConfigMutation};
+use crate::config::error::{ConfigLoadError, WritebackError};
+use crate::config::types::{AppConfig, ConfigMutation};
 /// Port abstraction for config persistence — separates domain logic from I/O.
 ///
 /// See design doc Section 2.1.
@@ -38,14 +38,14 @@ impl private::Sealed for toml_file::TomlFileConfigSource {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::memory::InMemoryConfigSource;
-    use crate::types::ServerId;
+    use crate::config::source::memory::InMemoryConfigSource;
+    use crate::config::types::ServerId;
     #[test]
     fn test_in_memory_source_load_persist() {
         let mut config = AppConfig::default();
         config.servers.insert(
-            crate::types::ServerId::from_config_id("s1"),
-            crate::types::ServerConfig::default(),
+            crate::config::types::ServerId::from_config_id("s1"),
+            crate::config::types::ServerConfig::default(),
         );
         let source = InMemoryConfigSource::new(config.clone());
 

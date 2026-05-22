@@ -5,13 +5,13 @@ use std::time::Duration;
 use chrono::Utc;
 use tempfile::TempDir;
 
-use llamaforge_config::{RequestorId, TaskTypeId};
+use llamaforge_core::config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     audit_drops, create_metrics_pipeline, telemetry_drops, AuditRecord, AuditSendError,
     EventFilter, EventStore, EventType, MetricsConfig, RequestId, RequestMetrics, RequestStatus,
     TelemetryEvent, TelemetryEventKind,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 
 fn dummy_telemetry() -> TelemetryEvent {
     TelemetryEvent {
@@ -72,10 +72,10 @@ async fn create_test_pipeline(config: &MetricsConfig) -> llamaforge_metrics::Met
     writeln!(file, "batch_flush_size = {}", config.batch_flush_size).unwrap();
     writeln!(file, "audit_semaphore_permits = {}", config.audit_semaphore_permits).unwrap();
 
-    let paths = llamaforge_config::ConfigPaths::new(config_path, priority_rules, state_dir);
-    let source = llamaforge_config::TomlFileConfigSource::new(paths);
-    let handle = llamaforge_config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
-    let reader: std::sync::Arc<dyn llamaforge_config::ConfigReader> = std::sync::Arc::new(handle);
+    let paths = llamaforge_core::config::ConfigPaths::new(config_path, priority_rules, state_dir);
+    let source = llamaforge_core::config::TomlFileConfigSource::new(paths);
+    let handle = llamaforge_core::config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
+    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> = std::sync::Arc::new(handle);
     create_metrics_pipeline(config, reader).unwrap()
 }
 

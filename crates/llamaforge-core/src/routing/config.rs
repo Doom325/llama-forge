@@ -1,10 +1,10 @@
 //! Module: config
-use crate::weights::{RoutingWeights, WeightsValidationError};
+use crate::routing::weights::{RoutingWeights, WeightsValidationError};
 
-impl TryFrom<llamaforge_config::RoutingWeightsConfig> for RoutingWeights {
+impl TryFrom<crate::config::RoutingWeightsConfig> for RoutingWeights {
     type Error = WeightsValidationError;
 
-    fn try_from(config: llamaforge_config::RoutingWeightsConfig) -> Result<Self, Self::Error> {
+    fn try_from(config: crate::config::RoutingWeightsConfig) -> Result<Self, Self::Error> {
         RoutingWeights::builder()
             .w_slots(config.w_slots)
             .w_kv(config.w_kv)
@@ -20,7 +20,7 @@ mod tests {
 
     #[test]
     fn test_routing_weights_dto_conversion_valid() {
-        let config = llamaforge_config::RoutingWeightsConfig {
+        let config = crate::config::RoutingWeightsConfig {
             w_slots: 0.5,
             w_kv: 0.1,
             w_queue: 0.2,
@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn test_routing_weights_dto_conversion_invalid() {
-        let config = llamaforge_config::RoutingWeightsConfig { w_slots: 1.5, ..Default::default() };
+        let config = crate::config::RoutingWeightsConfig { w_slots: 1.5, ..Default::default() };
         let res: Result<RoutingWeights, _> = config.try_into();
         assert!(matches!(res, Err(WeightsValidationError::OutOfRange { field: "w_slots", .. })));
     }

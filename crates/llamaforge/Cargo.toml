@@ -24,13 +24,10 @@ tracing-subscriber.workspace = true
 async-trait.workspace = true
 anyhow = "1"
 uuid = { workspace = true }
-llamaforge-config = { workspace = true }
-llamaforge-types = { workspace = true }
+llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
 llamaforge-server-manager = { workspace = true }
-llamaforge-routing = { workspace = true }
 llamaforge-dispatch = { workspace = true }
-llamaforge-queue = { workspace = true }
 llamaforge-transport = { workspace = true }
 llamaforge-adapters = { workspace = true }
 

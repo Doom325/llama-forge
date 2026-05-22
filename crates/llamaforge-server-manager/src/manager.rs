@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
-use llamaforge_config::{ConfigDiff, ConfigHandle, ConfigReader, GpuId, ServerConfig};
-use llamaforge_types::ServerId;
+use llamaforge_core::config::{ConfigDiff, ConfigHandle, ConfigReader, GpuId, ServerConfig};
+use llamaforge_core::types::ServerId;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -681,7 +681,7 @@ mod tests {
         }
     }
 
-    use llamaforge_config::{ConfigPaths, TomlFileConfigSource};
+    use llamaforge_core::config::{ConfigPaths, TomlFileConfigSource};
     use tempfile::TempDir;
 
     fn get_test_config(tmp: &TempDir) -> Arc<ConfigHandle> {

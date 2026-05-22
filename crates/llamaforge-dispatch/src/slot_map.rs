@@ -2,8 +2,8 @@
 //!
 //! See design doc Section 2.4
 
-use llamaforge_types::ports::SlotDispatchView;
-use llamaforge_types::{RequestId, ServerId, SlotId};
+use llamaforge_core::types::ports::SlotDispatchView;
+use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tokio::time::Instant;
@@ -101,7 +101,7 @@ impl SlotDispatchMap {
 /// **Split API Rationale:**
 /// Inherent methods (`insert`, `remove`, etc.) are intended for use only within
 /// `llamaforge-dispatch`. Trait methods are the designated cross-crate boundary.
-/// Callers must `use llamaforge_types::ports::SlotDispatchView;` to access these methods.
+/// Callers must `use llamaforge_core::types::ports::SlotDispatchView;` to access these methods.
 impl SlotDispatchView for SlotDispatchMap {
     fn get_request_for_slot(&self, server_id: &ServerId, slot_id: &SlotId) -> Option<RequestId> {
         let guard = self.inner.lock().unwrap_or_else(|p| {

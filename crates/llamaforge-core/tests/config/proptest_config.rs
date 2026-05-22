@@ -1,10 +1,10 @@
-use llamaforge_config::{
+use llamaforge_core::config::{
     compute_diff, AppConfig, Backend, CacheType, ConfigDiff, DeviceSpec, FairShareConfig,
     FlashAttnMode, GlobalConfig, GpuId, GrpcConfig, LogFormat, LogLevel, LoraAdapterConfig,
     ModelArchitecture, PreemptionConfig, PriorityRulesConfig, PrometheusConfig, RequestorId,
     ServerConfig, SpeculativeMethod, StarvationConfig, TaskClassName, TaskTypeId, WebUiConfig,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 use proptest::collection::{hash_map, vec};
 use proptest::prelude::*;
 use std::net::{IpAddr, Ipv4Addr};

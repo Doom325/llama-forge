@@ -1,11 +1,11 @@
-use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
-use llamaforge_queue::admission::AdmissionController;
-use llamaforge_queue::pipeline::{run_scheduler, RequestPipeline};
-use llamaforge_queue::queue::DispatchQueue;
-use llamaforge_queue::starvation::start_background_tasks;
-use llamaforge_queue::types::{DispatchResult, IncomingRequest, TaskType};
-use llamaforge_routing::{CapacityChecker, RoutingDecision, ServerSelector};
-use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
+use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+use llamaforge_core::queue::admission::AdmissionController;
+use llamaforge_core::queue::pipeline::{run_scheduler, RequestPipeline};
+use llamaforge_core::queue::queue::DispatchQueue;
+use llamaforge_core::queue::starvation::start_background_tasks;
+use llamaforge_core::queue::types::{DispatchResult, IncomingRequest, TaskType};
+use llamaforge_core::routing::{CapacityChecker, RoutingDecision, ServerSelector};
+use llamaforge_core::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,11 +14,11 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_core::routing::RequestCapabilities) -> bool {
         self.has_idle_slot(t, c)
     }
 
-    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_core::routing::RequestCapabilities) -> bool {
         true
     }
 }
@@ -27,8 +27,8 @@ struct MockServerSelector;
 impl ServerSelector for MockServerSelector {
     fn select_server(
         &self,
-        _: &dyn llamaforge_routing::RequestView,
-    ) -> Result<RoutingDecision, llamaforge_routing::RoutingError> {
+        _: &dyn llamaforge_core::routing::RequestView,
+    ) -> Result<RoutingDecision, llamaforge_core::routing::RoutingError> {
         Ok(RoutingDecision::new_for_test(ServerId::new(uuid::Uuid::now_v7())))
     }
 }
@@ -86,7 +86,7 @@ async fn test_vc3_1_request_lifecycle_tracking() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
@@ -138,7 +138,7 @@ async fn test_vc3_2_admission_to_dispatch_handoff() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let (req, _rx) = mock_incoming();
@@ -177,7 +177,7 @@ async fn test_vc3_3_cancellation_removes_from_queue() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let (req, _rx) = mock_incoming();
@@ -200,7 +200,7 @@ async fn test_vc3_4_timeout_eviction() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
@@ -230,7 +230,7 @@ async fn test_vc3_5_client_disconnect_sweep() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
@@ -260,7 +260,7 @@ fn test_vc3_6_wait_time_estimation_accuracy() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let (req, _rx) = mock_incoming();
@@ -310,7 +310,7 @@ async fn test_vc3_9_graceful_shutdown_drain() {
         fn serves_model(
             &self,
             t: &ModelTarget,
-            c: &llamaforge_routing::RequestCapabilities,
+            c: &llamaforge_core::routing::RequestCapabilities,
         ) -> bool {
             self.has_idle_slot(t, c)
         }
@@ -320,7 +320,7 @@ async fn test_vc3_9_graceful_shutdown_drain() {
 
             _: &ModelTarget,
 
-            _: &llamaforge_routing::RequestCapabilities,
+            _: &llamaforge_core::routing::RequestCapabilities,
         ) -> bool {
             false
         }
@@ -332,7 +332,7 @@ async fn test_vc3_9_graceful_shutdown_drain() {
         Arc::new(MockCapacityChecker),
     ));
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
-    let health = Arc::new(llamaforge_queue::pipeline::HealthTracker::default());
+    let health = Arc::new(llamaforge_core::queue::pipeline::HealthTracker::default());
 
     let (req1, rx1) = mock_incoming();
     queue.enqueue(admission.admit(req1).unwrap());

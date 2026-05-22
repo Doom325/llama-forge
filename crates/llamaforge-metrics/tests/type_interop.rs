@@ -1,8 +1,8 @@
-use llamaforge_config::{RequestorId, TaskTypeId};
+use llamaforge_core::config::{RequestorId, TaskTypeId};
 use llamaforge_metrics::{
     AuditRecord, ManagedProcess, ProcessId, RequestId, RequestMetrics, RequestStatus,
 };
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 
 #[test]
 fn test_type_interop() {

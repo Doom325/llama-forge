@@ -2,9 +2,9 @@
 //!
 //! See design doc Section 2.2 for the port definitions.
 
-use crate::diff::ConfigDiff;
-use crate::error::{ConfigReloadError, WritebackError};
-use crate::types::{AppConfig, ConfigMutation};
+use crate::config::diff::ConfigDiff;
+use crate::config::error::{ConfigReloadError, WritebackError};
+use crate::config::types::{AppConfig, ConfigMutation};
 use arc_swap::Guard;
 use std::sync::Arc;
 use tokio::sync::broadcast;

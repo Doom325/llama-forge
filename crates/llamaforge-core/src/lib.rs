@@ -18,7 +18,7 @@
 //!
 //! Inside the crate the submodules retain their old top-level structure so
 //! blame and call-site paths stay stable; everything else continues to use
-//! the fully-qualified `llamaforge_core::types::Foo` path.
+//! the fully-qualified `crate::types::Foo` path.
 
 pub mod config;
 pub mod queue;

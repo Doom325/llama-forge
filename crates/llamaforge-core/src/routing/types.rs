@@ -1,5 +1,5 @@
 //! Module: types
-use llamaforge_types::{
+use crate::types::{
     Capability, LoraAdapterId, ModelAlias, ServerId, ServerLifecycle, SessionId, SlotId,
 };
 use std::collections::HashSet;
@@ -17,7 +17,7 @@ pub struct ServerSnapshot {
     pub multimodal: bool,
     pub embedding: bool,
     pub reranking: bool,
-    pub architecture: llamaforge_types::ModelArchitecture,
+    pub architecture: crate::types::ModelArchitecture,
     pub total_slots: u32,
     pub idle_slots: u32,
     pub kv_usage: f64,
@@ -86,7 +86,7 @@ impl RoutingDecision {
     }
 
     /// Returns the target slot if specific, or None if auto.
-    pub fn slot_target(&self) -> Option<llamaforge_types::SlotId> {
+    pub fn slot_target(&self) -> Option<crate::types::SlotId> {
         match self.slot_target {
             SlotTarget::Pinned(id) => Some(id),
             SlotTarget::Auto => None,
@@ -148,7 +148,7 @@ impl RoutingDecision {
 }
 
 // Ensure RequestCapabilities from llamaforge_types is re-exported from here
-pub use llamaforge_types::RequestCapabilities;
+pub use crate::types::RequestCapabilities;
 
 #[cfg(test)]
 mod tests {

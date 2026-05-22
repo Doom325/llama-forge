@@ -1,6 +1,6 @@
 //! Module: affinity
 
-use llamaforge_types::{ServerId, SessionId};
+use crate::types::{ServerId, SessionId};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 

@@ -2,9 +2,9 @@
 //!
 //! See design doc Section 2.1.
 
-use crate::error::{ConfigLoadError, WritebackError};
-use crate::source::ConfigSource;
-use crate::types::{AppConfig, ConfigMutation};
+use crate::config::error::{ConfigLoadError, WritebackError};
+use crate::config::source::ConfigSource;
+use crate::config::types::{AppConfig, ConfigMutation};
 use parking_lot::Mutex;
 
 /// In-memory implementation of ConfigSource for internal testing.
@@ -37,7 +37,7 @@ impl ConfigSource for InMemoryConfigSource {
         let mut inner = self.config.lock();
         let mut new_config = config.clone();
 
-        if mutation.apply(&mut new_config) == crate::types::MutationOutcome::TargetMissing {
+        if mutation.apply(&mut new_config) == crate::config::types::MutationOutcome::TargetMissing {
             return Err(WritebackError::ServerNotFound);
         }
 

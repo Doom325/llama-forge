@@ -1,4 +1,4 @@
-use llamaforge_types::traits::MetricsExporter;
+use llamaforge_core::types::traits::MetricsExporter;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 
 pub struct MetricsExporterAdapter {

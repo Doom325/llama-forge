@@ -1,8 +1,8 @@
 mod common;
 use common::*;
-use llamaforge_routing::error::RoutingConstraint;
-use llamaforge_routing::weights::RoutingWeights;
-use llamaforge_routing::Router;
+use llamaforge_core::routing::error::RoutingConstraint;
+use llamaforge_core::routing::weights::RoutingWeights;
+use llamaforge_core::routing::Router;
 
 #[test]
 fn test_routing_with_mock_dispatch_count_view() {
@@ -142,5 +142,5 @@ fn test_stale_slot_compensation_floor() {
     // We can't read score directly, but we can verify it doesn't underflow
     // and returns a valid decision. Default weight w_slots=0.4, w_kv=0.2, w_queue=0.2
     // effective_free=0 -> free_ratio=0.0 -> score = 0.2*1.0 + 0.2*1.0 = 0.4
-    assert!(matches!(dec.reason(), llamaforge_routing::types::RoutingReason::HighestScore { .. }));
+    assert!(matches!(dec.reason(), llamaforge_core::routing::types::RoutingReason::HighestScore { .. }));
 }

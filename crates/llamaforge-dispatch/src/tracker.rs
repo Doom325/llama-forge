@@ -3,8 +3,8 @@
 //! See design doc Section 2.3
 
 use dashmap::DashMap;
-use llamaforge_routing::DispatchCountView;
-use llamaforge_types::{RequestId, ServerId};
+use llamaforge_core::routing::DispatchCountView;
+use llamaforge_core::types::{RequestId, ServerId};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tracing::warn;

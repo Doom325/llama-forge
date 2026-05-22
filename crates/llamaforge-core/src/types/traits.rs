@@ -1,4 +1,4 @@
-use crate::{RequestorId, ServerId};
+use crate::types::{RequestorId, ServerId};
 use bytes::Bytes;
 use futures_core::Stream;
 use std::pin::Pin;
@@ -72,11 +72,11 @@ pub enum DequeueReason {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ServerSummary {
     /// Server unique ID. See design doc §5.3.1.
-    pub id: crate::ServerId,
+    pub id: crate::types::ServerId,
     /// Model alias loaded by this server. See design doc §5.3.1.
-    pub alias: crate::ModelAlias,
+    pub alias: crate::types::ModelAlias,
     /// Lifecycle state of the server. See design doc §5.3.1.
-    pub state: crate::ServerLifecycle,
+    pub state: crate::types::ServerLifecycle,
     /// Port the server listens on. See design doc §5.3.1.
     pub port: u16,
     /// Total slots on the server. See design doc §5.3.1.
@@ -92,13 +92,13 @@ pub struct ServerSummary {
 #[derive(Debug, Error)]
 pub enum ServerError {
     #[error("Server not found: {id}")]
-    NotFound { id: crate::ServerId },
+    NotFound { id: crate::types::ServerId },
     #[error("Server already running: {id}")]
-    AlreadyRunning { id: crate::ServerId },
+    AlreadyRunning { id: crate::types::ServerId },
     #[error("Server spawn failed: {reason}")]
     SpawnFailed { reason: String },
     #[error("Server unreachable: {id}")]
-    Unreachable { id: crate::ServerId },
+    Unreachable { id: crate::types::ServerId },
 }
 
 /// A token representing a queued request.
@@ -107,7 +107,7 @@ pub enum ServerError {
 #[derive(Debug)]
 pub struct QueueTicket {
     /// Request ID. See design doc §5.4.3.
-    pub request_id: crate::RequestId,
+    pub request_id: crate::types::RequestId,
     /// Time when the request was admitted to the queue. See design doc §5.4.3.
     pub admitted_at: chrono::DateTime<chrono::Utc>,
     /// Token to signal cancellation of the request. See design doc §5.4.3.
@@ -121,7 +121,7 @@ pub struct QueueTicket {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchEvent {
     Queued { position: u32 },
-    Dispatched { server_id: crate::ServerId, slot_id: crate::SlotId },
+    Dispatched { server_id: crate::types::ServerId, slot_id: crate::types::SlotId },
     FirstToken { ttft_ms: u64 },
     Completed { tokens: u32 },
     Failed { error: String },
@@ -148,13 +148,13 @@ pub enum AdmissionError {
     /// rejection for the given model name, not a transient
     /// backpressure signal.
     #[error("No server for model: {model}")]
-    NoServerForModel { model: crate::ModelAlias },
+    NoServerForModel { model: crate::types::ModelAlias },
 }
 
 #[derive(Debug, Error)]
 pub enum QueueError {
     #[error("Request not found: {id}")]
-    NotFound { id: crate::RequestId },
+    NotFound { id: crate::types::RequestId },
     #[error("Already cancelled")]
     AlreadyCancelled,
     #[error("Internal error: {detail}")]
@@ -166,23 +166,23 @@ pub enum QueueError {
 #[derive(Debug, Clone)]
 pub struct IncomingRequest {
     /// Unique ID for this request. See design doc §5.4.2.
-    pub request_id: crate::RequestId,
+    pub request_id: crate::types::RequestId,
     /// ID of the caller/user. See design doc §5.4.2.
-    pub requestor_id: crate::RequestorId,
+    pub requestor_id: crate::types::RequestorId,
     /// Requestor class for quota rules. See design doc §5.4.2.
-    pub requestor_class: crate::RequestorClass,
+    pub requestor_class: crate::types::RequestorClass,
     /// Model targeted by this request. See design doc §5.4.2.
-    pub model_target: crate::ModelTarget,
+    pub model_target: crate::types::ModelTarget,
     /// Special capabilities required (e.g. multimodal). See design doc §5.4.2.
-    pub capabilities: crate::RequestCapabilities,
+    pub capabilities: crate::types::RequestCapabilities,
     /// Messages making up the chat history. See design doc §5.4.2.
-    pub messages: Vec<crate::Message>,
+    pub messages: Vec<crate::types::Message>,
     /// Generation parameters (temp, max_tokens, etc). See design doc §5.4.2.
-    pub params: crate::GenerationParams,
+    pub params: crate::types::GenerationParams,
     /// Whether the response should be streamed. See design doc §5.4.2.
     pub stream: bool,
     /// Optional session affinity ID. See design doc §5.4.2.
-    pub session_id: Option<crate::SessionId>,
+    pub session_id: Option<crate::types::SessionId>,
     /// When the request was submitted. See design doc §5.4.2.
     pub submitted_at: chrono::DateTime<chrono::Utc>,
 }
@@ -199,8 +199,8 @@ pub enum MetricsError {
 #[async_trait::async_trait]
 pub trait ServerControl: Send + Sync {
     async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError>;
-    async fn start_server(&self, id: &crate::ServerId) -> Result<(), ServerError>;
-    async fn stop_server(&self, id: &crate::ServerId) -> Result<(), ServerError>;
+    async fn start_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
+    async fn stop_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
 }
 
 /// Open trait. RouteValidator
@@ -212,15 +212,15 @@ pub trait ServerControl: Send + Sync {
 pub trait RouteValidator: Send + Sync {
     fn validate_routable(
         &self,
-        model: &crate::ModelTarget,
-        capabilities: &crate::RequestCapabilities,
+        model: &crate::types::ModelTarget,
+        capabilities: &crate::types::RequestCapabilities,
     ) -> Result<(), AdmissionError>;
 }
 
 /// Open trait. QueueSubmitter
 pub trait QueueSubmitter: Send + Sync {
     fn submit(&self, req: IncomingRequest) -> Result<QueueTicket, AdmissionError>;
-    fn cancel(&self, id: &crate::RequestId) -> Result<(), QueueError>;
+    fn cancel(&self, id: &crate::types::RequestId) -> Result<(), QueueError>;
     fn status(&self) -> Result<QueueSnapshot, QueueError>;
 }
 

@@ -1,5 +1,5 @@
 use llamaforge_server_manager::ServerManager;
-use llamaforge_types::traits::{ServerControl, ServerError, ServerSummary};
+use llamaforge_core::types::traits::{ServerControl, ServerError, ServerSummary};
 use std::sync::Arc;
 
 pub struct ServerControlAdapter {
@@ -21,7 +21,7 @@ impl ServerControl for ServerControlAdapter {
 
             summaries.push(ServerSummary {
                 id,
-                alias: llamaforge_types::ModelAlias::new(state.model_alias.into()),
+                alias: llamaforge_core::types::ModelAlias::new(state.model_alias.into()),
                 state: state.lifecycle,
                 port: state.port,
                 slots_total: state.parallel_slots,
@@ -33,7 +33,7 @@ impl ServerControl for ServerControlAdapter {
         Ok(summaries)
     }
 
-    async fn start_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
+    async fn start_server(&self, id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
         match self.manager.request_start(id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
@@ -50,7 +50,7 @@ impl ServerControl for ServerControlAdapter {
         }
     }
 
-    async fn stop_server(&self, id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
+    async fn stop_server(&self, id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
         match self.manager.request_stop(id).await {
             Ok(_) => Ok(()),
             Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
@@ -64,7 +64,7 @@ impl ServerControl for ServerControlAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+    use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 
     fn dummy_manager() -> Arc<ServerManager> {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -93,7 +93,7 @@ mod tests {
         impl llamaforge_server_manager::GpuTelemetry for DummyTelemetry {
             fn utilization_percent(
                 &self,
-                _: &llamaforge_config::GpuId,
+                _: &llamaforge_core::config::GpuId,
             ) -> Result<u8, llamaforge_server_manager::TelemetryError> {
                 Ok(0)
             }
@@ -107,7 +107,7 @@ mod tests {
             }
             fn free_vram_bytes(
                 &self,
-                _: &llamaforge_config::GpuId,
+                _: &llamaforge_core::config::GpuId,
             ) -> Result<u64, llamaforge_server_manager::TelemetryError> {
                 Ok(1000000)
             }
@@ -135,7 +135,7 @@ mod tests {
         let servers = adapter.list_servers().await.unwrap();
         assert_eq!(servers.len(), 1);
 
-        let id = llamaforge_types::ServerId::new(
+        let id = llamaforge_core::types::ServerId::new(
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
         );
         let start_res = adapter.start_server(&id).await;
@@ -144,7 +144,7 @@ mod tests {
         let start_again = adapter.start_server(&id).await;
         assert!(matches!(start_again, Err(ServerError::AlreadyRunning { .. })));
 
-        let not_found_id = llamaforge_types::ServerId::new(
+        let not_found_id = llamaforge_core::types::ServerId::new(
             uuid::Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
         );
         let start_res_not_found = adapter.start_server(&not_found_id).await;

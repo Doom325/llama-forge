@@ -1,6 +1,6 @@
-use llamaforge_queue::pipeline::RequestPipeline;
-use llamaforge_queue::types::{DispatchResult, TaskType};
-use llamaforge_types::traits::{
+use llamaforge_core::queue::pipeline::RequestPipeline;
+use llamaforge_core::queue::types::{DispatchResult, TaskType};
+use llamaforge_core::types::traits::{
     AdmissionError, DispatchEvent, IncomingRequest, QueueError, QueueSnapshot, QueueSubmitter,
     QueueTicket,
 };
@@ -18,7 +18,7 @@ impl QueueSubmitterAdapter {
         Self { pipeline }
     }
 
-    fn map_class_to_task(class: &llamaforge_types::RequestorClass) -> TaskType {
+    fn map_class_to_task(class: &llamaforge_core::types::RequestorClass) -> TaskType {
         match class.as_str() {
             "emergency" => TaskType::Emergency,
             "background" => TaskType::Background,
@@ -39,7 +39,7 @@ impl QueueSubmitter for QueueSubmitterAdapter {
         let requestor_id = req.requestor_id.clone();
         let request_id = req.request_id;
 
-        let q_req = llamaforge_queue::types::IncomingRequest {
+        let q_req = llamaforge_core::queue::types::IncomingRequest {
             id: request_id,
             payload: Arc::new(()), // Transport doesn't pass a payload to queue; dispatch takes it directly later
             task_type: Self::map_class_to_task(&req.requestor_class),
@@ -69,7 +69,7 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                                 Ok(DispatchResult::Dispatched(server, slot)) => {
                                     // By design (PR6), the slot might be None if Auto.
                                     // For now, default to SlotId 0 if Auto, or just wait for InferenceEngineAdapter to refine it.
-                                    let slot_id = slot.unwrap_or_else(|| llamaforge_types::SlotId::new(0));
+                                    let slot_id = slot.unwrap_or_else(|| llamaforge_core::types::SlotId::new(0));
                                     let _ = events_tx.send(DispatchEvent::Dispatched { server_id: server, slot_id }).await;
                                     // Wait for ticket to be dropped by the InferenceEngineAdapter
                                     events_tx.closed().await;
@@ -111,35 +111,35 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                 })
             }
             Err(e) => match e {
-                llamaforge_queue::error::AdmissionError::QueueFull { retry_after_secs, .. } => {
+                llamaforge_core::queue::error::AdmissionError::QueueFull { retry_after_secs, .. } => {
                     Err(AdmissionError::RateLimited { retry_after_secs })
                 }
-                llamaforge_queue::error::AdmissionError::RequestorLimit { .. } => {
+                llamaforge_core::queue::error::AdmissionError::RequestorLimit { .. } => {
                     Err(AdmissionError::RateLimited { retry_after_secs: 5 })
                 }
-                llamaforge_queue::error::AdmissionError::NoServerForModel { model } => {
+                llamaforge_core::queue::error::AdmissionError::NoServerForModel { model } => {
                     Err(AdmissionError::InvalidRequest {
                         reason: format!("No server for model: {}", model),
                     })
                 }
-                llamaforge_queue::error::AdmissionError::UnauthorizedTaskType { task_type } => {
+                llamaforge_core::queue::error::AdmissionError::UnauthorizedTaskType { task_type } => {
                     Err(AdmissionError::InvalidRequest {
                         reason: format!("Unauthorized task type: {}", task_type),
                     })
                 }
-                llamaforge_queue::error::AdmissionError::PriorityOutOfRange { priority } => {
+                llamaforge_core::queue::error::AdmissionError::PriorityOutOfRange { priority } => {
                     Err(AdmissionError::InvalidRequest {
                         reason: format!("Priority out of range: {}", priority),
                     })
                 }
-                llamaforge_queue::error::AdmissionError::Internal(reason) => {
+                llamaforge_core::queue::error::AdmissionError::Internal(reason) => {
                     Err(AdmissionError::InvalidRequest { reason })
                 }
             },
         }
     }
 
-    fn cancel(&self, id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+    fn cancel(&self, id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
         if self.pipeline.cancel(*id).is_some() {
             Ok(())
         } else {
@@ -157,12 +157,12 @@ impl QueueSubmitter for QueueSubmitterAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
-    use llamaforge_queue::admission::AdmissionController;
-    use llamaforge_queue::pipeline::HealthTracker;
-    use llamaforge_queue::queue::DispatchQueue;
-    use llamaforge_routing::CapacityChecker;
-    use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
+    use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+    use llamaforge_core::queue::admission::AdmissionController;
+    use llamaforge_core::queue::pipeline::HealthTracker;
+    use llamaforge_core::queue::queue::DispatchQueue;
+    use llamaforge_core::routing::CapacityChecker;
+    use llamaforge_core::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
     use std::sync::atomic::AtomicU32;
 
     struct MockCapacityChecker;
@@ -170,7 +170,7 @@ mod tests {
         fn serves_model(
             &self,
             t: &ModelTarget,
-            c: &llamaforge_routing::RequestCapabilities,
+            c: &llamaforge_core::routing::RequestCapabilities,
         ) -> bool {
             self.has_idle_slot(t, c)
         }
@@ -180,7 +180,7 @@ mod tests {
 
             _: &ModelTarget,
 
-            _: &llamaforge_routing::RequestCapabilities,
+            _: &llamaforge_core::routing::RequestCapabilities,
         ) -> bool {
             true
         }

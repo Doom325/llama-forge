@@ -6,8 +6,8 @@ use llamaforge_dispatch::proxy::{proxy_task, AuditRecord};
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::token::DispatchToken;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -368,33 +368,33 @@ async fn test_6_18_ttft_metric() {
     assert!(audit.ttft.is_some());
 }
 
-use llamaforge_config::ConfigHandle;
+use llamaforge_core::config::ConfigHandle;
 use llamaforge_dispatch::client::ClientManager;
 use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::routing::RoutingDecision;
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
         vec![]
     }
 }
 
 struct MockClientManager;
 impl ClientManager for MockClientManager {
-    fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
+    fn refresh(&self, _server_id: &ServerId, _event: llamaforge_core::types::ClientRefreshEvent) {}
 }
 
 struct MockSlotErasure;
 #[async_trait::async_trait]
-impl llamaforge_types::ports::SlotErasure for MockSlotErasure {
+impl llamaforge_core::types::ports::SlotErasure for MockSlotErasure {
     async fn erase_slot(
         &self,
         _server_id: &ServerId,
-        _slot_id: &llamaforge_types::SlotId,
-    ) -> Result<(), llamaforge_types::ports::SlotError> {
+        _slot_id: &llamaforge_core::types::SlotId,
+    ) -> Result<(), llamaforge_core::types::ports::SlotError> {
         Ok(())
     }
 }
@@ -403,8 +403,8 @@ fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
     let trackers = Arc::new(DispatchTrackerRegistry::new());
     let slot_map = Arc::new(SlotDispatchMap::new());
     let config = Arc::new(
-        ConfigHandle::load(Arc::new(llamaforge_config::source::memory::InMemoryConfigSource::new(
-            llamaforge_config::AppConfig::default(),
+        ConfigHandle::load(Arc::new(llamaforge_core::config::source::memory::InMemoryConfigSource::new(
+            llamaforge_core::config::AppConfig::default(),
         )))
         .unwrap(),
     );

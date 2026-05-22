@@ -14,7 +14,7 @@
 //! record (#134).
 
 use chrono::{DateTime, Utc};
-use llamaforge_config::{RequestorId as ConfigRequestorId, TaskTypeId};
+use llamaforge_core::config::{RequestorId as ConfigRequestorId, TaskTypeId};
 use llamaforge_dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use llamaforge_metrics::{
     AuditRecord as MetricsAuditRecord, RequestId as MetricsRequestId, RequestMetrics, RequestStatus,
@@ -110,8 +110,8 @@ mod tests {
     #[test]
     fn translate_success_record() {
         let record = DispatchAuditRecord {
-            request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
-            server_id: llamaforge_types::ServerId::new(uuid::Uuid::now_v7()),
+            request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
+            server_id: llamaforge_core::types::ServerId::new(uuid::Uuid::now_v7()),
             duration: Duration::from_millis(120),
             ttft: Some(Duration::from_millis(30)),
             tokens_predicted: 42,
@@ -138,8 +138,8 @@ mod tests {
     #[test]
     fn translate_failed_record_has_no_finish_reason() {
         let record = DispatchAuditRecord {
-            request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
-            server_id: llamaforge_types::ServerId::new(uuid::Uuid::now_v7()),
+            request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
+            server_id: llamaforge_core::types::ServerId::new(uuid::Uuid::now_v7()),
             duration: Duration::from_millis(10),
             ttft: None,
             tokens_predicted: 0,

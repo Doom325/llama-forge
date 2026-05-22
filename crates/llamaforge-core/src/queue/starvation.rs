@@ -1,8 +1,8 @@
-use crate::admission::AdmissionController;
-use crate::queue::DispatchQueue;
-use crate::types::DispatchResult;
-use llamaforge_config::{ConfigHandle, ConfigReader};
-use llamaforge_types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
+use crate::queue::admission::AdmissionController;
+use crate::queue::queue::DispatchQueue;
+use crate::queue::types::DispatchResult;
+use crate::config::{ConfigHandle, ConfigReader};
+use crate::types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -129,7 +129,7 @@ async fn starvation_boost_loop(
     }
 }
 
-fn apply_boost(queue: Arc<DispatchQueue>, candidates: Vec<(llamaforge_types::RequestId, u32)>) {
+fn apply_boost(queue: Arc<DispatchQueue>, candidates: Vec<(crate::types::RequestId, u32)>) {
     for (id, new_prio) in candidates {
         queue.boost(id, new_prio);
     }

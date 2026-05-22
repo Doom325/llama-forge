@@ -28,13 +28,12 @@ async-trait.workspace = true
 tracing.workspace = true
 metrics = "0.24"
 
-# Dependency rationale: llamaforge-config and llamaforge-metrics are direct dependencies
+# Dependency rationale: llamaforge-core and llamaforge-metrics are direct dependencies
 # despite cross-crate communication being via port traits because we need access to their
 # respective ConfigReader and MetricsExporter implementations to wire them in the composition root
 # and use their public interface definitions.
-llamaforge-config.workspace = true
+llamaforge-core.workspace = true
 llamaforge-metrics.workspace = true
-llamaforge-types.workspace = true
 llamaforge-proto.workspace = true
 chrono.workspace = true
 tokio-util.workspace = true
@@ -56,7 +55,7 @@ chrono.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tower = { workspace = true, features = ["util"] }
-llamaforge-config = { workspace = true, features = ["test-utils"] }
+llamaforge-core = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true, features = ["test-fixtures"] }
 serial_test.workspace = true
 

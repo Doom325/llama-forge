@@ -2,7 +2,7 @@
 //!
 //! See design doc Section 2.8 for diff type definitions and classification rules.
 
-use crate::types::{AppConfig, ServerConfig, ServerId};
+use crate::config::types::{AppConfig, ServerConfig, ServerId};
 use std::time::{Instant, SystemTime};
 
 /// Describes what changed between two config snapshots.
@@ -247,7 +247,7 @@ fn compute_server_diff(old: &ServerConfig, new: &ServerConfig) -> ServerConfigDi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AppConfig, LoraAdapterConfig, ServerConfig};
+    use crate::config::types::{AppConfig, LoraAdapterConfig, ServerConfig};
     use std::path::PathBuf;
 
     #[test]

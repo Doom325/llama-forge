@@ -4,9 +4,9 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use llamaforge_config::{ConfigReader, ConfigWriter};
+use llamaforge_core::config::{ConfigReader, ConfigWriter};
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
-use llamaforge_types::{
+use llamaforge_core::types::{
     traits::{QueueSubmitter, ServerControl},
     RequestId, ServerId,
 };
@@ -48,7 +48,7 @@ pub(crate) async fn start_server<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    llamaforge_config::validate_server_id_slug(&id)
+    llamaforge_core::config::validate_server_id_slug(&id)
         .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
     let server_id = ServerId::from_config_id(&id);
     state
@@ -63,7 +63,7 @@ pub(crate) async fn stop_server<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    llamaforge_config::validate_server_id_slug(&id)
+    llamaforge_core::config::validate_server_id_slug(&id)
         .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
     let server_id = ServerId::from_config_id(&id);
     state
@@ -103,7 +103,7 @@ where
     // rationale). Map the dedicated `RestartRequired` error to 412.
     match state.config_writer.reload().await {
         Ok(_) => Ok(axum::http::StatusCode::OK.into_response()),
-        Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+        Err(llamaforge_core::config::ConfigReloadError::RestartRequired { fields }) => {
             Err(ApiError::PreconditionFailed(format!(
                 "config diff touches restart-required server fields ({:?}); \
                  restart the orchestrator to apply",
@@ -188,13 +188,13 @@ pub(crate) struct WalCheckpointQuery {
 }
 
 fn map_config_checkpoint_mode(
-    m: llamaforge_config::WalCheckpointMode,
+    m: llamaforge_core::config::WalCheckpointMode,
 ) -> llamaforge_metrics::CheckpointMode {
     match m {
-        llamaforge_config::WalCheckpointMode::Passive => {
+        llamaforge_core::config::WalCheckpointMode::Passive => {
             llamaforge_metrics::CheckpointMode::Passive
         }
-        llamaforge_config::WalCheckpointMode::Truncate => {
+        llamaforge_core::config::WalCheckpointMode::Truncate => {
             llamaforge_metrics::CheckpointMode::Truncate
         }
     }
@@ -246,10 +246,10 @@ where
 mod tests {
     use super::*;
     use axum::http::StatusCode;
-    use llamaforge_config::{
+    use llamaforge_core::config::{
         source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
     };
-    use llamaforge_types::traits::*;
+    use llamaforge_core::types::traits::*;
 
     struct MockServerControl;
     #[async_trait::async_trait]
@@ -269,7 +269,7 @@ mod tests {
     impl QueueSubmitter for MockQueueSubmitter {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
             Ok(QueueTicket {
-                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 events: tokio::sync::mpsc::channel(1).1,

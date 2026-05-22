@@ -1,8 +1,8 @@
-use llamaforge_config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
-use llamaforge_queue::admission::AdmissionController;
-use llamaforge_queue::types::{IncomingRequest, TaskType};
-use llamaforge_routing::CapacityChecker;
-use llamaforge_types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
+use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
+use llamaforge_core::queue::admission::AdmissionController;
+use llamaforge_core::queue::types::{IncomingRequest, TaskType};
+use llamaforge_core::routing::CapacityChecker;
+use llamaforge_core::types::{ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -10,11 +10,11 @@ use tokio_util::sync::CancellationToken;
 
 struct MockCapacityChecker;
 impl CapacityChecker for MockCapacityChecker {
-    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn serves_model(&self, t: &ModelTarget, c: &llamaforge_core::routing::RequestCapabilities) -> bool {
         self.has_idle_slot(t, c)
     }
 
-    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_routing::RequestCapabilities) -> bool {
+    fn has_idle_slot(&self, _: &ModelTarget, _: &llamaforge_core::routing::RequestCapabilities) -> bool {
         true
     }
 }
@@ -63,7 +63,7 @@ fn test_trace_context_propagation() {
     let admitted = admission.admit(req).unwrap();
     assert!(admitted.trace_context.is_some());
 
-    let queued = llamaforge_queue::types::QueuedRequest::from_admitted(admitted);
+    let queued = llamaforge_core::queue::types::QueuedRequest::from_admitted(admitted);
     assert!(queued.trace_context.is_some());
 }
 
@@ -96,5 +96,5 @@ fn test_rejection_log_levels() {
     };
 
     let res = admission.admit(req);
-    assert!(matches!(res, Err(llamaforge_queue::error::AdmissionError::QueueFull { .. })));
+    assert!(matches!(res, Err(llamaforge_core::queue::error::AdmissionError::QueueFull { .. })));
 }

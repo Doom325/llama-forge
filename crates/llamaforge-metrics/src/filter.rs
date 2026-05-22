@@ -3,8 +3,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use llamaforge_config::RequestorId;
-use llamaforge_types::ServerId;
+use llamaforge_core::config::RequestorId;
+use llamaforge_core::types::ServerId;
 
 use crate::types::{EventType, RequestId, RequestStatus};
 

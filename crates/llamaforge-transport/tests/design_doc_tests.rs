@@ -1,7 +1,7 @@
 #[path = "mocks.rs"]
 mod mocks;
 
-use llamaforge_config::{
+use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
 };
 use llamaforge_metrics::InMemoryStore;
@@ -9,7 +9,7 @@ use llamaforge_transport::{start_servers, TransportDeps};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 
-use llamaforge_types::{
+use llamaforge_core::types::{
     traits::{
         AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
         RouteValidator,
@@ -217,8 +217,8 @@ struct MockRouteValidatorRejects;
 impl RouteValidator for MockRouteValidatorRejects {
     fn validate_routable(
         &self,
-        _model: &llamaforge_types::ModelTarget,
-        _capabilities: &llamaforge_types::RequestCapabilities,
+        _model: &llamaforge_core::types::ModelTarget,
+        _capabilities: &llamaforge_core::types::RequestCapabilities,
     ) -> Result<(), AdmissionError> {
         Err(AdmissionError::QueueFull)
     }
@@ -229,7 +229,7 @@ impl QueueSubmitter for MockQueueSubmitterFull {
     fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
         Err(AdmissionError::QueueFull)
     }
-    fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+    fn cancel(&self, _id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
         Ok(())
     }
     fn status(&self) -> Result<QueueSnapshot, QueueError> {
