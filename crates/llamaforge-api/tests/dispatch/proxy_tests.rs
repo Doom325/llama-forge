@@ -1,6 +1,4 @@
 use bytes::Bytes;
-use llamaforge_core::types::traits::SlotNotifier;
-use llamaforge_core::types::{RequestId, ServerId};
 use llamaforge_api::dispatch::client::{BackendClient, BackendResponseStream};
 use llamaforge_api::dispatch::dispatcher::CompletionRequest;
 use llamaforge_api::dispatch::error::{DispatchError, StreamError};
@@ -8,6 +6,8 @@ use llamaforge_api::dispatch::proxy::{proxy_task, AuditRecord};
 use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
 use llamaforge_api::dispatch::token::DispatchToken;
 use llamaforge_api::dispatch::tracker::DispatchTrackerRegistry;
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -338,7 +338,8 @@ async fn test_6_16_connection_refused() {
 #[tokio::test]
 async fn test_6_17_backend_http_500() {
     let (token, tx, mut rx, audit_tx, _audit_rx, cancel, map, req, _) = setup();
-    let err = DispatchError::BackendError { status: llamaforge_api::dispatch::error::HttpStatus(500) };
+    let err =
+        DispatchError::BackendError { status: llamaforge_api::dispatch::error::HttpStatus(500) };
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![])),
         error_on_connect: Mutex::new(Some(err)),
@@ -368,11 +369,11 @@ async fn test_6_18_ttft_metric() {
     assert!(audit.ttft.is_some());
 }
 
+use llamaforge_api::dispatch::client::ClientManager;
+use llamaforge_api::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_core::config::ConfigHandle;
 use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::routing::RoutingDecision;
-use llamaforge_api::dispatch::client::ClientManager;
-use llamaforge_api::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
 
 struct MockServerStateView;

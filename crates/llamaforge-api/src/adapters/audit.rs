@@ -13,9 +13,9 @@
 //! `prompt_tokens` is now carried through from the dispatch audit
 //! record (#134).
 
+use crate::dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use chrono::{DateTime, Utc};
 use llamaforge_core::config::{RequestorId as ConfigRequestorId, TaskTypeId};
-use crate::dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use llamaforge_metrics::{
     AuditRecord as MetricsAuditRecord, RequestId as MetricsRequestId, RequestMetrics, RequestStatus,
 };

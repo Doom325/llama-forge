@@ -18,6 +18,8 @@ use futures_core::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
+use crate::transport::InferenceEngine;
 use llamaforge_core::routing::{Router, RoutingDecision};
 use llamaforge_core::types::traits::{
     DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
@@ -26,9 +28,7 @@ use llamaforge_core::types::{
     ChatCompletionChunk, ChatCompletionRequest, GenerationParams, ModelAlias, ModelTarget,
     RequestId, RequestorClass, RequestorId, Role, StreamError,
 };
-use crate::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
-use crate::transport::InferenceEngine;
 
 /// Adapter implementing [`InferenceEngine`] by composing the queue, router,
 /// dispatcher and metrics layers. See module-level docs.
@@ -289,6 +289,10 @@ impl InferenceEngine for InferenceEngineAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+    use crate::dispatch::error::DispatchError as DispatchCrateError;
+    use crate::dispatch::slot_map::SlotDispatchMap;
+    use crate::dispatch::tracker::DispatchTrackerRegistry;
     use futures_util::StreamExt;
     use llamaforge_core::routing::types::ServerStateView;
     use llamaforge_core::types::ports::{SlotErasure, SlotError};
@@ -297,10 +301,6 @@ mod tests {
         AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
     };
     use llamaforge_core::types::{ClientRefreshEvent, Message, RequestId, ServerId, SlotId};
-    use crate::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-    use crate::dispatch::error::DispatchError as DispatchCrateError;
-    use crate::dispatch::slot_map::SlotDispatchMap;
-    use crate::dispatch::tracker::DispatchTrackerRegistry;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -364,8 +364,7 @@ mod tests {
     // ---- Mock dispatch plumbing --------------------------------------------
 
     struct ScriptedBackend {
-        script:
-            AsyncMutex<Option<Vec<Result<bytes::Bytes, crate::dispatch::error::StreamError>>>>,
+        script: AsyncMutex<Option<Vec<Result<bytes::Bytes, crate::dispatch::error::StreamError>>>>,
     }
 
     impl ScriptedBackend {

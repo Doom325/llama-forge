@@ -1,9 +1,9 @@
 //! End-to-end test: `ReqwestClientStore` as `SlotErasure` actually
 //! POSTs to `/slots/{id}?action=erase` on the registered server.
 
+use llamaforge_api::dispatch::client::ReqwestClientStore;
 use llamaforge_core::types::ports::SlotErasure;
 use llamaforge_core::types::{ServerId, SlotId};
-use llamaforge_api::dispatch::client::ReqwestClientStore;
 use llamaforge_e2e::Harness;
 use std::sync::Arc;
 
