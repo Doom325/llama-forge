@@ -82,7 +82,7 @@ async fn test_process_lifecycle_external_kill() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     let mut pid = None;
     for _ in 0..50 {
@@ -151,7 +151,7 @@ async fn test_process_lifecycle_shutdown() {
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     let mut pid = None;
     for _ in 0..50 {
@@ -310,7 +310,7 @@ estimated_vram_mb = 100
         .store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(pid_a),
-            server_id: ServerId("srv_a".into()),
+            server_id: ServerId::from_config_id("srv_a"),
             started_at: Utc::now(),
             cmdline: "".into(),
             port: port_a,
@@ -322,7 +322,7 @@ estimated_vram_mb = 100
         .store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(pid_b),
-            server_id: ServerId("srv_b".into()),
+            server_id: ServerId::from_config_id("srv_b"),
             started_at: Utc::now(),
             cmdline: "".into(),
             port: port_b,
@@ -334,7 +334,7 @@ estimated_vram_mb = 100
         .store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(pid_c),
-            server_id: ServerId("srv_c".into()),
+            server_id: ServerId::from_config_id("srv_c"),
             started_at: Utc::now(),
             cmdline: "".into(),
             port: port_c,
@@ -346,7 +346,7 @@ estimated_vram_mb = 100
         .store
         .upsert_managed_process(&ManagedProcess {
             pid: ProcessId(pid_d),
-            server_id: ServerId("srv_d".into()),
+            server_id: ServerId::from_config_id("srv_d"),
             started_at: Utc::now(),
             cmdline: "".into(),
             port: port_d,
@@ -371,21 +371,21 @@ estimated_vram_mb = 100
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // A should be running with pid_a
-    let state_a = mgr_started.server_state(&ServerId("srv_a".into())).unwrap();
+    let state_a = mgr_started.server_state(&ServerId::from_config_id("srv_a")).unwrap();
     assert_eq!(state_a.lifecycle, ServerLifecycle::Running);
     assert_eq!(state_a.pid, Some(pid_a));
 
     // B should have spawned a NEW child because health failed, so orphan wasn't adopted
-    let state_b = mgr_started.server_state(&ServerId("srv_b".into())).unwrap();
+    let state_b = mgr_started.server_state(&ServerId::from_config_id("srv_b")).unwrap();
     // B was adopted (since first health check passed), but then it failed health checks and restarted!
     assert!(state_b.lifecycle == ServerLifecycle::Restarting || state_b.pid != Some(pid_b));
 
     // C should have spawned a NEW child because it was dead
-    let state_c = mgr_started.server_state(&ServerId("srv_c".into())).unwrap();
+    let state_c = mgr_started.server_state(&ServerId::from_config_id("srv_c")).unwrap();
     assert_ne!(state_c.pid, Some(pid_c));
 
     // D should have spawned a NEW child because model alias mismatched
-    let state_d = mgr_started.server_state(&ServerId("srv_d".into())).unwrap();
+    let state_d = mgr_started.server_state(&ServerId::from_config_id("srv_d")).unwrap();
     assert_ne!(state_d.pid, Some(pid_d));
 
     // Cleanup

@@ -108,7 +108,7 @@ async fn test_metrics_surface() {
     llamaforge_server_manager::spawn_metrics_poller(mgr_started.clone());
     let instrumented = InstrumentedServerManager::new(mgr_started.clone());
 
-    let srv_id = ServerId("srv_metrics".into());
+    let srv_id = ServerId::from_config_id("srv_metrics");
 
     // Wait for Running
     let mut is_running = false;

@@ -126,7 +126,7 @@ async fn test_scenario_full_stack() {
     llamaforge_server_manager::spawn_metrics_poller(mgr_started.clone());
     let instrumented = InstrumentedServerManager::new(mgr_started.clone());
 
-    let srv_id = ServerId("srv_scenario".into());
+    let srv_id = ServerId::from_config_id("srv_scenario");
 
     // Wait for Running
     let mut is_running = false;

@@ -86,7 +86,7 @@ async fn test_degradation_e2e_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId("srv_deg".into());
+    let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
     let mut is_running = false;
@@ -147,7 +147,7 @@ async fn test_degradation_e2e_no_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId("srv_deg".into());
+    let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
     let mut is_running = false;

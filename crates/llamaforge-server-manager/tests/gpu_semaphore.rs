@@ -95,8 +95,8 @@ async fn test_gpu_semaphore() {
     let _start_time = tokio::time::Instant::now();
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    let srv1_id = ServerId("srv1".into());
-    let srv2_id = ServerId("srv2".into());
+    let srv1_id = ServerId::from_config_id("srv1");
+    let srv2_id = ServerId::from_config_id("srv2");
 
     let mut srv1_running_time = None;
     let mut srv2_running_time = None;

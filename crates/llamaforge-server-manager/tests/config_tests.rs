@@ -110,7 +110,7 @@ async fn test_apply_config_diff() {
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let (mgr, token) = setup_manager(&tmp, port).await;
 
-    let srv_id = ServerId("srv_test".into());
+    let srv_id = ServerId::from_config_id("srv_test");
 
     // Wait for Running
     let mut is_running = false;
@@ -148,7 +148,7 @@ estimated_vram_mb = 100
     let diff = mgr.config().reload().await.unwrap();
     mgr.apply_config_diff(&diff).await;
 
-    let srv_added = ServerId("srv_added".into());
+    let srv_added = ServerId::from_config_id("srv_added");
     let mut is_added_running = false;
     for _ in 0..100 {
         if let Some(state) = mgr.server_state(&srv_added) {
