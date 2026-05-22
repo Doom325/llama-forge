@@ -66,16 +66,6 @@ pub trait ServerSelector: Send + Sync {
     fn select_server(&self, request: &dyn RequestView) -> Result<RoutingDecision, RoutingError>;
 }
 
-/// Used by Transport Layer (Component 07) at admission time.
-pub trait RouteValidator: Send + Sync {
-    /// Validates if a request is routable based on constraints.
-    fn validate_routable(
-        &self,
-        model: &ModelTarget,
-        capabilities: &RequestCapabilities,
-    ) -> Result<(), RoutingError>;
-}
-
 // Re-export key types from submodules so consumers can import from `llamaforge_routing::*`
 pub use error::RoutingError;
 pub use router::Router;

@@ -61,7 +61,9 @@ impl InferenceService for GrpcInferenceService {
         // previous "everything is `Internal`" shape.
         let request_id = llamaforge_types::RequestId::new(uuid::Uuid::now_v7());
         let incoming = crate::http::build_incoming_request(request_id, &chat_req);
-        self.route_validator.validate_routable(&incoming).map_err(map_admission_error)?;
+        self.route_validator
+            .validate_routable(&incoming.model_target, &incoming.capabilities)
+            .map_err(map_admission_error)?;
 
         let mut response_stream = self
             .inference_engine
@@ -515,7 +517,8 @@ mod tests {
     impl llamaforge_types::traits::RouteValidator for MockRouteValidator {
         fn validate_routable(
             &self,
-            _req: &llamaforge_types::traits::IncomingRequest,
+            _model: &llamaforge_types::ModelTarget,
+            _capabilities: &llamaforge_types::RequestCapabilities,
         ) -> Result<(), llamaforge_types::traits::AdmissionError> {
             Ok(())
         }

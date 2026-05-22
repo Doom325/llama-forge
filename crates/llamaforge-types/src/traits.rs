@@ -204,8 +204,17 @@ pub trait ServerControl: Send + Sync {
 }
 
 /// Open trait. RouteValidator
+///
+/// Takes the destructured `(model, capabilities)` tuple rather than the full
+/// `IncomingRequest`: the transport layer already has these fields and the
+/// validator only ever consumes those two. Callers destructure at the call
+/// site (one line) instead of forcing an adapter to wrap the whole request.
 pub trait RouteValidator: Send + Sync {
-    fn validate_routable(&self, req: &IncomingRequest) -> Result<(), AdmissionError>;
+    fn validate_routable(
+        &self,
+        model: &crate::ModelTarget,
+        capabilities: &crate::RequestCapabilities,
+    ) -> Result<(), AdmissionError>;
 }
 
 /// Open trait. QueueSubmitter

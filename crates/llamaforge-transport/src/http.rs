@@ -151,18 +151,21 @@ where
     // routing sees the real model alias / capabilities / params /
     // messages, not a placeholder.
     let incoming = build_incoming_request(request_id, &req);
-    state.route_validator.validate_routable(&incoming).map_err(|e| {
-        // Pattern-match instead of collapsing every error to `QueueFull`:
-        // `NoServerForModel` must surface as `404 model_not_found`, not
-        // `429 queue_full` with a wrong `Retry-After`.
-        match e {
-            llamaforge_types::traits::AdmissionError::QueueFull => {
-                let retry_after_secs = compute_retry_after(&*state.queue_submitter);
-                ApiError::QueueFull { retry_after_secs }
+    state
+        .route_validator
+        .validate_routable(&incoming.model_target, &incoming.capabilities)
+        .map_err(|e| {
+            // Pattern-match instead of collapsing every error to `QueueFull`:
+            // `NoServerForModel` must surface as `404 model_not_found`, not
+            // `429 queue_full` with a wrong `Retry-After`.
+            match e {
+                llamaforge_types::traits::AdmissionError::QueueFull => {
+                    let retry_after_secs = compute_retry_after(&*state.queue_submitter);
+                    ApiError::QueueFull { retry_after_secs }
+                }
+                other => ApiError::from(other),
             }
-            other => ApiError::from(other),
-        }
-    })?;
+        })?;
 
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
@@ -407,13 +410,16 @@ where
     };
 
     let incoming = build_incoming_request(request_id, &req);
-    state.route_validator.validate_routable(&incoming).map_err(|e| match e {
-        llamaforge_types::traits::AdmissionError::QueueFull => {
-            let retry_after_secs = compute_retry_after(&*state.queue_submitter);
-            ApiError::QueueFull { retry_after_secs }
-        }
-        other => ApiError::from(other),
-    })?;
+    state
+        .route_validator
+        .validate_routable(&incoming.model_target, &incoming.capabilities)
+        .map_err(|e| match e {
+            llamaforge_types::traits::AdmissionError::QueueFull => {
+                let retry_after_secs = compute_retry_after(&*state.queue_submitter);
+                ApiError::QueueFull { retry_after_secs }
+            }
+            other => ApiError::from(other),
+        })?;
 
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
@@ -733,7 +739,8 @@ mod tests {
     impl RouteValidator for MockRouteValidator {
         fn validate_routable(
             &self,
-            _req: &IncomingRequest,
+            _model: &llamaforge_types::ModelTarget,
+            _capabilities: &llamaforge_types::RequestCapabilities,
         ) -> Result<(), llamaforge_types::traits::AdmissionError> {
             Ok(())
         }
@@ -1015,7 +1022,11 @@ mod tests {
     async fn test_queue_full_returns_429_with_retry_after() {
         struct MockRouteValidatorRejects;
         impl RouteValidator for MockRouteValidatorRejects {
-            fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
+            fn validate_routable(
+                &self,
+                _model: &llamaforge_types::ModelTarget,
+                _capabilities: &llamaforge_types::RequestCapabilities,
+            ) -> Result<(), AdmissionError> {
                 Err(AdmissionError::QueueFull)
             }
         }

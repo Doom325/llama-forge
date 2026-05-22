@@ -38,7 +38,7 @@ use llamaforge_routing::Router;
 use llamaforge_server_manager::ServerManager;
 use llamaforge_transport::TransportDeps;
 use llamaforge_types::ports::SlotErasure;
-use llamaforge_types::traits::{AdmissionError, IncomingRequest, RouteValidator, SlotNotifier};
+use llamaforge_types::traits::SlotNotifier;
 use std::sync::atomic::AtomicU32;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -178,39 +178,11 @@ pub async fn build(
         metrics_exporter,
         request_metrics_store: metrics_store.clone(),
         store_maintenance: metrics_store,
-        route_validator: Arc::new(RouterValidatorAdapter { router: router.clone() }),
+        route_validator: router.clone(),
         inference_engine,
     };
 
     Ok((deps, BackgroundTasks { scheduler: scheduler_handle, server_manager }))
-}
-
-/// Bridges `routing::Router`'s `(model, capabilities) -> RoutingError`
-/// validation into the transport's `&IncomingRequest -> AdmissionError`
-/// shape. Maps any routing error to `AdmissionError::InvalidRequest`.
-struct RouterValidatorAdapter {
-    router: Arc<Router>,
-}
-
-impl RouteValidator for RouterValidatorAdapter {
-    fn validate_routable(&self, req: &IncomingRequest) -> Result<(), AdmissionError> {
-        use llamaforge_routing::RoutingError;
-        use llamaforge_types::ModelAlias;
-        <Router as llamaforge_routing::RouteValidator>::validate_routable(
-            &self.router,
-            &req.model_target,
-            &req.capabilities,
-        )
-        .map_err(|e| match e {
-            RoutingError::ModelNotFound { model, .. }
-            | RoutingError::ModelUnavailable { model, .. } => AdmissionError::NoServerForModel {
-                model: ModelAlias::new(std::sync::Arc::from(model.as_str())),
-            },
-            RoutingError::NoCapableServer { requested, .. } => AdmissionError::NoServerForModel {
-                model: ModelAlias::new(std::sync::Arc::from(requested.as_str())),
-            },
-        })
-    }
 }
 
 /// Bridges `server-manager::ServerStateSnapshot` to the routing layer's

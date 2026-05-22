@@ -215,7 +215,11 @@ async fn test_anthropic_no_token_before_preamble() {
 
 struct MockRouteValidatorRejects;
 impl RouteValidator for MockRouteValidatorRejects {
-    fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
+    fn validate_routable(
+        &self,
+        _model: &llamaforge_types::ModelTarget,
+        _capabilities: &llamaforge_types::RequestCapabilities,
+    ) -> Result<(), AdmissionError> {
         Err(AdmissionError::QueueFull)
     }
 }
