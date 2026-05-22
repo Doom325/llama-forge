@@ -1,55 +1,69 @@
-# Integration & Composition Root — Implementation Plan
+# Workspace Consolidation — Implementation Plan
 
-**Phase:** 8 (Final integration; closes v1)
-**Estimated LOC:** ~3,200 (~2,000 production + ~1,200 tests)
-**Estimated Duration:** 8–10 working days (single engineer)
-**Design Reference:** `docs/design.md` §4 (Architecture), §5 (Component Deep Dives — composition flow), §6 (Config schema), §8 (Testing strategy)
-**Branch Prefix:** `integration/`
+**Phase:** 9 (Post-v1 structural refactor — collapse 13-crate sprawl to 7-crate layout)
+**Estimated LOC:** ~4,500 lines moved + ~600 lines deleted (adapter glue, bridge functions, re-exports) — net **−600 LOC** despite touching every crate.
+**Estimated Duration:** 5–7 working days (single engineer)
+**Design Reference:** `docs/design.md` §4.2 (Hexagonal layering), issue #154 (the H4 finding driving this phase).
+**Branch Prefix:** `consolidate/`
 **Target:** `main` (via squash-merge PRs)
-**Upstream Dependencies:** All 7 component crates merged (✅ as of 2026-05-14):
-- `llamaforge-config`, `llamaforge-metrics`, `llamaforge-server-manager`, `llamaforge-queue`, `llamaforge-routing`, `llamaforge-dispatch`, `llamaforge-transport`
-- Plus `llamaforge-types`, `llamaforge-proto`, `llamaforge` (binary, currently stub).
+**Upstream Dependencies:** v1 closure complete (PRs #1–#11 from the prior Integration phase). H1/H2/H3 design-review fixes merged (#183/#184/#185).
 
-**Primary CoderAgent:** `AssistantCoderAgent_llamaforge-transport_final` (per role handoff 2026-05-14; see `~/.claude/projects/-Users-sumanthgottipati-git-llama-forge/memory/project_relay_agents.md`).
-**Primary Reviewer:** `ReviewerAgent_llamaforge-transport_final`.
-**Relay key prefix:** `llamaforge#integration-*`.
+**Primary CoderAgent:** `CoderAgent_llamaforge-designbugs`.
+**Primary Reviewer:** `ReviewerAgent_llamaforge-designbugs`.
+**Relay key prefix:** `llama-forge#consolidate-*`.
 
 ---
 
 ## Why this phase exists
 
-The seven component crates are individually merged and pass their own tests, but `cargo run -p llamaforge` produces a stub message. Three structural gaps prevent the system from actually running end-to-end:
+The new-design-review pass landed issue #154: 13 crates for ~23K lines of single-node code, several of which exist solely as adapter layers between other crates. Tracing one request end-to-end (HTTP in → queue → route → dispatch → backend → response) requires opening **seven** crates today: `transport`, `adapters/inference_engine`, `adapters/queue`, `queue`, `routing`, `dispatch`, and `types`. The new-hire test ("4–5 files to follow a request") fails by a wide margin.
 
-1. **Domain types are still empty stubs.** `IncomingRequest {}`, `QueueTicket {}`, `ServerSummary {}` are unit structs with no fields. The port traits (`QueueSubmitter::submit(IncomingRequest) -> Result<QueueTicket, ...>`, `ServerControl::list_servers() -> Vec<ServerSummary>`, etc.) pass empty data — even after wiring, nothing meaningful flows.
-2. **Only one of five port traits has a production impl.** `RouteValidator` is implemented on `Router` in `llamaforge-routing`. `QueueSubmitter`, `ServerControl`, `MetricsExporter`, and `InferenceEngine` have *zero* non-test implementations. Each upstream crate exports its own surface (e.g., `RequestPipeline`, `ServerManager`) but never adapts to the port the transport layer consumes.
-3. **`InferenceEngine` is the keystone and doesn't exist.** Transport's `start_servers` calls `inference_engine.chat_completion(req).await` returning a stream of chunks. That trait is the contract that glues queue → routing → dispatch into one protocol-agnostic API for transport to call. It has no production implementation anywhere — including the binary crate.
+H2 (duplicate `SlotNotifier`) and H3 (duplicate `RouteValidator`) were the symptoms — both arose because the same trait surface had to be declared in two crates to satisfy the layering. They are now fixed, but the structural pressure that *produced* them remains: every new port trait risks the same fate.
 
-Beyond those three, several smaller items are deferred behind `// TODO`, `v1.1`, or hardcoded constants — config knobs, TLS for gRPC, query-string filter parsing for the management API, true token-usage reporting, and the `ConfigOverlayStore` trait. These are mopping-up work, not load-bearing.
+A secondary issue caught by the H4 review: `ServerId` is defined twice — `llamaforge_types::ServerId(Uuid)` and `llamaforge_config::ServerId(String)` — requiring `config_server_id_to_types_id` bridge calls at every boundary. The unification removes ~50 lines of bridge code and a class of "which ServerId is in play?" debugging time.
 
-The phase output is a `cargo run -p llamaforge -- --config config/llamaforge.toml` that actually:
-- Loads config, builds 7 component instances, wires them via port traits
-- Spawns HTTP (`:8000`) and gRPC (`:50051`) servers
-- Accepts a request via OpenAI-compatible API, routes/queues/dispatches it through `mock-llama` (or a real `llama-server`), and streams tokens back
-- Shuts down gracefully on SIGTERM
+The phase output is a workspace where:
 
-That's VC-4 + VC-5 ("final sign-off") combined.
+- **13 crates collapse to 7**: `llamaforge`, `llamaforge-core`, `llamaforge-server`, `llamaforge-api`, `llamaforge-metrics`, `llamaforge-proto`, `mock-llama` (+ `llamaforge-e2e` as the test-infra peer).
+- **One `ServerId` type, used everywhere**, with config parsing/validation living in the same crate that defines the type.
+- **Request trace fits in ≤4 files** (api → core::queue → core::routing → api::dispatch is one crate hop, not six).
+- **No behavior change**: no public HTTP/gRPC surface change, no metric name change, no config schema change. This is pure structural refactor.
+
+After this phase lands, the next design-review pass should not produce another H2/H3-style finding for any new port trait.
+
+---
+
+## Target layout
+
+```
+llamaforge          (binary + serve + build + cli)             [unchanged crate name]
+llamaforge-core     (config + types + routing + queue)         [NEW — absorbs 4 crates]
+llamaforge-server   (server-manager + process + health + telemetry) [RENAMED from -server-manager]
+llamaforge-api      (transport + adapters + dispatch)          [NEW — absorbs 3 crates]
+llamaforge-metrics  (SQLite store)                             [unchanged]
+llamaforge-proto    (generated tonic/prost bindings)           [unchanged]
+mock-llama          (test backend)                             [unchanged]
+llamaforge-e2e      (test infra)                               [unchanged]
+```
+
+**Crates removed**: `llamaforge-types`, `llamaforge-routing`, `llamaforge-queue`, `llamaforge-dispatch`, `llamaforge-adapters` (5 crates merged in).
+**Crates renamed**: `llamaforge-server-manager` → `llamaforge-server`.
+**Crates added**: `llamaforge-core`, `llamaforge-api`.
+
+Module layout inside the new crates preserves the current source-file boundaries — e.g., `llamaforge-core/src/types/`, `llamaforge-core/src/routing/`, `llamaforge-core/src/queue/`. This makes the merge a `git mv` exercise rather than a rewrite, and keeps blame history intact.
 
 ---
 
 ## Ground Rules for CoderAgents
 
-1. **Read `docs/design.md` §4 + §5 first.** Every PR description references specific design doc sections it implements.
-2. **No `unwrap()` or `expect()` in production code paths.** The one exception remains `Uuid::now_v7()`. Tests excluded.
-3. **No blocking under `.await`.** Inherited from transport phase. `spawn_blocking` for CPU-heavy work; `try_recv` / `try_send` for non-blocking channel ops.
-4. **Every public type and trait gets a doc comment** citing the design doc section. `Open trait` / `Sealed trait` designation on all new traits.
-5. **Newtype wrappers for domain IDs.** Use `RequestId`, `ServerId`, `RequestorId`, `SessionId`, `ModelAlias` from `llamaforge-types` — never raw `String`.
-6. **Port traits, not concrete types, at adapter boundaries.** The `llamaforge` binary may import concrete types from any crate (it's the composition root). Library crates must not.
-7. **Workspace deps only.** New dependencies belong in `[workspace.dependencies]`. Member crates use `workspace = true`.
-8. **`cargo deny check` must pass** before each merge. The CI Audit Dependencies job won't catch advisories that land mid-PR fast enough.
-9. **Visibility discipline.** Composition-root types in `crates/llamaforge/src/` are `pub(crate)` unless re-exported. Domain types in `llamaforge-types` are `pub`.
-10. **`unwrap_or_default()` on `Result` is not an escape hatch.** Match explicitly or propagate. See PR4 (transport) Finding 3 — silent error swallowing is a finding.
-11. **No workflow refs in production code or comments.** Don't write `// Default from VC-2.6` or `// TODO(PR12)`. Use local-invariant wording: `// Defaults match design doc §6.2 until [gateway] config section lands.`
-12. **5-gate local verification + CI check before every relay closure:**
+1. **Behavior-preserving refactor only.** No new features, no API surface changes (HTTP/gRPC/metric names/config keys all stay identical). If a behavior change is tempting, defer it to a separate PR after this phase closes.
+2. **Use `git mv`, not delete-and-rewrite.** Preserves blame and makes the diff readable. CI's mergeability check fails fast if a file is touched in two places.
+3. **Module structure inside merged crates mirrors the old crate names.** `llamaforge-core/src/{types,config,routing,queue}/` — one submodule per absorbed crate. Don't flatten the source tree in the same PR; that's churn on top of churn.
+4. **`pub` ↔ `pub(crate)` audit at every merge.** When two crates merge, types previously `pub` to satisfy the crate boundary may now be `pub(crate)`. Each PR does this audit explicitly — tighten visibility where the dependency-graph collapse makes it possible. Document each demotion in the PR body.
+5. **Workspace deps only.** New deps belong in root `[workspace.dependencies]`; member crates use `workspace = true`. Same rule as Phase 8 — restated here because new `Cargo.toml`s will be created.
+6. **No `unwrap()`/`expect()` in production paths.** Inherited.
+7. **No blocking under `.await`.** Inherited.
+8. **5-gate local verification + CI check before every relay closure:**
     ```bash
     cargo build --workspace && \
     cargo clippy --workspace --all-targets -- -D warnings && \
@@ -57,659 +71,256 @@ That's VC-4 + VC-5 ("final sign-off") combined.
     cargo fmt --check && \
     cargo deny check
     echo "all-local=$?"
-    # then wait for GitHub Actions:
     gh pr checks <PR>
     ```
-    Every CI check must be SUCCESS. Cite the Actions run URL in the closure message.
-13. **File:line cites for each closed finding** in re-review responses. If you can't cite a line, the finding isn't resolved.
+9. **Each PR rewrites the `[workspace.dependencies]` block atomically.** Half-renamed workspace deps break every member crate at once; keep the change cohesive in one commit.
+10. **Per-PR PLAN.md tick.** Each PR closes specific task IDs in the section below; tick them in the same commit so the plan stays the source of truth.
+11. **`gh pr merge --squash --delete-branch`** for each landed PR. Use `--auto` only when a single PR is in flight; if two are queued, merge sequentially (per `project_automerge_race` memory).
+12. **Closing the relay cycle** sends a one-line verdict on the matching `llama-forge#consolidate-prN` key.
 
 ---
 
 ## Dependency Graph (PR merge order)
 
 ```
-                  ┌── PR3 ──┐
-PR1 ── PR2 ──────┼── PR4 ──┼── PR8 ── PR9 ── PR10 ── PR11
-                  ├── PR5 ──┤              ↗
-                  └── PR6 ──┘
-                  PR7 (independent) ───────┘
+PR1 (ServerId unification) ── PR2 (core merge) ── PR3 (api merge) ── PR4 (server rename) ── PR5 (docs/closure)
 ```
 
-- **PR1 → PR2** sequential: domain types must land before trait impls compile.
-- **PR3–PR6** parallel after PR2: each adapter (queue, server-manager, metrics-exporter, inference-engine wiring) implements a different port trait against the same `llamaforge-types` surface.
-- **PR7** (config schema additions) is independent — touches only `llamaforge-config`, can land any time after PR2.
-- **PR8** is the composition root — needs all 5 adapters merged.
-- **PR9 → PR10 → PR11** are strictly sequential end-to-end work.
+Strictly sequential. Each PR depends on the previous landing because:
+
+- **PR1 → PR2**: Once `ServerId` is unified, the merge of `types` + `config` is purely cosmetic. Doing them at the same time creates a 3000-line diff with intermingled type-redesign and file-moves; doing them sequentially keeps each PR reviewable.
+- **PR2 → PR3**: `llamaforge-api` depends on `llamaforge-core` (transport/dispatch/adapters all use `types`, `routing`, `config`). The new `-core` crate name must exist before `-api` can declare its dep.
+- **PR3 → PR4**: The rename of `server-manager` is independent in principle, but rebasing it on top of two crate-merges is much cheaper than rebasing two crate-merges on top of a rename.
+- **PR4 → PR5**: Docs/PLAN.md/README must reflect the final crate layout; cannot finalize until PR4 lands.
+
+There is no parallelism here. Each PR is large; running two in flight against the workspace `Cargo.toml` would conflict on every push.
 
 ---
 
-## PR1 — Domain types: real fields for the seven stubs
+## PR1 — `ServerId` unification
 
-**Branch:** `integration/01-domain-types`
-**Depends on:** `main` only
-**Size:** Medium (~350 lines)
-**Estimated Time:** 4–6 hours
+**Branch:** `consolidate/01-server-id-unify`
+**Depends on:** `main` only (post-#183/#184/#185)
+**Size:** Small (~150 lines changed, ~50 deleted)
+**Estimated Time:** 2–3 hours
 
 ### Purpose
 
-Replace the seven empty/under-populated domain stubs in `crates/llamaforge-types/` with field-complete types that satisfy the port-trait contracts. Update all crates that destructure or construct these types (transport, dispatch, queue, routing, server-manager) to compile.
+Eliminate the `llamaforge_config::ServerId(String)` ↔ `llamaforge_types::ServerId(Uuid)` duality. After this PR, exactly one `ServerId` type exists, defined in `llamaforge-types`, and is what everything uses.
 
 ### Audit of current state (file:line)
 
-- `crates/llamaforge-types/src/traits.rs:71` — `pub struct ServerSummary {}` (empty)
-- `crates/llamaforge-types/src/traits.rs:80` — `pub struct QueueTicket {}` (empty)
-- `crates/llamaforge-types/src/traits.rs:101` — `pub struct IncomingRequest {}` (empty)
-- `crates/llamaforge-types/src/traits.rs:74` — `pub enum ServerError { Failed }` (single uninformative variant)
-- `crates/llamaforge-types/src/traits.rs:89` — `pub enum AdmissionError { QueueFull }` (missing `Cancelled`, `InvalidRequest`)
-- `crates/llamaforge-types/src/traits.rs:95` — `pub enum QueueError { Failed }` (uninformative)
-- `crates/llamaforge-types/src/traits.rs:104` — `pub enum MetricsError { Failed }` (uninformative)
-- `crates/llamaforge-types/src/lib.rs:367` — `pub struct StreamError {}` (empty; mirrors dispatch's `DispatchError` but doesn't carry its variants)
+- `crates/llamaforge-types/src/lib.rs` — `pub struct ServerId(pub Uuid)` (the surviving canonical type)
+- `crates/llamaforge-config/src/types.rs` — `pub struct ServerId(pub String)` (the config-side slug/UUID-string variant)
+- `crates/llamaforge-config/src/handle.rs:27-35` — load-time validation that already coerces config IDs to canonical form
+- `crates/llamaforge/src/build.rs:281-287` — `fn config_server_id_to_types_id(s: &llamaforge_config::ServerId) -> llamaforge_types::ServerId` (the bridge being deleted)
+- `crates/llamaforge-server-manager/src/**` — `ServerStateSnapshot` uses `config::ServerId` in some adapters
 
 ### Tasks
 
 | # | Task | File(s) |
 |---|------|---------|
-| 1.1 | `IncomingRequest`: add fields per design doc §5.4.2 — `request_id: RequestId`, `requestor_id: RequestorId`, `requestor_class: RequestorClass`, `model_target: ModelTarget`, `capabilities: RequestCapabilities`, `messages: Vec<Message>`, `params: GenerationParams`, `stream: bool`, `session_id: Option<SessionId>`, `submitted_at: DateTime<Utc>`. Doc comment cites design doc §5.4.2. | `llamaforge-types/src/traits.rs` |
-| 1.2 | Define `GenerationParams` struct in `llamaforge-types/src/lib.rs` with `max_tokens: Option<u32>`, `temperature: Option<f32>`, `top_p: Option<f32>`, `top_k: Option<u32>`, `logit_bias: Option<HashMap<i32, f64>>`, `stop: Vec<String>`, `seed: Option<u64>`. Derive `Debug, Clone, Default, Serialize, Deserialize`. | `llamaforge-types/src/lib.rs` |
-| 1.3 | `QueueTicket`: add `request_id: RequestId`, `admitted_at: DateTime<Utc>`, `cancel_token: tokio_util::sync::CancellationToken`, `events: tokio::sync::mpsc::Receiver<DispatchEvent>`. `DispatchEvent` enum: `Queued { position: u32 }`, `Dispatched { server_id: ServerId, slot_id: SlotId }`, `FirstToken { ttft_ms: u64 }`, `Completed { tokens: u32 }`, `Failed { error: String }`. Doc comment notes ticket holds backpressure for cancellation. | `llamaforge-types/src/traits.rs` |
-| 1.4 | `ServerSummary`: `id: ServerId`, `alias: ModelAlias`, `state: ServerLifecycle`, `port: u16`, `slots_total: u32`, `slots_busy: u32`, `started_at: Option<DateTime<Utc>>`, `last_restart_at: Option<DateTime<Utc>>`. Serialize for management JSON. | `llamaforge-types/src/traits.rs` |
-| 1.5 | `StreamError`: convert to enum with `BackendDisconnect`, `Timeout`, `Cancelled`, `ChunkParse { reason: String }`, `Upstream(Box<dyn std::error::Error + Send + Sync>)`. Mirrors `llamaforge-dispatch::StreamError` (which is its actual source). | `llamaforge-types/src/lib.rs` |
-| 1.6 | `ServerError` / `QueueError` / `MetricsError`: replace `Failed` with informative variants. `ServerError`: `NotFound { id: ServerId }`, `AlreadyRunning { id: ServerId }`, `SpawnFailed { reason: String }`, `Unreachable { id: ServerId }`. `QueueError`: `NotFound { id: RequestId }`, `AlreadyCancelled`, `Internal { detail: String }`. `MetricsError`: `StoreUnavailable`, `Internal { detail: String }`. | `llamaforge-types/src/traits.rs` |
-| 1.7 | `AdmissionError`: add `Cancelled`, `InvalidRequest { reason: String }`, `RateLimited { retry_after_secs: u32 }` alongside existing `QueueFull`. | `llamaforge-types/src/traits.rs` |
-| 1.8 | Update transport's `tonic::Status::from(ApiError)` mapping and `IntoResponse for ApiError` to surface the new error variants where applicable (e.g., `AdmissionError::RateLimited` should carry the `retry_after_secs` to the existing `ApiError::QueueFull { retry_after_secs }`). | `llamaforge-transport/src/error.rs` |
-| 1.9 | Mechanical fixes in dependent crates: every site that constructed `IncomingRequest {}`, `QueueTicket {}`, etc. must compile. Search with `grep -rn 'IncomingRequest {}\|QueueTicket {}\|ServerSummary {}' crates/`. | various |
-| 1.10 | Doc comments on every new field referencing design doc §5.4.2 (IncomingRequest), §5.4.3 (QueueTicket), §5.3.1 (ServerSummary). | — |
-| 1.11 | Unit tests: round-trip serde on `ServerSummary`, `QueueSnapshot`, `GenerationParams` (all are public API for management JSON). | `llamaforge-types/src/lib.rs` |
+| 1.1 | `llamaforge-config` depends on `llamaforge-types` (workspace dep). Today config has no internal deps; this introduces one. Edge is acyclic: types is a leaf. | `crates/llamaforge-config/Cargo.toml` |
+| 1.2 | Replace `pub struct ServerId(pub String)` in `llamaforge-config::types` with a re-export: `pub use llamaforge_types::ServerId;`. Remove the struct entirely. | `crates/llamaforge-config/src/types.rs` |
+| 1.3 | Move config-side parsing/validation (currently the `String` invariants in `handle.rs:27-35`) into a `ServerId::from_config_str(&str) -> Result<Self, ConfigError>` helper on `llamaforge-types::ServerId`. This is the *only* place the slug-vs-UUID coercion lives. | `crates/llamaforge-types/src/lib.rs`, `crates/llamaforge-config/src/handle.rs` |
+| 1.4 | Delete `config_server_id_to_types_id` and the `ServerStateAdapter` projection in `build.rs` (the two-step projection collapses to identity now). | `crates/llamaforge/src/build.rs` |
+| 1.5 | Sweep all callers: `grep -rn 'config_server_id_to_types_id\|llamaforge_config::ServerId' crates/`. Each hit becomes a direct `ServerId` reference. | various |
+| 1.6 | Unit tests for `ServerId::from_config_str`: round-trip UUID-shaped strings, reject empty strings, accept the slug forms that worked before. Carry over existing test cases from `llamaforge-config::handle::tests`. | `crates/llamaforge-types/src/lib.rs` |
+| 1.7 | `cargo deny check` — verify no advisory landed in the new `config → types` edge's transitive graph. | — |
 
 ### PR1 Acceptance Criteria
 
-- [ ] `cargo build --workspace` succeeds with the new fields.
-- [ ] `grep -rn 'pub struct \(IncomingRequest\|QueueTicket\|ServerSummary\) {}' crates/` returns zero hits.
-- [ ] No uninformative `Failed,` variant remains in `llamaforge-types/src/traits.rs`.
-- [ ] 5 local gates green + 3/3 CI checks green.
-- [ ] Doc comments cite design doc sections for every new type.
+- [ ] `grep -rn 'config_server_id_to_types_id' crates/` returns 0 hits.
+- [ ] `grep -rn 'llamaforge_config::ServerId' crates/` returns 0 hits.
+- [ ] Exactly one `pub struct ServerId` in the workspace (`grep -rn 'pub struct ServerId' crates/` returns 1 line).
+- [ ] All 5 local gates green; 3/3 CI checks green.
+- [ ] Relay closure on `llama-forge#consolidate-pr1` cites the run URL.
 
 ---
 
-## PR2 — Adapter scaffolding crate
+## PR2 — `llamaforge-core`: merge `types` + `config` + `routing` + `queue`
 
-**Branch:** `integration/02-adapters`
+**Branch:** `consolidate/02-core-merge`
 **Depends on:** PR1 merged
-**Size:** Small (~200 lines)
-**Estimated Time:** 2–3 hours
+**Size:** Large (~2,500 lines moved across crates; ~200 deleted from re-exports/visibility tightening)
+**Estimated Time:** 8–12 hours
 
 ### Purpose
 
-Create a new library crate `crates/llamaforge-adapters/` that will house the port-trait implementations bridging concrete component types (`RequestPipeline`, `ServerManager`, etc.) to the port traits in `llamaforge-types`. This keeps the binary crate small and makes the adapter logic unit-testable.
+Create `crates/llamaforge-core/` by absorbing the four leaf-ish crates that together constitute the "brain" of the orchestrator: domain types, configuration, routing policy, and the request queue. After this PR the four old crates are deleted; their contents live under `llamaforge-core::{types, config, routing, queue}`.
 
-Why a separate crate (not the binary): the orchestrator needs the same adapter trait impls when running under workspace integration tests (PR10) and the binary crate isn't a good place for that — integration tests would have to depend on a binary's `[lib]`, which Rust supports awkwardly.
+### Why these four together
+
+The four form a closed sub-dependency-graph today: `types` is a leaf, `config` depends on `types` (after PR1), `routing` depends on both, `queue` depends on all three. There is no fifth crate to add (every other internal crate depends on at least one of these) and no subset to remove (the dispatcher and adapters reach across all four). Merging them in one step is the only way to land the new crate in a usable state.
 
 ### Tasks
 
 | # | Task | File(s) |
 |---|------|---------|
-| 2.1 | `cargo init --lib crates/llamaforge-adapters`. Workspace member. | `Cargo.toml`, `crates/llamaforge-adapters/` |
-| 2.2 | Dependencies: `llamaforge-types`, `llamaforge-config`, `llamaforge-queue`, `llamaforge-server-manager`, `llamaforge-routing`, `llamaforge-dispatch`, `llamaforge-metrics`, `tokio`, `tokio-util`, `async-trait`, `tracing`. All via `.workspace = true`. | `crates/llamaforge-adapters/Cargo.toml` |
-| 2.3 | Module structure: `src/lib.rs` declares `pub mod queue;`, `pub mod server_control;`, `pub mod metrics_exporter;`, `pub mod inference_engine;`. Each module is a stub with one `pub struct <Name>Adapter` and a `pub fn new(...)` constructor — no logic yet (PRs 3–6 fill them). | `crates/llamaforge-adapters/src/` |
-| 2.4 | Crate doc comment in `lib.rs`: "Adapters bridging concrete component types to the port traits consumed by `llamaforge-transport`. See design doc §4.2 Hexagonal layering." | `crates/llamaforge-adapters/src/lib.rs` |
+| 2.1 | `mkdir crates/llamaforge-core && cargo init --lib`. Workspace member; standard `[lib]` with the canonical doc comment from CLAUDE.md (cites design doc §4.2). | `Cargo.toml`, `crates/llamaforge-core/` |
+| 2.2 | `git mv` each old crate's `src/` into a sub-tree: `crates/llamaforge-types/src/*.rs` → `crates/llamaforge-core/src/types/*.rs` (and similarly for `config`, `routing`, `queue`). Tests follow under `crates/llamaforge-core/tests/{types,config,routing,queue}/`. **No content edits in this commit — pure moves.** | `git mv` |
+| 2.3 | New `crates/llamaforge-core/src/lib.rs` declares `pub mod types; pub mod config; pub mod routing; pub mod queue;`. Re-exports the load-bearing types at the crate root for compat (`pub use types::{ServerId, RequestId, ModelTarget, ...}` — only the symbols imported by ≥3 external sites; everything else stays namespaced). | `crates/llamaforge-core/src/lib.rs` |
+| 2.4 | Merge the four old `Cargo.toml`s into the new one. Union the dependency list, deduplicating. Workspace deps only. | `crates/llamaforge-core/Cargo.toml` |
+| 2.5 | Update `[workspace.dependencies]` at the workspace root: remove `llamaforge-types`, `-config`, `-routing`, `-queue`; add `llamaforge-core`. | `Cargo.toml` |
+| 2.6 | Sweep every other crate's `Cargo.toml`: replace `llamaforge-types = { workspace = true }` (and the other 3) with `llamaforge-core = { workspace = true }`. Affects `llamaforge-metrics`, `-server-manager`, `-dispatch`, `-transport`, `-adapters`, `llamaforge` (bin/lib), `llamaforge-e2e`. | various |
+| 2.7 | Path-rename sweep: replace `llamaforge_types::` → `llamaforge_core::types::`, `llamaforge_config::` → `llamaforge_core::config::`, `llamaforge_routing::` → `llamaforge_core::routing::`, `llamaforge_queue::` → `llamaforge_core::queue::`. Use `git grep -lE 'llamaforge_(types|config|routing|queue)::' \| xargs sed -i ''`. Then build and fix the inevitable false-positive matches by hand. | every member crate |
+| 2.8 | Visibility audit. Symbols that were `pub` to cross the (now-deleted) crate boundary may become `pub(crate)`. Specifically:<br>• Internal helpers in `routing::affinity::*` no longer need to be `pub` for `routing::router` to use them across files within the same module — already fine, but the audit catches `pub use` re-exports that can drop to `pub(super)`.<br>• Internal queue plumbing (e.g. `pipeline::HealthTracker`) was `pub` for `llamaforge::build` to construct it; that's still needed (composition root reaches in), so leave alone.<br>Document each demotion in the PR body. | various |
+| 2.9 | Re-export ergonomics. The old crate root re-exports (`pub use error::RoutingError;` in `routing/lib.rs`) move into `llamaforge-core/src/routing/mod.rs` so call sites stay `llamaforge_core::routing::RoutingError` rather than `llamaforge_core::routing::error::RoutingError`. | `crates/llamaforge-core/src/{types,config,routing,queue}/mod.rs` |
+| 2.10 | Delete the four old crate directories. `git rm -rf crates/llamaforge-{types,config,routing,queue}`. | — |
+| 2.11 | Update `.github/workflows/ci.yml` if any job mentions a removed crate by name (e.g. `cargo doc -p llamaforge-types`). | `.github/workflows/ci.yml` |
+| 2.12 | Update PLAN.md (this file) and `docs/component-designs/{01_CONFIG_MANAGER,04_REQUEST_QUEUE_AND_SCHEDULER,05_SMART_ROUTING}.md` to refer to the new `llamaforge-core::*` paths. Code-path cites in those design docs become stale otherwise. | `docs/component-designs/*.md` |
+| 2.13 | Run the full test suite — the queue/routing tests in particular exercise cross-module wiring and will catch missed renames. | — |
 
 ### PR2 Acceptance Criteria
 
-- [x] `cargo build -p llamaforge-adapters` succeeds (with stub impls).
-- [x] No production code outside `llamaforge-adapters` depends on it yet.
-- [x] 5 local gates green + 3/3 CI green.
+- [ ] `ls crates/` shows no `llamaforge-{types,config,routing,queue}` directories.
+- [ ] `grep -rn 'llamaforge_types::\|llamaforge_config::\|llamaforge_routing::\|llamaforge_queue::' crates/` returns 0 hits in non-test paths (test fixtures may briefly use full paths; tidy if unsightly).
+- [ ] `cargo build --workspace` ≤ wall-clock of pre-merge baseline + 10% (one fewer crate to compile should *help*, not hurt).
+- [ ] All 5 local gates green; 3/3 CI checks green.
+- [ ] No `cargo deny check` advisory regression.
+- [ ] PR body lists each visibility demotion explicitly.
 
 ---
 
-## VC-A — Type & Adapter Foundation Verification
+## PR3 — `llamaforge-api`: merge `transport` + `adapters` + `dispatch`
 
-**Gate:** PR1 + PR2 merged.
-
-| # | Check | Pass criterion |
-|---|-------|-----------------|
-| VC-A.1 | Domain types complete | `IncomingRequest`, `QueueTicket`, `ServerSummary` all have ≥3 fields each |
-| VC-A.2 | Adapter crate scaffolded | `crates/llamaforge-adapters/src/{queue,server_control,metrics_exporter,inference_engine}.rs` all exist |
-| VC-A.3 | Workspace compiles | `cargo build --workspace` clean |
-| VC-A.4 | CI clean | All 3 Actions checks SUCCESS on latest `main` |
-
----
-
-## PR3 — `QueueSubmitterAdapter`: bridge to `RequestPipeline`
-
-**Branch:** `integration/03-queue-adapter`
+**Branch:** `consolidate/03-api-merge`
 **Depends on:** PR2 merged
-**Size:** Medium (~300 lines)
-**Estimated Time:** 4–6 hours
+**Size:** Large (~3,000 lines moved; ~400 deleted from adapter-only-existed-for-glue code)
+**Estimated Time:** 8–12 hours
 
 ### Purpose
 
-Implement `QueueSubmitter` for a `QueueSubmitterAdapter` that wraps `llamaforge_queue::RequestPipeline`. Owns the translation from the port trait's `IncomingRequest` to the queue's internal request envelope, and translates the queue's submit-result + cancel + status calls back through the port trait.
+Create `crates/llamaforge-api/` by absorbing the three crates that together implement the request-handling pipeline: the HTTP/gRPC transport, the port-trait adapters, and the dispatch/proxy layer. After this PR, the three old crates are deleted; their contents live under `llamaforge-api::{transport, adapters, dispatch}`.
+
+### Why these three together
+
+`adapters` exists today solely to bridge port traits between `transport` and the upstream component crates. When `transport` and `dispatch` live in the same crate, the `InferenceEngineAdapter` and `QueueSubmitterAdapter` are no longer adapters at all — they're internal wiring. Several adapter structs (~400 lines total) collapse to direct calls.
+
+`dispatch` and `transport` are kept separate today only because `adapters` needs both. Without `adapters` as a forced intermediary, separating them costs more than it saves.
 
 ### Tasks
 
 | # | Task | File(s) |
 |---|------|---------|
-| 3.1 | `pub struct QueueSubmitterAdapter { pipeline: Arc<RequestPipeline>, dispatch_event_tx: ... }`. Constructor takes the pipeline. | `crates/llamaforge-adapters/src/queue.rs` |
-| 3.2 | `impl QueueSubmitter for QueueSubmitterAdapter` — `submit()` translates `IncomingRequest` to queue's envelope and calls `pipeline.submit(envelope)`. Returns `QueueTicket` populated with `request_id`, `admitted_at = Utc::now()`, `cancel_token`, and an `mpsc::Receiver<DispatchEvent>` whose sender is held by the pipeline-watcher task. | `crates/llamaforge-adapters/src/queue.rs` |
-| 3.3 | `cancel()` calls into the pipeline's cancel API and emits `DispatchEvent::Failed { error: "cancelled" }` on the event channel before returning. | `crates/llamaforge-adapters/src/queue.rs` |
-| 3.4 | `status()` snapshots the queue depth and computes `estimated_throughput_req_sec` from the metrics layer (passed in via constructor or held via Arc). Returns a `QueueSnapshot`. | `crates/llamaforge-adapters/src/queue.rs` |
-| 3.5 | Error mapping: queue's internal admission errors map to `AdmissionError::QueueFull` / `RateLimited` / `InvalidRequest`. Document each branch. | `crates/llamaforge-adapters/src/queue.rs` |
-| 3.6 | Unit tests with a stub `RequestPipeline` (already supported in queue crate's `test-utils` feature, or write a minimal mock here). Cover: successful submit, queue-full rejection, cancel, status returning real depth. | tests in `queue.rs` |
-| 3.7 | If `RequestPipeline` doesn't currently expose `cancel(request_id)` or a stream-of-events API, add a focused PR to `llamaforge-queue` first. **Decision required:** if the change to `llamaforge-queue` is non-trivial (>50 LOC), break it into its own preliminary PR (`integration/03a-queue-cancel-api`) and merge first. | `llamaforge-queue/src/pipeline.rs` (if needed) |
+| 3.1 | `mkdir crates/llamaforge-api && cargo init --lib`. Workspace member. Crate doc cites design doc §4.2 + §7 (Transport layer). | `Cargo.toml`, `crates/llamaforge-api/` |
+| 3.2 | `git mv` each old crate's `src/` into a sub-tree: `transport/` → `llamaforge-api/src/transport/`, `adapters/` → `llamaforge-api/src/adapters/`, `dispatch/` → `llamaforge-api/src/dispatch/`. Tests likewise. **Pure moves in this commit.** | `git mv` |
+| 3.3 | `crates/llamaforge-api/src/lib.rs` declares the three submodules and re-exports the load-bearing public types: `TransportDeps`, `start_servers`, `Dispatcher`, `ReqwestClientStore`, and the adapter constructors `QueueSubmitterAdapter::new`, `ServerControlAdapter::new`, `MetricsExporterAdapter::new`, `InferenceEngineAdapter::new`. | `crates/llamaforge-api/src/lib.rs` |
+| 3.4 | Union the three `Cargo.toml`s. Note that `transport` brings the proto dep, `dispatch` brings `reqwest`, and `adapters` is the only one that needed everything — the union is the union. | `crates/llamaforge-api/Cargo.toml` |
+| 3.5 | Update `[workspace.dependencies]`: remove `llamaforge-transport`, `-adapters`, `-dispatch`; add `llamaforge-api`. | `Cargo.toml` |
+| 3.6 | Sweep `Cargo.toml`s in remaining crates that referenced any of the three: `llamaforge` (bin/lib), `llamaforge-e2e`. | `crates/llamaforge/Cargo.toml`, `crates/llamaforge-e2e/Cargo.toml` |
+| 3.7 | Path-rename sweep: `llamaforge_transport::` → `llamaforge_api::transport::`, `llamaforge_adapters::` → `llamaforge_api::adapters::`, `llamaforge_dispatch::` → `llamaforge_api::dispatch::`. Same mechanical sweep as PR2. | every remaining member crate |
+| 3.8 | Adapter collapse audit. Now that `transport`, `adapters`, and `dispatch` live in one crate, several adapter structs become superfluous:<br>• `InferenceEngineAdapter` exists to satisfy `transport::InferenceEngine`. With dispatch + transport in the same crate, the trait can be implemented directly on a thinner type, or the trait deleted in favor of a concrete service. **Decision deferred to PR5**: leave the structs in place for PR3 to keep the diff bounded, document the collapse opportunity in `docs/component-designs/06_DISPATCH_AND_PROXY.md`, follow up after PR4 lands.<br>• `QueueSubmitterAdapter` / `ServerControlAdapter` / `MetricsExporterAdapter`: same — they survive PR3, get re-examined in PR5. | `docs/component-designs/06_DISPATCH_AND_PROXY.md` |
+| 3.9 | Visibility audit. The transport-side mock impls in `*/src/grpc.rs::tests` and `*/src/http.rs::tests` reach into dispatch-internal types via `pub` types — many can drop to `pub(crate)` or `pub(super)` now. List each demotion in PR body. | various |
+| 3.10 | Delete the three old crate directories. | — |
+| 3.11 | Update component design docs: `06_DISPATCH_AND_PROXY.md`, `07_TRANSPORT_LAYER.md`, and any reference to `llamaforge-adapters` (the design doc for adapters is the README of the old crate; if it carries any standalone notes, fold into `06` and `07`). | `docs/component-designs/*.md` |
+| 3.12 | Run full test suite. The HTTP and gRPC integration tests under `crates/llamaforge-api/src/transport/tests/` are the highest-cardinality and will catch any missed path-rename. | — |
 
 ### PR3 Acceptance Criteria
 
-- [ ] `impl QueueSubmitter for QueueSubmitterAdapter` compiles.
-- [ ] Unit tests cover the four `QueueSubmitter` methods + all `AdmissionError` mappings.
-- [ ] No new `unwrap()`/`expect()` in production paths.
-- [ ] 5 local gates green + 3/3 CI green.
+- [ ] `ls crates/` shows no `llamaforge-{transport,adapters,dispatch}` directories.
+- [ ] `grep -rn 'llamaforge_transport::\|llamaforge_adapters::\|llamaforge_dispatch::' crates/` returns 0 hits in non-test paths.
+- [ ] HTTP integration tests (`crates/llamaforge-api/src/transport/http/*` tests) pass at the same count as pre-merge.
+- [ ] gRPC integration tests (`crates/llamaforge-api/src/transport/grpc/*` tests) pass at the same count as pre-merge.
+- [ ] All 5 local gates green; 3/3 CI checks green.
+- [ ] PR body lists adapter-collapse opportunities deferred to PR5 (not silently elided).
 
 ---
 
-## PR4 — `ServerControlAdapter`: bridge to `ServerManager`
+## PR4 — Rename `llamaforge-server-manager` → `llamaforge-server`
 
-**Branch:** `integration/04-server-control-adapter`
-**Depends on:** PR2 merged (parallel with PR3)
-**Size:** Small (~200 lines)
-**Estimated Time:** 3–4 hours
+**Branch:** `consolidate/04-server-rename`
+**Depends on:** PR3 merged
+**Size:** Small (~50 lines changed — `Cargo.toml`, workspace `[dependencies]`, import paths)
+**Estimated Time:** 1–2 hours
 
 ### Purpose
 
-Implement `ServerControl` on a `ServerControlAdapter` wrapping `llamaforge_server_manager::ServerManager`. The three port methods (`list_servers`, `start_server`, `stop_server`) thinly translate to manager calls and project the manager's internal `ManagedServer` view to the public `ServerSummary` shape.
+The crate's name today (`llamaforge-server-manager`) is awkward and inconsistent with the target layout's naming convention (`llamaforge-core`, `llamaforge-api`, `llamaforge-server`). Rename to `llamaforge-server`. Pure rename — no module restructure, no behavior change.
 
 ### Tasks
 
 | # | Task | File(s) |
 |---|------|---------|
-| 4.1 | `pub struct ServerControlAdapter { manager: Arc<ServerManager> }` with constructor. | `crates/llamaforge-adapters/src/server_control.rs` |
-| 4.2 | `list_servers()`: read the manager's snapshot, project each entry into `ServerSummary` (id, alias, state, port, slots_total, slots_busy, started_at, last_restart_at). | `crates/llamaforge-adapters/src/server_control.rs` |
-| 4.3 | `start_server(&ServerId)`: call manager's `request_start(id)`. Map `ServerManager::Error::NotFound` → `ServerError::NotFound`, `AlreadyRunning` → `ServerError::AlreadyRunning`, spawn failures → `SpawnFailed`. | `crates/llamaforge-adapters/src/server_control.rs` |
-| 4.4 | `stop_server(&ServerId)`: call manager's `request_stop(id)`. Same error mapping pattern. | `crates/llamaforge-adapters/src/server_control.rs` |
-| 4.5 | Unit tests with a stub manager (or real `ServerManager` driven against `mock-llama` if test-utils feature allows it). | tests in `server_control.rs` |
+| 4.1 | `git mv crates/llamaforge-server-manager crates/llamaforge-server`. | — |
+| 4.2 | Edit `crates/llamaforge-server/Cargo.toml`: `name = "llamaforge-server"`. | `crates/llamaforge-server/Cargo.toml` |
+| 4.3 | Update workspace `[workspace.dependencies]`: rename the entry. | `Cargo.toml` |
+| 4.4 | Sweep `Cargo.toml`s in `llamaforge`, `llamaforge-api`, `llamaforge-e2e` to use the new name. | various |
+| 4.5 | Path-rename sweep: `llamaforge_server_manager::` → `llamaforge_server::`. Mechanical. | every member crate |
+| 4.6 | Update component design doc filename if it embeds the old crate name. | `docs/component-designs/03_SERVER_MANAGER.md` (content only — keep filename) |
+| 4.7 | `cargo doc --no-deps --workspace` to confirm the doc tree builds with the new name. | — |
 
 ### PR4 Acceptance Criteria
 
-- [x] `impl ServerControl for ServerControlAdapter` compiles.
-- [x] All `ServerError` variants from PR1 mapped from at least one upstream error case.
-- [x] 5 local gates green + 3/3 CI green.
+- [ ] `ls crates/` shows `llamaforge-server`, not `llamaforge-server-manager`.
+- [ ] `grep -rn 'llamaforge_server_manager\|llamaforge-server-manager' .` returns 0 hits anywhere in the repo (including docs, CI, CLAUDE.md if applicable).
+- [ ] All 5 local gates green; 3/3 CI checks green.
+- [ ] `cargo doc` clean.
 
 ---
 
-## PR5 — `MetricsExporterAdapter`: bridge to the Prometheus registry
+## PR5 — Closure: docs, README, deferred adapter collapse, plan reset
 
-**Branch:** `integration/05-metrics-exporter-adapter`
-**Depends on:** PR2 merged (parallel with PR3/PR4)
-**Size:** Small (~150 lines)
-**Estimated Time:** 2–3 hours
-
-### Purpose
-
-Implement `MetricsExporter` on a `MetricsExporterAdapter` that wraps the `metrics_exporter_prometheus::PrometheusBuilder` recorder (already a workspace dep). Returns the text exposition format on demand. Distinct from `MetricsStore` (which is SQLite-backed historical metrics).
-
-### Tasks
-
-| # | Task | File(s) |
-|---|------|---------|
-| 5.1 | Build a `PrometheusHandle` at startup, hold it in `MetricsExporterAdapter`. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
-| 5.2 | `gather_text()`: returns `self.handle.render()`. Per design doc §4.2 the `/metrics` endpoint must always return 200, even on degraded state. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
-| 5.3 | Constructor: `MetricsExporterAdapter::install_global()` returns `(adapter, install_result)` and calls `PrometheusBuilder::new().install_recorder()` once at boot. Document that this is a process-global install. | `crates/llamaforge-adapters/src/metrics_exporter.rs` |
-| 5.4 | Verify that the existing `metrics::counter!`/`gauge!`/`histogram!` calls scattered through the transport crate (and elsewhere) actually flow through this recorder. Add a single unit test that emits a counter and asserts `render()` contains the metric name. | tests in `metrics_exporter.rs` |
-
-### PR5 Acceptance Criteria
-
-- [x] `cargo run -p llamaforge-adapters --example metrics_smoke` (or unit test) shows `llamaforge_*` metric names in the rendered output.
-- [x] No `unwrap()` in production paths.
-- [x] 5 local gates green + 3/3 CI green.
-
----
-
-## PR6 — `InferenceEngineAdapter`: the keystone
-
-**Branch:** `integration/06-inference-engine-adapter`
-**Depends on:** PR3 merged (needs `QueueSubmitterAdapter`); PR2 (adapter crate)
-**Size:** Large (~600 lines including streaming + error mapping + tests)
-**Estimated Time:** 8–12 hours
-
-### Purpose
-
-Implement `InferenceEngine` on a new `InferenceEngineAdapter`. This is the most substantive PR in this phase — it owns the request lifecycle:
-
-```
-ChatCompletionRequest
-    → translate to IncomingRequest
-    → submit via QueueSubmitter (returns QueueTicket with event stream)
-    → on Dispatched event: ask SmartRouter (RouteValidator? — see Note below) for slot
-    → call Dispatcher::proxy (Component 06) to get a bytes stream from llama-server
-    → parse llama.cpp SSE bytes into ChatCompletionChunk
-    → yield chunks (with QueueUpdate intersperced from DispatchEvent::Queued)
-    → on completion/error/cancel: clean up, record metrics
-```
-
-This wires four components together. The implementation crosses the `Dispatcher → SmartRouter → Queue → Metrics` boundaries within a single async function.
-
-### Tasks
-
-| # | Task | File(s) |
-|---|------|---------|
-| 6.1 | `pub struct InferenceEngineAdapter { queue: Arc<dyn QueueSubmitter>, router: Arc<llamaforge_routing::Router>, dispatcher: Arc<llamaforge_dispatch::Dispatcher>, metrics: Arc<llamaforge_metrics::MetricsIngest> }`. Constructor injection (Arc-of-trait for queue, Arc-of-concrete for router/dispatcher/metrics until those grow port traits). | `crates/llamaforge-adapters/src/inference_engine.rs` |
-| 6.2 | `chat_completion(req: ChatCompletionRequest)` translates to `IncomingRequest`: generates `RequestId::from(Uuid::now_v7())`, maps `req.model` to `ModelTarget::Exact(ModelAlias::new(req.model))`, populates `GenerationParams` from `req.{max_tokens,temperature,...}`, sets `submitted_at = Utc::now()`. Caller-provided `RequestorId` and `RequestorClass` come from a `RequestContext` extension (defer to "anonymous" for v1 if no header). | `crates/llamaforge-adapters/src/inference_engine.rs` |
-| 6.3 | Call `queue.submit(incoming_req)?`. Hold the returned `QueueTicket`. The `events` `mpsc::Receiver` is the source of state-change signals. | — |
-| 6.4 | Build the output `Stream<Item = Result<ChatCompletionChunk, StreamError>>`. The stream's `poll_next` drives a state machine: `WaitingForDispatch → AwaitingFirstToken → Streaming → Completed`. While `WaitingForDispatch`, yield `ChatCompletionChunk::QueueUpdate { position }` events from the `DispatchEvent::Queued` ticks. On `DispatchEvent::Dispatched { server_id, slot_id }`, transition to dispatching. | — |
-| 6.5 | Dispatching: call `dispatcher.proxy(server_id, slot_id, incoming_req_payload)`, get back a `ResponseStream` (bytes). Wrap with a parser that emits `ChatCompletionChunk::Token(s)` for each `data: {"content":"..."}` SSE line from llama.cpp, and `ChatCompletionChunk::Stop(finish_reason)` on the final chunk. Use a lightweight SSE parser (`tokio_util::codec` LinesCodec is sufficient). | — |
-| 6.6 | Cancellation: the ticket's `cancel_token` is observed by a `select!` arm; on cancellation, drop the dispatcher stream (its `Drop` releases the slot per dispatch's RAII guard), emit `DispatchEvent::Failed { error: "cancelled" }`, and end the stream. | — |
-| 6.7 | Error mapping: dispatch's `DispatchError` → transport's `StreamError` (`BackendDisconnect`, `Timeout`, `ChunkParse`, `Upstream`). | — |
-| 6.8 | Metrics recording: at each lifecycle point, emit `metrics::counter!` / `metrics::histogram!`. Specifically TTFT histogram on first `ChatCompletionChunk::Token`, total tokens counter on `Stop`, queue-wait histogram on transition out of `WaitingForDispatch`. | — |
-| 6.9 | Unit tests: mock queue + mock dispatcher (return controlled byte stream) + real router (with one mock server entry). Cover: happy-path streaming, queue cancellation, dispatch error mid-stream, client disconnect (drop the consumer side). | tests in `inference_engine.rs` |
-
-### Note on SmartRouter integration
-
-`Router::select(&IncomingRequest) -> Result<RoutingDecision, RoutingError>` returns the picked server. Decide in PR6 whether the adapter calls `router.select` directly *or* whether queue admission already runs routing (and the `DispatchEvent::Dispatched` carries the answer). Read `crates/llamaforge-queue/src/pipeline.rs` to confirm; document the choice in a code comment with a design doc cite.
-
-### PR6 Acceptance Criteria
-
-- [ ] `impl InferenceEngine for InferenceEngineAdapter` compiles and passes the 4 unit tests above.
-- [ ] Streaming path parses llama.cpp SSE into `ChatCompletionChunk` variants correctly.
-- [ ] No `unwrap()` outside `Uuid::now_v7()`.
-- [ ] No blocking calls under `.await` (audit explicitly: no `std::sync::Mutex::lock().await` or similar).
-- [ ] 5 local gates green + 3/3 CI green.
-
----
-
-## PR7 — Config schema closing
-
-**Branch:** `integration/07-config-schema`
-**Depends on:** PR2 merged (independent of PR3–PR6, can land any time)
-**Size:** Medium (~250 lines)
+**Branch:** `consolidate/05-closure`
+**Depends on:** PR4 merged
+**Size:** Medium (~300 lines docs + ~100 lines code for the deferred adapter-collapse if it lands here, else docs-only)
 **Estimated Time:** 4–6 hours
 
 ### Purpose
 
-Add the config knobs that were hardcoded with `// v1.1` comments during the transport phase. Wire them through `ConfigReader::snapshot()` so the transport and orchestrator read live values instead of compile-time constants.
+Three converging items:
+
+1. **Adapter collapse deferred from PR3.** With `transport` + `dispatch` in one crate, several "adapters" are no longer adapters. Decide whether to collapse them now or defer to a future cleanup. Recommendation: collapse the *trivial* ones (`MetricsExporterAdapter`, `ServerControlAdapter`) in this PR, leave `InferenceEngineAdapter` for a future stand-alone PR (it's load-bearing and the diff would be ~500 lines on its own).
+2. **Documentation sync.** `docs/design.md` §4 (architecture diagram), `docs/component-designs/*.md` (per-component crate cites), `README.md` if present, all need to reflect the new 7-crate layout. The `CLAUDE.md` workspace-layout block also needs updating.
+3. **PLAN.md reset.** This file is the active phased plan; with this phase complete, rewrite it as a one-pager pointing at "no active phase — see issue tracker for next work." Future phases overwrite as they begin.
 
 ### Tasks
 
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 7.1 | Add `[gateway]` config section | New `GatewayConfig` struct in `llamaforge-config::types`. Fields: `max_request_body_bytes: u64` (default 50MB), `large_body_threshold_mb: u64` (default 1), `max_concurrent_large_requests: usize` (default 5), `wal_checkpoint_mode: CheckpointMode` (default Passive). | `llamaforge-config/src/types.rs` |
-| 7.2 | Add `[routing]` → `affinity_weight: f32` (default 0.5) — wire through `Router` to replace the hardcoded `0.0` at `llamaforge-routing/src/router.rs:239`. | `llamaforge-config/src/types.rs`, `llamaforge-routing/src/router.rs` |
-| 7.3 | Add `[grpc.tls]` table: `enabled: bool` (default false), `cert_path: Option<PathBuf>`, `key_path: Option<PathBuf>`. Wire into `start_grpc_server` to call `tonic::transport::ServerTlsConfig::new().identity(...)` when enabled. | `llamaforge-config/src/types.rs`, `llamaforge-transport/src/grpc.rs` |
-| 7.4 | Update `llamaforge-transport/src/lib.rs:91-95` to read `LargeBodyConcurrencyLimit::new(deps.config_reader.snapshot().gateway.max_concurrent_large_requests, deps.config_reader.snapshot().gateway.large_body_threshold_mb)`. Remove the workflow-ref-style comments. | `llamaforge-transport/src/lib.rs` |
-| 7.5 | Update `llamaforge-transport/src/http.rs:459` `RequestBodyLimitLayer::new(50 * 1024 * 1024)` → `RequestBodyLimitLayer::new(config.gateway.max_request_body_bytes as usize)`. | `llamaforge-transport/src/http.rs` |
-| 7.6 | Update `llamaforge-transport/src/management.rs` query handlers — parse `Query<MetricsFilter>` from the URL and pass through to `RequestMetricsStore::query_*`. Replace `MetricsFilter::default()` placeholders. Same for `Query<Vec<GroupByField>>` on `query_aggregated`. | `llamaforge-transport/src/management.rs` |
-| 7.7 | Update `wal_checkpoint` handler to accept `Query<{ mode: CheckpointMode }>` (optional, default Passive). | `llamaforge-transport/src/management.rs` |
-| 7.8 | Update `ConfigDiff` and `compute_diff()` to emit `GatewayConfigChanged`, `RoutingAffinityChanged`, `GrpcTlsChanged` so subscribers can react to hot-reload. | `llamaforge-config/src/diff.rs` |
-| 7.9 | Unit tests: round-trip serde on the new config sections, including hot-reload diff emission. | `llamaforge-config/src/types.rs`, `llamaforge-config/tests/proptest_config.rs` |
+| # | Task | File(s) |
+|---|------|---------|
+| 5.1 | Collapse `MetricsExporterAdapter` if its only consumer is the same-crate transport: the adapter is ~30 lines; the consumer can call the underlying `PrometheusHandle::render()` directly via a 1-line method on a renamed type. Document the rename in PR body. | `crates/llamaforge-api/src/adapters/metrics_exporter.rs` |
+| 5.2 | Collapse `ServerControlAdapter` similarly if feasible. Audit first: the trait may be load-bearing for the management HTTP API's serialization shape; if so, leave alone and document why. | `crates/llamaforge-api/src/adapters/server_control.rs` |
+| 5.3 | `InferenceEngineAdapter`: do **not** collapse in this PR. The adapter currently owns the queue-event→stream state machine (per design doc §3.1); collapsing it requires picking a new home for that logic. Open a follow-up issue ("collapse InferenceEngineAdapter into transport's stream handler") and link from this PR. | — |
+| 5.4 | Update `docs/design.md` §4 architecture diagram: the 7-crate layout (boxes labeled with the new names; arrows = today's dependency edges). Replace the current 13-crate diagram. | `docs/design.md` |
+| 5.5 | Update each `docs/component-designs/NN_*.md` to cite the new file paths. The component design docs themselves don't need to merge (each still describes one architectural component) — but the "implementation lives in" pointers update. | `docs/component-designs/*.md` |
+| 5.6 | Update `CLAUDE.md` workspace-layout section (if it embeds the old crate list). The block under "Workspace layout" near line 51 of project CLAUDE.md lists the crates explicitly; update to the 7-crate set. | `CLAUDE.md` |
+| 5.7 | Update `README.md` (top-level) if it references the old crate names. | `README.md` |
+| 5.8 | New-hire test: trace one request from HTTP receipt to backend dispatch. Count the files opened. Target: ≤4 files (api/transport/http.rs → api/transport/router.rs → api/dispatch/proxy.rs → core/queue/pipeline.rs or similar). Document the trace in `docs/design.md` as the canonical "how a request flows" walkthrough. | `docs/design.md` |
+| 5.9 | Reset `PLAN.md`: a 5-line placeholder pointing at the issue tracker for the next active phase. (CLAUDE.md says PLAN.md is rewritten when the active phase finishes — this is that.) | `PLAN.md` |
+| 5.10 | Open follow-up issue: "collapse InferenceEngineAdapter into transport stream handler" with `tech-debt` label and link to PR5. | (GitHub issue) |
 
-### PR7 Acceptance Criteria
+### PR5 Acceptance Criteria
 
-- [ ] `grep -rn 'v1.1\|Default from VC\|Default from PR' crates/` returns zero hits in `src/` files.
-- [ ] `crates/llamaforge-transport/src/lib.rs:91` reads from config.
-- [ ] All hardcoded `50 * 1024 * 1024`, `5`, `1` (for the body-limit constants) replaced with config reads.
-- [ ] 5 local gates green + 3/3 CI green.
+- [ ] `docs/design.md` §4 architecture diagram lists the 7 crates.
+- [ ] Every `docs/component-designs/NN_*.md` cites a path that exists in the current workspace.
+- [ ] `CLAUDE.md` workspace-layout block matches reality.
+- [ ] `PLAN.md` is the 5-line placeholder (this content gets overwritten by the next phase).
+- [ ] Follow-up issue opened and referenced from the PR body.
+- [ ] All 5 local gates green; 3/3 CI checks green.
+- [ ] Relay closure on `llama-forge#consolidate-pr5`.
 
 ---
 
-## VC-B — Adapter Layer Verification
+## VC-9 — Workspace Consolidation Sign-Off
 
-**Gate:** PR3 + PR4 + PR5 + PR6 + PR7 merged.
+**Gate:** PRs 1–5 merged.
 
 | # | Check | Method | Pass criterion |
 |---|-------|--------|-----------------|
-| VC-B.1 | All 5 port traits have production impls | `grep -rn 'impl QueueSubmitter for\|impl ServerControl for\|impl MetricsExporter for\|impl InferenceEngine for\|impl RouteValidator for' crates/ --include='*.rs'` | each grep returns ≥1 hit OUTSIDE `tests/` or `#[cfg(test)]` |
-| VC-B.2 | Config knobs config-driven | `grep -c 'v1.1\|Default from' crates/*/src/*.rs` | 0 |
-| VC-B.3 | All five adapters unit-tested | `cargo test -p llamaforge-adapters` | each adapter has ≥3 tests |
-| VC-B.4 | CI clean | All Actions checks SUCCESS | green |
-
----
-
-## PR8 — Composition root in `crates/llamaforge/src/main.rs`
-
-**Branch:** `integration/08-composition-root`
-**Depends on:** PR3 + PR4 + PR5 + PR6 + PR7 all merged
-**Size:** Medium (~400 lines)
-**Estimated Time:** 6–8 hours
-
-### Purpose
-
-Replace the stub `main.rs` with the production composition root. Parse args, load config, construct each component, build adapters, build `TransportDeps`, call `start_servers`, install signal handlers, wait for shutdown.
-
-### Tasks
-
-| # | Task | Detail | File(s) |
-|---|------|--------|---------|
-| 8.1 | CLI: `--config <path>` (default `config/llamaforge.toml`), `--verbose`, subcommands `serve` (default), `init`, `validate`. Use `clap` (workspace dep). | `crates/llamaforge/src/main.rs`, `crates/llamaforge/src/cli.rs` |
-| 8.2 | Tracing init: read `RUST_LOG`, default `info`. Configure a `tracing_subscriber::registry().with(fmt_layer).with(opentelemetry_layer_if_configured)`. | `crates/llamaforge/src/tracing_init.rs` |
-| 8.3 | Build the Tokio runtime explicitly: `Runtime::new()?` with the `multi_thread` flavor. | `main.rs` |
-| 8.4 | **Component construction order** (dependency-strict): (a) `ConfigHandle`, (b) `SqliteMetricsStore` + `MetricsIngest`, (c) `MetricsExporterAdapter::install_global()` — must happen before any `metrics::counter!` call site is exercised, (d) `ServerManager` (subscribes to config diffs), (e) `Router` (subscribes to `ServerManager`'s server-changed channel), (f) `Dispatcher` + `ReqwestClientStore` (subscribes to `Router`), (g) `RequestPipeline` (subscribes to `Dispatcher` for completion events), (h) the four adapter wrappers, (i) `InferenceEngineAdapter` constructed from `queue_adapter + router + dispatcher + metrics`. | `crates/llamaforge/src/build.rs` |
-| 8.5 | Construct `TransportDeps` with the adapters as `Arc<dyn Trait>` and concrete types where the trait is generic (config_writer, request_metrics_store, store_maintenance). | `crates/llamaforge/src/build.rs` |
-| 8.6 | Call `llamaforge_transport::start_servers(deps).await?` and hold the returned `TransportHandles`. | `main.rs` |
-| 8.7 | Signal handling: `tokio::signal::ctrl_c()` and (on Unix) `signal(SignalKind::terminate())`. On either, call `handles.shutdown()` and then `handles.wait().await`. Log `lifecycle.shutdown.started` at INFO. | `main.rs` |
-| 8.8 | The `init` subcommand: write `config/llamaforge.toml.example` with all the new gateway/routing/grpc.tls knobs and prose explaining each. | `crates/llamaforge/src/init.rs` |
-| 8.9 | The `validate` subcommand: parse the config file, run `ConfigHandle::load()`, and exit non-zero on any error (with a printed diagnostic). | `crates/llamaforge/src/validate.rs` |
-| 8.10 | Doc comment on `main()` listing the dependency order and citing design doc §4.4 (Composition root). | `main.rs` |
-
-### PR8 Acceptance Criteria
-
-- [ ] `cargo run -p llamaforge -- --config config/llamaforge.toml.example` starts both servers and stays running.
-- [ ] `curl http://127.0.0.1:8000/health` returns 200 within 1s of startup.
-- [ ] `grpcurl -plaintext 127.0.0.1:50051 grpc.health.v1.Health/Check` returns `SERVING`.
-- [ ] `kill -TERM <pid>` triggers graceful shutdown that completes within `graceful_shutdown_secs` from config.
-- [ ] No `unwrap()` outside `Uuid::now_v7()`.
-- [ ] 5 local gates green + 3/3 CI green.
-
----
-
-## PR9 — Workspace-level integration test harness against `mock-llama`
-
-**Branch:** `integration/09-e2e-mocklama`
-**Depends on:** PR8 merged
-**Size:** Medium (~500 lines, mostly tests)
-**Estimated Time:** 6–8 hours
-
-### Purpose
-
-Build the first cross-component end-to-end test. Launches a `mock-llama` subprocess on an ephemeral port, builds the full composition root in-process (or runs `cargo run --bin llamaforge -- serve` as a subprocess), POSTs a chat-completion through the HTTP and gRPC surfaces, and verifies the response chunks arrive in the correct order.
-
-### Tasks
-
-| # | Task | File(s) |
-|---|------|---------|
-| 9.1 | Move `mock-llama` from `crates/llamaforge-server-manager/src/bin/mock-llama.rs` to its own crate `crates/mock-llama/` so it can be built independently of server-manager's test-utils feature. (Or: expose it via a `mock-llama` feature on the server-manager crate that's enabled by the new e2e crate.) | `crates/mock-llama/` (or `llamaforge-server-manager/Cargo.toml`) |
-| 9.2 | New workspace member `crates/llamaforge-e2e/` with `[lib]` (no [[bin]]). Integration tests live in `crates/llamaforge-e2e/tests/`. | `crates/llamaforge-e2e/` |
-| 9.3 | Test harness `LlamaForgeHarness::start()`: writes a temp config TOML pointing at the spawned `mock-llama` port, then either builds the orchestrator in-process or spawns it as a subprocess. Returns the HTTP and gRPC URLs. | `crates/llamaforge-e2e/src/harness.rs` |
-| 9.4 | `test_e2e_openai_chat_streaming`: POST `/v1/chat/completions` with `stream: true`. Verify the SSE stream contains `chatcmpl-<uuid>` ids consistent across chunks, `data: [DONE]` terminator, and the tokens emitted by mock-llama. | `crates/llamaforge-e2e/tests/openai.rs` |
-| 9.5 | `test_e2e_anthropic_messages_streaming`: POST `/v1/messages` with `stream: true`. Verify Anthropic event ordering (`message_start` before any `content_block_delta`). | `crates/llamaforge-e2e/tests/anthropic.rs` |
-| 9.6 | `test_e2e_grpc_streaming`: gRPC client streams from `/llamaforge.inference.InferenceService/StreamInference`. | `crates/llamaforge-e2e/tests/grpc.rs` |
-| 9.7 | `test_e2e_graceful_shutdown`: start, fire an in-flight request, send SIGTERM, verify the in-flight finishes and a new request is rejected. | `crates/llamaforge-e2e/tests/lifecycle.rs` |
-| 9.8 | `test_e2e_metrics_endpoint`: hit `/metrics` after several requests, parse the Prometheus text, assert the expected counter names and label cardinality. | `crates/llamaforge-e2e/tests/metrics.rs` |
-| 9.9 | CI workflow: add a new job `e2e-mocklama` in `.github/workflows/ci.yml` that runs `cargo test -p llamaforge-e2e --features mock-llama`. Depends on the existing `test` job. | `.github/workflows/ci.yml` |
-
-### PR9 Acceptance Criteria
-
-- [ ] All 5 e2e tests pass locally.
-- [ ] The new `e2e-mocklama` CI job is SUCCESS on the PR's own Actions run.
-- [ ] `mock-llama` is buildable from `cargo build --bin mock-llama` without needing the `test-utils` feature gymnastics.
-- [ ] 5 local gates green + 4/4 CI checks SUCCESS (Check & Lint, Test, e2e-mocklama, Audit Dependencies).
-
----
-
-## PR10 — v1.0 substance gate: orchestrator e2e + PR9 protocol tests + cleanup
-
-**Branch:** `integration/10-v1-substance-gate`
-**Depends on:** PR9b merged (✅ as of PR97 squash `cd0d710`)
-**Size:** Medium-Large (~600–800 LOC; split into PR10a + PR10b if it exceeds 800)
-**Estimated Time:** 8–12 hours
-
-> **Section rewritten 2026-05-15** to absorb three deferrals from earlier PRs. Original "small cleanup pass" framing is obsolete — PR10 is now the actual v1.0 substance gate per the PR97 review reframe.
-
-### Purpose
-
-Three deferrals from earlier PRs converge here, plus the original PR10 cleanup list:
-
-1. **The 5 PLAN.md PR9 tests (9.4–9.8)** were deferred from PR97 because the e2e harness today only boots `mock-llama`, not the LlamaForge orchestrator. Lands here.
-2. **`llamaforge` bin → bin+lib refactor** to make `serve::run` reachable from outside the binary so `llamaforge-e2e` can build the composition root in-process (PLAN PR9 task 9.3a).
-3. **Audit-record translator** (`dispatch::AuditRecord` → `metrics::AuditEvent`) deferred from PR9a — fold in here.
-4. The original PR10 cleanup list (config-overlay decision, Anthropic usage tokens, tracing audit, hardcoded test ports, doc warnings, README).
-
-After PR10 lands, only PR11 (design.md ↔ impl reconciliation) remains before VC-C → `git tag v1.0.0`.
-
-### Splitting guidance
-
-If the diff exceeds **800 LOC**, split into two PRs:
-
-- **PR10a — orchestrator harness + protocol tests** (~500 LOC, tasks 10.1, 10.2, 10.3): bin/lib refactor, `OrchestratorHandle` in `Harness`, 5 protocol tests. The infrastructure pieces.
-- **PR10b — translator + cleanup list** (~300 LOC, tasks 10.4–10.10): audit translator, Anthropic usage, tracing audit, test ports, doc clean, README.
-
-Single PR is preferred if you can stay under 800 total. Branch `integration/10b-translator-cleanup` if splitting.
-
-### Tasks
-
-#### 10.1 — `llamaforge` bin/lib refactor
-
-**Purpose:** make `serve::run` and `build::build` reachable from `llamaforge-e2e` so the harness can construct the orchestrator in-process.
-
-Current state (`crates/llamaforge/`):
-- 6 source files: `main.rs`, `serve.rs`, `build.rs`, `tracing_init.rs`, `init.rs`, `validate.rs`
-- `Cargo.toml` has only `[[bin]]`
-- `serve::run` already `pub` at `serve.rs:11`
-- `BackgroundTasks` already `pub` at `build.rs:53`
-
-| # | Task | File(s) |
-|---|------|---------|
-| 10.1.a | Add `[lib]` target to `crates/llamaforge/Cargo.toml` alongside `[[bin]]`. Both targets share the same source tree. | `crates/llamaforge/Cargo.toml` |
-| 10.1.b | Create `crates/llamaforge/src/lib.rs` declaring `pub mod build;`, `pub mod serve;`, `pub mod tracing_init;`. Re-export `serve::run`, `build::build`, `build::BackgroundTasks` at the crate root for ergonomic e2e use. `init` and `validate` stay private to the bin — they're CLI subcommand handlers, not library API. | `crates/llamaforge/src/lib.rs` (new) |
-| 10.1.c | Update `crates/llamaforge/src/main.rs` to `use llamaforge::serve;` (was `use crate::serve;`). The `init`/`validate` modules stay reachable from `main.rs` via `mod init;` / `mod validate;` — they don't move to the lib. | `crates/llamaforge/src/main.rs` |
-| 10.1.d | Add `llamaforge = { workspace = true }` to root `[workspace.dependencies]` and to `llamaforge-e2e/Cargo.toml [dev-dependencies]`. | `Cargo.toml`, `crates/llamaforge-e2e/Cargo.toml` |
-
-**Acceptance:** `cargo build -p llamaforge --lib && cargo build -p llamaforge --bin llamaforge` both succeed; `cargo test -p llamaforge-e2e` can `use llamaforge::serve::run`.
-
-#### 10.2 — `OrchestratorHandle` in `Harness`
-
-Extend `crates/llamaforge-e2e/src/lib.rs`:
-
-| # | Task | File(s) |
-|---|------|---------|
-| 10.2.a | Add `pub struct OrchestratorHandle { pub http_url: String, pub grpc_url: String, pub shutdown: CancellationToken, _task: JoinHandle<anyhow::Result<()>> }`. | `crates/llamaforge-e2e/src/lib.rs` |
-| 10.2.b | Add `pub async fn start_full() -> anyhow::Result<(Self, OrchestratorHandle)>`. Builds the mock-llama harness as today, then constructs a `ConfigHandle` from the temp config and calls `tokio::spawn(llamaforge::serve::run(handle))`. | `crates/llamaforge-e2e/src/lib.rs` |
-| 10.2.c | **Port discovery wrinkle.** `start_servers` binds listeners but the bound ports are internal to the transport task. Choose (a) — extend `TransportHandles` with `pub http_addr: SocketAddr, pub grpc_addr: SocketAddr` so `serve::run` can return them up to `start_full`. Touches `start_http_server` and `start_grpc_server` to capture the bound `local_addr()` before serving. The temp config uses `http_port = 0` / `grpc_port = 0` so the OS picks ephemeral ports. | `crates/llamaforge-transport/src/lib.rs`, `crates/llamaforge-transport/src/http.rs`, `crates/llamaforge-transport/src/grpc.rs`, `crates/llamaforge/src/serve.rs` |
-| 10.2.d | `OrchestratorHandle::shutdown_and_wait()` method: cancels the shutdown token, then joins the task. Used by graceful-shutdown test (10.3.d). | `crates/llamaforge-e2e/src/lib.rs` |
-
-**Acceptance:** `Harness::start_full()` returns within 2s; `curl <http_url>/health` returns 200; `shutdown_and_wait()` drains cleanly without panic.
-
-#### 10.3 — The 5 PLAN.md PR9 tests against the orchestrator
-
-For each, a new file in `crates/llamaforge-e2e/tests/`. Each test:
-1. `let (harness, orch) = Harness::start_full().await?;`
-2. Drive the orchestrator via real HTTP/gRPC clients.
-3. Assert specific protocol invariants.
-4. `orch.shutdown_and_wait().await?;`
-
-| # | Test | File | Assertions |
-|---|------|------|-----------|
-| 10.3.a | `test_e2e_openai_chat_streaming` | `tests/openai_streaming.rs` | POST `<orch.http_url>/v1/chat/completions` with `{"model": "e2e-mock", "messages": [{"role":"user","content":"hi"}], "stream": true}`. Collect all `data: {...}` events. Assert: (1) every event's `id` field is identical (no `chatcmpl-q/-t/-s` regression from PR4); (2) terminal `data: [DONE]` present; (3) at least one `delta.content` chunk before stop; (4) final chunk has `finish_reason: "stop"`. |
-| 10.3.b | `test_e2e_anthropic_messages_streaming` | `tests/anthropic_streaming.rs` | POST `/v1/messages` with `stream: true`. Verify event ordering: `message_start` is event #0, `content_block_start` precedes every `content_block_delta`, `message_stop` is final. No `content_block_delta` before `content_block_start` (G-11 invariant). |
-| 10.3.c | `test_e2e_grpc_streaming` | `tests/grpc_streaming.rs` | Build `tonic` client against `<orch.grpc_url>`. Call `StreamInference` with the proto request. Stream `InferenceResponse` messages; assert at least one chunk before terminal status, all chunks parse cleanly, the final status is `OK`. |
-| 10.3.d | `test_e2e_graceful_shutdown` | `tests/graceful_shutdown.rs` | Spawn a streaming `chat_completion` request. After receiving ≥1 chunk, call `orch.shutdown_and_wait()`. Assert: (1) the in-flight stream completes (does not return error mid-stream); (2) a *new* POST to the same endpoint after shutdown fails with connection refused or 503. |
-| 10.3.e | `test_e2e_metrics_endpoint` | `tests/metrics_endpoint.rs` | After driving 3 chat-completion requests through `<orch.http_url>`, GET `<orch.http_url>/metrics`. Parse the Prometheus text. Assert: `llamaforge_http_requests_total{path="/v1/chat/completions",method="POST",status="200"} 3`; `llamaforge_active_connections` gauge present (value ≥ 0); `llamaforge_tokens_total` counter present and > 0. Label cardinality on `path` bounded to known routes. |
-
-The existing `e2e-mocklama` CI job already runs `cargo test -p llamaforge-e2e --tests`. These pick up automatically — no workflow changes needed.
-
-#### 10.4 — Audit-record translator
-
-**Background:** `InferenceEngineAdapter::chat_completion` (`crates/llamaforge-adapters/src/inference_engine.rs:186-188`) currently spawns a task that consumes the dispatch `audit_rx` channel and logs the count on exit but doesn't forward records. The `Arc<MetricsIngest>` field at `inference_engine.rs:41` is held but unused (marked `#[allow(dead_code)]`).
-
-Source types:
-
-- **Source** (`crates/llamaforge-dispatch/src/proxy.rs`):
-  ```rust
-  pub struct AuditRecord {
-      pub request_id: RequestId,
-      pub server_id: ServerId,
-      pub duration: Duration,
-      pub ttft: Option<Duration>,
-      pub tokens_predicted: u32,
-      pub success: bool,
-  }
-  ```
-- **Target** (`crates/llamaforge-metrics/src/types.rs`):
-  ```rust
-  pub struct AuditEvent {
-      pub event_id: String,
-      pub event_type: EventType,
-      pub event_kind: String,
-      pub server_id: Option<ServerId>,
-      pub request_id: Option<RequestId>,
-      pub created_at: DateTime<Utc>,
-      pub payload: serde_json::Value,
-  }
-  ```
-
-Mapping:
-
-| dispatch field | metrics field |
-|----------------|---------------|
-| `request_id` | `Some(request_id)` |
-| `server_id` | `Some(server_id)` |
-| (new) | `event_id = Uuid::now_v7().to_string()` |
-| (new) | `event_type = EventType::RequestDispatched` (add variant if missing) |
-| (new) | `event_kind = "request_dispatched"` |
-| (new) | `created_at = Utc::now()` |
-| `duration`, `ttft`, `tokens_predicted`, `success` | `payload = json!({"duration_ms": ..., "ttft_ms": ..., "tokens_predicted": ..., "success": ...})` |
-
-| # | Task | File(s) |
-|---|------|---------|
-| 10.4.a | If `EventType::RequestDispatched` doesn't exist on `llamaforge-metrics::types::EventType`, add it. Check `crates/llamaforge-metrics/src/types.rs` first; many variants likely already exist. | `crates/llamaforge-metrics/src/types.rs` |
-| 10.4.b | Add `pub(crate) fn translate_audit(record: AuditRecord) -> AuditEvent` in a new `crates/llamaforge-adapters/src/audit.rs` module. Pure function, unit-testable. | `crates/llamaforge-adapters/src/audit.rs` (new), `crates/llamaforge-adapters/src/lib.rs` |
-| 10.4.c | Replace the drain-and-log spawn at `inference_engine.rs:186-188` with a translate-and-record spawn: for each `audit_rx.recv().await`, call `translate_audit`, then `self.metrics.record_audit_event(event).await` (or whatever the existing API on `MetricsIngest` is — see `crates/llamaforge-metrics/src/ingest.rs`). Remove `#[allow(dead_code)]` on the `metrics` field. | `crates/llamaforge-adapters/src/inference_engine.rs` |
-| 10.4.d | Unit test for `translate_audit`: build an `AuditRecord`, translate, assert every field maps correctly (especially `event_id` is a valid UUID, `event_type` is the new variant, `payload` JSON has the four expected keys). | `crates/llamaforge-adapters/src/audit.rs::tests` |
-| 10.4.e | Extend `test_e2e_metrics_endpoint` (10.3.e) to also issue a `GET <orch.http_url>/api/metrics/requests` after the 3 chat completions and verify each request shows up in the persisted store. | `crates/llamaforge-e2e/tests/metrics_endpoint.rs` |
-
-#### 10.5 — Anthropic `usage.output_tokens` real threading
-
-**Site:** `crates/llamaforge-transport/src/anthropic.rs:240` — currently `"usage": {"output_tokens": 0}` hardcoded with a `// Placeholder for v1` comment.
-
-| # | Task | File(s) |
-|---|------|---------|
-| 10.5.a | Extend `ChatCompletionChunk::Stop` from `Stop(String)` to `Stop { finish_reason: String, output_tokens: u32 }`. Update all construction sites. | `crates/llamaforge-types/src/lib.rs`, `crates/llamaforge-adapters/src/inference_engine.rs`, `crates/llamaforge-transport/src/openai.rs`, `crates/llamaforge-transport/src/anthropic.rs` |
-| 10.5.b | `InferenceEngineAdapter` already has `parsed.tokens_predicted` at `inference_engine.rs:209` (value going into `tokens_total` counter). Thread into the new `Stop` variant. | `crates/llamaforge-adapters/src/inference_engine.rs` |
-| 10.5.c | Update `format_anthropic_event` at `anthropic.rs:240` to use the carried `output_tokens` instead of `0`. Delete the placeholder comment. | `crates/llamaforge-transport/src/anthropic.rs:240` |
-| 10.5.d | Update existing Anthropic streaming unit test to assert `usage.output_tokens > 0` on the stop event. | `crates/llamaforge-transport/src/anthropic.rs::tests` |
-
-#### 10.6 — Structured `tracing::error!` / `tracing::warn!` audit
-
-Run `git grep -nE 'tracing::(error|warn)!\("[^"]*\{[^}]*\}' crates/*/src/`. Each hit is a format-interpolated message that should become structured: `tracing::error!(error = %e, "lifecycle.event_name")`.
-
-Known clean sites (verified during PR10 planning):
-- `crates/llamaforge/src/serve.rs` — `lifecycle.shutdown.wait_error` ✅
-- `crates/llamaforge-transport/src/lib.rs` — `transport.http_server_failed` / `transport.grpc_server_failed` ✅
-
-If grep returns new sites introduced after PR6, rewrite.
-
-**Acceptance:** zero hits from `git grep -nE 'tracing::(error|warn)!\("[^"]*\{' crates/*/src/`.
-
-#### 10.7 — Hardcoded test ports
-
-Replace static port numbers in:
-- `crates/llamaforge-transport/tests/vc3_transport.rs:78,109,144,170,219,243,303,336` (8 sites)
-- Any others surfaced by `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/`
-
-Pattern: `setup_test_server` takes a port; either modify it to accept `0` and return the bound `SocketAddr`, or pre-bind a `TcpListener::bind("127.0.0.1:0")`, read `local_addr().port()`, drop the listener, pass the port in. The helper-modification path is cleaner — one change to the helper, ~zero change per test.
-
-**Acceptance:** `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/` returns 0 hits.
-
-#### 10.8 — `cargo doc --no-deps --workspace`
-
-**Status as of 2026-05-15 PR10 planning:** clean. No warnings. No action needed unless new doc-lint issues have appeared post-PR9b.
-
-Run once at the start of PR10 to confirm baseline, again before closure.
-
-#### 10.9 — `ConfigOverlayStore` decision
-
-**Status:** Trait at `crates/llamaforge-metrics/src/traits.rs:91-104` with sealed bound. No production impl. Doc comment cites design doc §2.8 (cleaned up in PR7).
-
-**Decision:** Keep deferred. Design doc explicitly marks per-server config overlays as v1.1.
-
-| # | Task | File(s) |
-|---|------|---------|
-| 10.9.a | Create `docs/v1.1-deferred.md` (if PR11 hasn't created it yet) with an entry: `ConfigOverlayStore` trait defined at `llamaforge-metrics/src/traits.rs:91`; no production impl in v1.0; deferral rationale per design doc §2.8 (per-server runtime config overlays — useful for A/B testing model parameters, out of v1 scope). | `docs/v1.1-deferred.md` |
-
-No code change — the trait stays, just documented as deferred.
-
-#### 10.10 — README at workspace root
-
-10-line workspace README:
-
-```markdown
-# LlamaForge
-
-Rust orchestrator and gateway for fleets of `llama.cpp` (`llama-server`) processes.
-[1-paragraph summary from CLAUDE.md §"What LlamaForge is"]
-
-## Build & run
-
-cargo build --release
-./target/release/llamaforge init                       # writes config/llamaforge.toml.example
-./target/release/llamaforge serve --config <path>      # starts the orchestrator
-
-## Documentation
-
-- Master design: `docs/design.md`
-- Component designs: `docs/component-designs/`
-- Phase plan: `PLAN.md`
-
-## End-to-end tests
-
-cargo test -p llamaforge-e2e --tests                   # requires `protoc` and `mold`
-```
-
-### PR10 Acceptance Criteria
-
-- [ ] `cargo build -p llamaforge --lib && cargo build -p llamaforge --bin llamaforge` both succeed (10.1)
-- [ ] `Harness::start_full()` builds the orchestrator in-process; `OrchestratorHandle` exposes `http_url` + `grpc_url` + `shutdown_and_wait` (10.2)
-- [ ] All 5 PR9 protocol tests (10.3.a–e) pass in the `e2e-mocklama` CI job
-- [ ] `git grep -n 'translate_audit' crates/` returns the new module + the call site replacing the drain-and-log spawn (10.4)
-- [ ] `crates/llamaforge-transport/src/anthropic.rs` no longer hardcodes `"output_tokens": 0` (10.5)
-- [ ] `git grep -nE 'tracing::(error|warn)!\("[^"]*\{' crates/*/src/` returns 0 hits (10.6)
-- [ ] `git grep -nE '127\.0\.0\.1:5[0-9]{4}' crates/*/tests/` returns 0 hits (10.7)
-- [ ] `cargo doc --no-deps --workspace` clean (10.8)
-- [ ] `docs/v1.1-deferred.md` has an entry for `ConfigOverlayStore` (10.9)
-- [ ] `README.md` at workspace root exists (10.10)
-- [ ] 5 local gates green + 4/4 CI green (Check & Lint, Test, E2E (mock-llama), Audit Dependencies)
-- [ ] No `unwrap()`/`expect()` in production paths outside the documented PR8/PR9a exception at `crates/llamaforge/src/build.rs` (UUID parse, infallible by load-time validation)
-
-### Splitting decision protocol
-
-After completing 10.1+10.2+10.3 (the harness + 5 tests), measure: `git diff origin/main HEAD --shortstat`. If `> 800` lines, open PR10a here and start PR10b on `integration/10b-translator-cleanup` from the new main. If `≤ 800`, continue with 10.4–10.10 in the same PR.
-
----
-
-## PR11 — `docs/design.md` ↔ implementation reconciliation pass
-
-**Branch:** `integration/11-design-reconcile`
-**Depends on:** PR10 merged
-**Size:** Small (~50 LOC + docs)
-**Estimated Time:** 3–4 hours (mostly reading)
-
-### Purpose
-
-For every numbered section in `docs/design.md`, find the file(s) that implement it and add a comment pointing back to the design section. This is the final "no silent drift" guarantee — if a future contributor changes a `tokens_per_second` calculation without updating §7.2, the comment will surface in code review.
-
-### Tasks
-
-| # | Task |
-|---|------|
-| 11.1 | For each design doc §, find the implementing site(s). Add a one-line `//! Implements design.md §<n>.<m>` doc comment at the top of each implementing module. |
-| 11.2 | Build a `docs/design-implementation-map.md` table: design section → crate/file. Maintain as part of every future PR. |
-| 11.3 | Decision log: any design item still not implemented after this phase goes in `docs/v1.1-deferred.md` with the section, the reason, and the workaround. |
-
-### PR11 Acceptance Criteria
-
-- [ ] `docs/design-implementation-map.md` covers every numbered section in design.md.
-- [ ] `docs/v1.1-deferred.md` covers every `// TODO`, `// v1.1`, or `// Pending` comment remaining in `crates/*/src/`.
-- [ ] 5 local gates green + 3/3 CI green.
-
----
-
-## VC-C — v1 Sign-Off Checkpoint
-
-**Gate:** All PRs 1–11 merged. This is the actual "LlamaForge v1.0" checkpoint.
-
-| # | Check | Method | Pass criterion |
-|---|-------|--------|-----------------|
-| VC-C.1 | All tests pass | `cargo test --workspace` and `cargo test -p llamaforge-e2e` | zero failures |
-| VC-C.2 | Zero clippy warnings | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
-| VC-C.3 | No `unwrap()` audit | grep `\.unwrap()` in `crates/*/src/` excluding tests | 0 (with `Uuid::now_v7()` exception if it remains; ideally zero) |
-| VC-C.4 | All five port traits production-impl | manual check VC-B.1 redux | each ≥1 impl outside tests |
-| VC-C.5 | E2E green | PR9 e2e suite | all 5 tests SUCCESS |
-| VC-C.6 | CI all-green | `gh pr view <last PR> --json statusCheckRollup` | every check SUCCESS |
-| VC-C.7 | Composition root runs | `cargo run -p llamaforge -- serve --config config/llamaforge.toml.example` runs for 60s under `mock-llama`, accepts a request, shuts down on SIGTERM | manual smoke |
-| VC-C.8 | Design ↔ impl map complete | `docs/design-implementation-map.md` covers every § | manual review |
-| VC-C.9 | Deferred-items map complete | `docs/v1.1-deferred.md` covers every remaining `TODO` | manual review |
-| VC-C.10 | `cargo deny check` | exit 0 | green |
-| VC-C.11 | Memory bound under load | run e2e harness with 100 concurrent requests, observe RSS stays under 2GB | manual smoke |
-| VC-C.12 | Documentation builds | `cargo doc --no-deps --workspace` | no warnings |
-
-When VC-C is green, `git tag v1.0.0` and announce.
+| VC-9.1 | Crate count | `ls crates/ \| wc -l` | 8 (`llamaforge`, `llamaforge-core`, `llamaforge-server`, `llamaforge-api`, `llamaforge-metrics`, `llamaforge-proto`, `mock-llama`, `llamaforge-e2e`) |
+| VC-9.2 | Single `ServerId` | `grep -rn 'pub struct ServerId' crates/` | exactly 1 hit |
+| VC-9.3 | All tests pass | `cargo test --workspace` | zero failures |
+| VC-9.4 | Zero clippy warnings | `cargo clippy --workspace --all-targets -- -D warnings` | exit 0 |
+| VC-9.5 | No `unwrap()` regression | grep `\.unwrap()` in `crates/*/src/` excluding tests | ≤ pre-phase baseline (`Uuid::now_v7()` exception remains) |
+| VC-9.6 | E2E green | `cargo test -p llamaforge-e2e` | all tests SUCCESS |
+| VC-9.7 | CI all-green on PR5 | `gh pr view <PR5> --json statusCheckRollup` | every check SUCCESS |
+| VC-9.8 | `cargo deny check` | exit 0 | green |
+| VC-9.9 | Documentation builds | `cargo doc --no-deps --workspace` | no warnings |
+| VC-9.10 | New-hire trace | manual walkthrough of HTTP-request → backend-dispatch | ≤4 files opened |
+| VC-9.11 | No behavior change | sample request through HTTP + gRPC matches pre-phase response byte-for-byte | manual smoke (one request each path) |
+| VC-9.12 | No metric name regression | `curl /metrics` after a test request; diff against a pre-phase capture | metric names unchanged |
+
+When VC-9 is green, this phase is closed; `PLAN.md` is reset (per task 5.9).
 
 ---
 
@@ -717,13 +328,15 @@ When VC-C is green, `git tag v1.0.0` and announce.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| `InferenceEngineAdapter` SSE parser doesn't match real llama.cpp output | Medium | High | PR6 unit tests use canned SSE bytes from a real llama.cpp run (commit a fixture). PR9 e2e validates against `mock-llama` AND optionally against a real `llama-server` (gated by CI runner availability). |
-| Domain type changes in PR1 ripple wider than expected | Medium | Medium | Search-first approach in 1.9. The transport phase's `ApiError` and `tonic::Status` mapping are the riskiest sites. Add 1.8 to surface and fix early. |
-| `mock-llama` doesn't faithfully simulate `llama-server` streaming | Low | High | PR9 tests cover the contract surface (SSE event names, chunk timing). If divergence is found, fix `mock-llama` in the same PR. |
-| Tokio runtime conflict between transport's `start_servers` and `main.rs` | Low | Medium | PR8 explicitly constructs the runtime once at top level and uses `Handle::current()` everywhere downstream. No nested `Runtime::new()`. |
-| `metrics_exporter_prometheus::install_recorder()` is process-global | Certain | Low | PR5.3 documents it; PR9 e2e tests that need isolation use the `metrics::with_local_recorder` API. |
-| Config hot-reload doesn't propagate to running components | Medium | Medium | PR7.8 emits diff events; each component should already subscribe (config phase). Verify via PR9 lifecycle test. |
-| `gh pr merge --auto` ordering footgun resurfaces | Medium | High | Apply the `project_automerge_race` memory: for any PR that touches `.github/workflows/` or `Cargo.toml` at workspace root, merge without `--auto`. Sequential merges only for foundational changes. |
+| Path-rename sweep in PR2/PR3 misses a fully-qualified `llamaforge_types::` (etc.) reference in a doc comment or string literal | High | Low | The `cargo build` step catches code-level misses immediately. Doc-comment/string misses don't break the build but show up in `cargo doc` link warnings — VC-9.9 covers it. |
+| Visibility tightening (`pub` → `pub(crate)`) accidentally breaks `llamaforge-e2e`'s reach-in | Medium | Medium | Audit explicit. Each demotion listed in PR body; reviewer cross-checks against e2e's import set. If broken, revert the specific demotion — keep the rest. |
+| Merging four crates' tests into one tree creates duplicate test names | Medium | Low | Test names are scoped by file path (`tests::routing::router::test_X` vs `tests::queue::pipeline::test_X`). No conflict in practice; if one shows up, rename the inner test. |
+| `cargo build` wall-time regresses (more compilation in fewer parallel units) | Medium | Low | Fewer crates → fewer parallel compile units, but each unit is small and ICE-free. Net wall-time historically *improves* in similar refactors. Measured in VC-9 acceptance. |
+| Workflow-ref leak: a code comment cites the old crate name | Medium | Low | `git grep -nE 'llamaforge-(types\|config\|routing\|queue\|transport\|adapters\|dispatch\|server-manager)' crates/` in PR5; replace remaining hits. |
+| `docs/component-designs/*.md` reviews flag the move as a design change (it isn't) | Low | Low | Lead PR description with "behavior-preserving refactor, no design change" and link to issue #154. |
+| Auto-merge ordering race resurfaces (see `project_automerge_race` memory) | Medium | High | Strictly sequential PRs in this phase. Each PR's `gh pr merge` runs *without* `--auto` (cite memory in each closure message). |
+| `cargo deny` advisory lands mid-phase on the merged dep graph | Low | Medium | Run `cargo deny check` locally at every PR boundary (gate 5). The merged crate's `[workspace.dependencies]` is the union of the absorbed crates' deps — no new transitive deps introduced, so risk is no higher than the pre-phase baseline. |
+| `InferenceEngineAdapter` deferral in PR5 looks like an evasion to a reviewer | Low | Low | PR5 body links to the explicit follow-up issue with the rationale (load-bearing state machine; out-of-scope diff size). The deferral is named, not hidden. |
 
 ---
 
@@ -731,15 +344,13 @@ When VC-C is green, `git tag v1.0.0` and announce.
 
 | Day | Work | PR |
 |-----|------|----|
-| Day 1 | Domain types | PR1 |
-| Day 2 | Adapter crate scaffold + queue adapter | PR2, PR3 (start) |
-| Day 3 | Queue adapter complete + server-control + metrics-exporter adapters | PR3, PR4, PR5 |
-| Day 4–5 | `InferenceEngineAdapter` (SSE parsing is the long pole) | PR6 |
-| Day 6 | Config schema + closing | PR7 |
-| Day 7 | Composition root | PR8 |
-| Day 8 | E2E harness + `mock-llama` integration | PR9 |
-| Day 9 | v1 cleanup + design-reconciliation | PR10, PR11 |
-| Day 10 | VC-C sign-off + tag v1.0.0 | — |
+| Day 1 | `ServerId` unification | PR1 |
+| Day 2–3 | `llamaforge-core` merge — `git mv`, path renames, visibility audit | PR2 |
+| Day 4–5 | `llamaforge-api` merge — same shape as PR2 but larger | PR3 |
+| Day 6 | `server-manager` → `server` rename + doc sync | PR4 |
+| Day 7 | Closure PR: trivial adapter collapses, docs, PLAN.md reset, follow-up issue | PR5 |
+
+If PR2 or PR3 runs long (>2 days each), do **not** carry forward partial work — close it cleanly with the move-only commit landed and a follow-up PR for the visibility audit. The "pure move" commit is the load-bearing piece; the visibility audit can be a smaller separate PR if needed.
 
 ---
 
@@ -747,28 +358,22 @@ When VC-C is green, `git tag v1.0.0` and announce.
 
 | PR | Key Files Created/Modified | LOC (est.) |
 |----|---------------------------|------------|
-| PR1 | `llamaforge-types/src/{lib.rs,traits.rs}`, `llamaforge-transport/src/error.rs` | ~350 |
-| PR2 | `crates/llamaforge-adapters/` (new crate) | ~200 |
-| PR3 | `llamaforge-adapters/src/queue.rs`, possibly `llamaforge-queue/src/pipeline.rs` | ~300 |
-| PR4 | `llamaforge-adapters/src/server_control.rs` | ~200 |
-| PR5 | `llamaforge-adapters/src/metrics_exporter.rs` | ~150 |
-| PR6 | `llamaforge-adapters/src/inference_engine.rs` | ~600 |
-| PR7 | `llamaforge-config/src/types.rs`, `llamaforge-routing/src/router.rs`, `llamaforge-transport/src/{lib.rs,http.rs,management.rs}` | ~250 |
-| PR8 | `llamaforge/src/{main.rs,cli.rs,build.rs,tracing_init.rs,init.rs,validate.rs}` | ~400 |
-| PR9 | `crates/mock-llama/` move, `crates/llamaforge-e2e/`, `.github/workflows/ci.yml` | ~500 |
-| PR10 | `crates/*/src/` cleanup, `README.md` | ~150 |
-| PR11 | `docs/design-implementation-map.md`, `docs/v1.1-deferred.md`, per-module doc comments | ~50 + docs |
-| **Total** | | **~3,150** |
+| PR1 | `llamaforge-types/src/lib.rs`, `llamaforge-config/{src/handle.rs,Cargo.toml}`, `llamaforge/src/build.rs` | ~150 changed, ~50 deleted |
+| PR2 | `crates/llamaforge-core/` (new), four old crate directories deleted, workspace `Cargo.toml` + every member's `Cargo.toml`, every `use llamaforge_{types,config,routing,queue}` site | ~2,500 moved, ~200 deleted |
+| PR3 | `crates/llamaforge-api/` (new), three old crate directories deleted, workspace `Cargo.toml` + every member's `Cargo.toml`, every `use llamaforge_{transport,adapters,dispatch}` site | ~3,000 moved, ~400 deleted |
+| PR4 | `crates/llamaforge-server/` (renamed from `-server-manager`), workspace `Cargo.toml`, every member's `Cargo.toml`, every `use llamaforge_server_manager` site | ~50 changed |
+| PR5 | `docs/design.md`, `docs/component-designs/*.md`, `CLAUDE.md`, `README.md`, `PLAN.md`, possibly `crates/llamaforge-api/src/adapters/*.rs` (trivial collapses) | ~300 docs + ~100 code |
+| **Total** | | **~5,500 moved, ~750 deleted** (net **−750 LOC** if no new code) |
 
 ---
 
-## Process Notes (carried forward from transport phase memory)
+## Process Notes (carried forward)
 
-- **5-gate local verification + 3/3 CI confirmation before every relay closure.** No exceptions. The pattern that caused 15 closure/diff mismatches during the transport phase was paraphrased command output rather than literal-quoted exit codes; quote exit codes verbatim.
-- **`gh pr merge --squash --delete-branch` WITHOUT `--auto`** for any PR touching `.github/workflows/` or workspace `Cargo.toml`. See `project_automerge_race` memory.
-- **Closing another agent's PR (`gh pr close N --comment ...`)** may be blocked by the auto-mode permission classifier when triggered by a relay instruction. Surface to user before attempting. See `project_close_other_agent_pr` memory.
-- **File:line cites in closure messages** for each closed finding. If you can't cite a line, the finding isn't resolved.
+- **5-gate local verification + 3/3 CI confirmation before every relay closure.** No exceptions.
+- **`gh pr merge --squash --delete-branch` WITHOUT `--auto`** for every PR in this phase. The workspace `Cargo.toml` is touched in PRs 1–4; auto-merge ordering would silently drop changes. Cite `project_automerge_race` memory in each closure.
+- **File:line cites in closure messages** for each closed task. If you can't cite a line, the task isn't done.
+- **Behavior-preserving guarantee.** If any user-visible behavior changes during this refactor, stop and open a separate PR for the behavior change. This phase is structural only.
 
 ---
 
-*Plan revision 1 — 2026-05-14. Replaces the prior `PLAN.md` (Transport Layer plan, phase 7) which is complete (PRs #70–#85 on `main`).*
+*Plan revision 1 — 2026-05-22. Replaces the prior `PLAN.md` (Integration & Composition Root, phase 8) which is complete (PRs #1–#11 on `main`).*
