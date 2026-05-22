@@ -85,10 +85,17 @@ impl ReqwestClientStore {
     }
 
     /// Helper to build a `reqwest::Client` with the correct pool settings.
+    //
+    // Note on timeouts: only `connect_timeout` is set here. A Client-level
+    // `.timeout()` would cap the entire request including body read, which
+    // for SSE streaming responses would terminate legitimate long completions.
+    // Stuck-after-connect protection lives at the dispatch layer (proxy_task
+    // wraps the connect future in tokio::time::timeout for defense in depth).
     fn build_client(parallel_slots: usize) -> Result<Client, reqwest::Error> {
         let max_idle = parallel_slots.max(16);
 
         Client::builder()
+            .connect_timeout(Duration::from_secs(5))
             .pool_idle_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(max_idle)
             .tcp_keepalive(Duration::from_secs(10))

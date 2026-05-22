@@ -109,8 +109,12 @@ pub async fn proxy_task(
     let _guard = PendingDispatchToken::new();
     tracing::debug!("dispatch.started");
 
-    // PreConnect phase
-    let connect_future = client.post_completion(&server_id, request);
+    // PreConnect phase. Wrap the connect future in a tokio timeout so a
+    // backend that accepts the TCP connection but never writes a response
+    // cannot pin this dispatch slot indefinitely (the reqwest connect_timeout
+    // only covers TCP handshake, not waiting for response headers).
+    let connect_future =
+        timeout(Duration::from_secs(30), client.post_completion(&server_id, request));
 
     let mut stream = tokio::select! {
         biased;
@@ -121,10 +125,16 @@ pub async fn proxy_task(
         }
         res = connect_future => {
             match res {
-                Ok(s) => s,
-                Err(e) => {
+                Ok(Ok(s)) => s,
+                Ok(Err(e)) => {
                     tracing::warn!(error = %e, "dispatch.failed");
                     let _ = response_tx.send(Err(StreamError::from(e))).await;
+                    cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, prompt_tokens, false, slot_notifier, audit_tx, slot_dispatch_map);
+                    return;
+                }
+                Err(_) => {
+                    tracing::warn!("dispatch.connect_timeout");
+                    let _ = response_tx.send(Err(StreamError::Timeout)).await;
                     cleanup(token, server_id, request_id, id_slot, start_time, ttft, tokens_predicted, prompt_tokens, false, slot_notifier, audit_tx, slot_dispatch_map);
                     return;
                 }
