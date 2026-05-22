@@ -1,5 +1,5 @@
 [package]
-name = "llamaforge-transport"
+name = "llamaforge-api"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-# Inherited from workspace
+# Inherited from workspace. This crate is the merged successor of the
+# former `llamaforge-transport`, `llamaforge-adapters`, and
+# `llamaforge-dispatch` crates (see PLAN.md Phase 9 PR3 and design doc
+# §4.2 + §7). The dependency union covers all three.
 axum.workspace = true
 tower.workspace = true
 tower-http.workspace = true
@@ -24,19 +27,26 @@ futures-core.workspace = true
 futures-util.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 async-trait.workspace = true
+async-stream.workspace = true
 tracing.workspace = true
 metrics = "0.24"
+metrics-exporter-prometheus.workspace = true
+reqwest = { workspace = true }
+dashmap = { workspace = true }
+arc-swap = { workspace = true }
+bytes = { workspace = true }
+chrono.workspace = true
 
-# Dependency rationale: llamaforge-core and llamaforge-metrics are direct dependencies
-# despite cross-crate communication being via port traits because we need access to their
-# respective ConfigReader and MetricsExporter implementations to wire them in the composition root
-# and use their public interface definitions.
+# Component dependencies. llamaforge-core and llamaforge-metrics are
+# direct deps despite the hexagonal port-trait convention because the
+# composition root needs access to their concrete reader/store types,
+# and the merged api crate is now a composition-root neighbour itself.
 llamaforge-core.workspace = true
 llamaforge-metrics.workspace = true
+llamaforge-server-manager.workspace = true
 llamaforge-proto.workspace = true
-chrono.workspace = true
-tokio-util.workspace = true
 
 [features]
 default = ["dev-reflection"]
@@ -50,13 +60,17 @@ dev-reflection = ["dep:tonic-reflection"]
 
 [dev-dependencies]
 chrono.workspace = true
-# reqwest: used for full-stack integration tests (real HTTP client -> real server).
-# Unit/handler tests use axum::test helpers instead.
 reqwest.workspace = true
-tokio = { workspace = true, features = ["test-util", "macros"] }
+tokio = { workspace = true, features = ["test-util", "macros", "rt-multi-thread"] }
 tower = { workspace = true, features = ["util"] }
-llamaforge-core = { workspace = true, features = ["test-utils"] }
-llamaforge-metrics = { workspace = true, features = ["test-fixtures"] }
+tokio-stream = { workspace = true }
+futures-util = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+wiremock = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v7"] }
+proptest = { workspace = true }
 serial_test.workspace = true
-
-[build-dependencies]
+llamaforge-core = { workspace = true, features = ["test-utils"] }
+llamaforge-metrics = { workspace = true, features = ["test-utils", "test-fixtures"] }
