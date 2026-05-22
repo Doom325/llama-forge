@@ -1,6 +1,7 @@
 use futures_core::future::BoxFuture;
 use futures_util::StreamExt;
-use llamaforge_config::{ConfigReader, ConfigWriter};
+use llamaforge_core::config::{ConfigReader, ConfigWriter};
+use llamaforge_core::types::traits::{QueueSubmitter, RouteValidator, ServerControl};
 use llamaforge_proto::inference::inference_service_server::{
     InferenceService, InferenceServiceServer,
 };
@@ -13,7 +14,6 @@ use llamaforge_proto::management::{
     QueueStatusRequest, QueueStatusResponse, ReloadConfigRequest, ReloadConfigResponse,
     StartServerRequest, StartServerResponse, StopServerRequest, StopServerResponse,
 };
-use llamaforge_types::traits::{QueueSubmitter, RouteValidator, ServerControl};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -59,7 +59,7 @@ impl InferenceService for GrpcInferenceService {
         // documented gRPC codes — `NoServerForModel` → `NotFound`,
         // `QueueFull` → `ResourceExhausted` — rather than the
         // previous "everything is `Internal`" shape.
-        let request_id = llamaforge_types::RequestId::new(uuid::Uuid::now_v7());
+        let request_id = llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7());
         let incoming = crate::http::build_incoming_request(request_id, &chat_req);
         self.route_validator
             .validate_routable(&incoming.model_target, &incoming.capabilities)
@@ -94,8 +94,8 @@ impl InferenceService for GrpcInferenceService {
 
 /// Map a domain `AdmissionError` to a gRPC `Status`. Mirrors the
 /// HTTP shim's `From<AdmissionError> for ApiError`.
-fn map_admission_error(err: llamaforge_types::traits::AdmissionError) -> Status {
-    use llamaforge_types::traits::AdmissionError as Ae;
+fn map_admission_error(err: llamaforge_core::types::traits::AdmissionError) -> Status {
+    use llamaforge_core::types::traits::AdmissionError as Ae;
     match err {
         Ae::NoServerForModel { ref model } => {
             Status::not_found(format!("model not found: {}", model))
@@ -109,8 +109,8 @@ fn map_admission_error(err: llamaforge_types::traits::AdmissionError) -> Status 
 /// Map a domain `ServerError` to a gRPC `Status`. `NotFound` becomes
 /// `Code::NotFound` so SDK clients see the documented status rather
 /// than `Internal` (which signals "retry" in most SDK retry policies).
-fn map_server_error(err: llamaforge_types::traits::ServerError) -> Status {
-    use llamaforge_types::traits::ServerError as Se;
+fn map_server_error(err: llamaforge_core::types::traits::ServerError) -> Status {
+    use llamaforge_core::types::traits::ServerError as Se;
     match err {
         Se::NotFound { .. } => Status::not_found(err.to_string()),
         Se::AlreadyRunning { .. } => Status::already_exists(err.to_string()),
@@ -149,9 +149,9 @@ where
         request: Request<StartServerRequest>,
     ) -> Result<Response<StartServerResponse>, Status> {
         let req = request.into_inner();
-        llamaforge_config::validate_server_id_slug(&req.server_id)
+        llamaforge_core::config::validate_server_id_slug(&req.server_id)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let server_id = llamaforge_types::ServerId::from_config_id(&req.server_id);
+        let server_id = llamaforge_core::types::ServerId::from_config_id(&req.server_id);
         self.server_control.start_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StartServerResponse {}))
     }
@@ -161,9 +161,9 @@ where
         request: Request<StopServerRequest>,
     ) -> Result<Response<StopServerResponse>, Status> {
         let req = request.into_inner();
-        llamaforge_config::validate_server_id_slug(&req.server_id)
+        llamaforge_core::config::validate_server_id_slug(&req.server_id)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let server_id = llamaforge_types::ServerId::from_config_id(&req.server_id);
+        let server_id = llamaforge_core::types::ServerId::from_config_id(&req.server_id);
         self.server_control.stop_server(&server_id).await.map_err(map_server_error)?;
         Ok(Response::new(StopServerResponse {}))
     }
@@ -185,7 +185,7 @@ where
         let req = request.into_inner();
         let uuid = uuid::Uuid::parse_str(&req.request_id)
             .map_err(|_| Status::invalid_argument("Invalid request_id format"))?;
-        let request_id = llamaforge_types::RequestId::new(uuid);
+        let request_id = llamaforge_core::types::RequestId::new(uuid);
         self.queue_submitter.cancel(&request_id).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(CancelRequestResponse {}))
     }
@@ -204,7 +204,7 @@ where
         // server-manager.
         match self.config_writer.reload().await {
             Ok(_) => Ok(Response::new(ReloadConfigResponse {})),
-            Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+            Err(llamaforge_core::config::ConfigReloadError::RestartRequired { fields }) => {
                 Err(Status::failed_precondition(format!(
                     "config diff touches restart-required server fields ({:?}); \
                      restart the orchestrator to apply",
@@ -437,9 +437,9 @@ where
 mod tests {
     use super::*;
     use crate::error::ApiError;
-    use llamaforge_config::source::memory::InMemoryConfigSource;
-    use llamaforge_config::ConfigHandle;
-    use llamaforge_config::{AppConfig, GlobalConfig};
+    use llamaforge_core::config::source::memory::InMemoryConfigSource;
+    use llamaforge_core::config::ConfigHandle;
+    use llamaforge_core::config::{AppConfig, GlobalConfig};
     use tonic::Code;
 
     #[test]
@@ -486,9 +486,9 @@ mod tests {
     }
 
     use futures_util::stream;
+    use llamaforge_core::types::{ChatCompletionChunk, StreamError};
     use llamaforge_proto::inference::inference_service_client::InferenceServiceClient;
     use llamaforge_proto::inference::InferenceRequest;
-    use llamaforge_types::{ChatCompletionChunk, StreamError};
 
     struct MockEngine {
         chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
@@ -497,7 +497,7 @@ mod tests {
     impl InferenceEngine for MockEngine {
         async fn chat_completion(
             &self,
-            _req: llamaforge_types::ChatCompletionRequest,
+            _req: llamaforge_core::types::ChatCompletionRequest,
         ) -> Result<
             Pin<
                 Box<
@@ -506,7 +506,7 @@ mod tests {
                         + 'static,
                 >,
             >,
-            llamaforge_types::traits::DispatchError,
+            llamaforge_core::types::traits::DispatchError,
         > {
             let chunks = std::mem::take(&mut *self.chunks.lock().unwrap());
             Ok(Box::pin(stream::iter(chunks)))
@@ -514,18 +514,18 @@ mod tests {
     }
 
     struct MockRouteValidator;
-    impl llamaforge_types::traits::RouteValidator for MockRouteValidator {
+    impl llamaforge_core::types::traits::RouteValidator for MockRouteValidator {
         fn validate_routable(
             &self,
-            _model: &llamaforge_types::ModelTarget,
-            _capabilities: &llamaforge_types::RequestCapabilities,
-        ) -> Result<(), llamaforge_types::traits::AdmissionError> {
+            _model: &llamaforge_core::types::ModelTarget,
+            _capabilities: &llamaforge_core::types::RequestCapabilities,
+        ) -> Result<(), llamaforge_core::types::traits::AdmissionError> {
             Ok(())
         }
     }
 
     struct MockMetricsExporter;
-    impl llamaforge_types::traits::MetricsExporter for MockMetricsExporter {
+    impl llamaforge_core::types::traits::MetricsExporter for MockMetricsExporter {
         fn gather_text(&self) -> String {
             "".into()
         }
@@ -533,38 +533,40 @@ mod tests {
 
     struct MockServerControl;
     #[tonic::async_trait]
-    impl llamaforge_types::traits::ServerControl for MockServerControl {
+    impl llamaforge_core::types::traits::ServerControl for MockServerControl {
         async fn list_servers(
             &self,
         ) -> Result<
-            Vec<llamaforge_types::traits::ServerSummary>,
-            llamaforge_types::traits::ServerError,
+            Vec<llamaforge_core::types::traits::ServerSummary>,
+            llamaforge_core::types::traits::ServerError,
         > {
             Ok(vec![])
         }
         async fn start_server(
             &self,
-            _id: &llamaforge_types::ServerId,
-        ) -> Result<(), llamaforge_types::traits::ServerError> {
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
         async fn stop_server(
             &self,
-            _id: &llamaforge_types::ServerId,
-        ) -> Result<(), llamaforge_types::traits::ServerError> {
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
     }
 
     struct MockQueueSubmitter;
-    impl llamaforge_types::traits::QueueSubmitter for MockQueueSubmitter {
+    impl llamaforge_core::types::traits::QueueSubmitter for MockQueueSubmitter {
         fn submit(
             &self,
-            _req: llamaforge_types::traits::IncomingRequest,
-        ) -> Result<llamaforge_types::traits::QueueTicket, llamaforge_types::traits::AdmissionError>
-        {
-            Ok(llamaforge_types::traits::QueueTicket {
-                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+            _req: llamaforge_core::types::traits::IncomingRequest,
+        ) -> Result<
+            llamaforge_core::types::traits::QueueTicket,
+            llamaforge_core::types::traits::AdmissionError,
+        > {
+            Ok(llamaforge_core::types::traits::QueueTicket {
+                request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 events: tokio::sync::mpsc::channel(1).1,
@@ -572,15 +574,17 @@ mod tests {
         }
         fn cancel(
             &self,
-            _id: &llamaforge_types::RequestId,
-        ) -> Result<(), llamaforge_types::traits::QueueError> {
+            _id: &llamaforge_core::types::RequestId,
+        ) -> Result<(), llamaforge_core::types::traits::QueueError> {
             Ok(())
         }
         fn status(
             &self,
-        ) -> Result<llamaforge_types::traits::QueueSnapshot, llamaforge_types::traits::QueueError>
-        {
-            Ok(llamaforge_types::traits::QueueSnapshot {
+        ) -> Result<
+            llamaforge_core::types::traits::QueueSnapshot,
+            llamaforge_core::types::traits::QueueError,
+        > {
+            Ok(llamaforge_core::types::traits::QueueSnapshot {
                 depth: 0,
                 estimated_throughput_req_sec: 1.0,
             })

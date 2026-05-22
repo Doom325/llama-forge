@@ -2,10 +2,10 @@ use chrono::{Duration, TimeZone, Utc};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{
     create_metrics_pipeline, AuditEvent, EventFilter, EventStore, EventType, MetricsConfig,
 };
-use llamaforge_types::ServerId;
 
 prop_compose! {
     fn arb_audit_event()(
@@ -43,10 +43,11 @@ async fn setup_store() -> (TempDir, llamaforge_metrics::MetricsPipeline) {
     writeln!(file, "metrics_retention_days = 999999").unwrap();
     std::fs::write(&priority_rules, "").unwrap();
 
-    let paths = llamaforge_config::ConfigPaths::new(config_path, priority_rules, state_dir);
-    let source = llamaforge_config::TomlFileConfigSource::new(paths);
-    let handle = llamaforge_config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
-    let reader: std::sync::Arc<dyn llamaforge_config::ConfigReader> = std::sync::Arc::new(handle);
+    let paths = llamaforge_core::config::ConfigPaths::new(config_path, priority_rules, state_dir);
+    let source = llamaforge_core::config::TomlFileConfigSource::new(paths);
+    let handle = llamaforge_core::config::ConfigHandle::load(std::sync::Arc::new(source)).unwrap();
+    let reader: std::sync::Arc<dyn llamaforge_core::config::ConfigReader> =
+        std::sync::Arc::new(handle);
 
     let config = MetricsConfig { db_path, retention_days: 999999, ..Default::default() };
     let pipeline = create_metrics_pipeline(&config, reader).unwrap();

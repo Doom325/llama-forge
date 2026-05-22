@@ -7,8 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-llamaforge-config = { workspace = true }
-llamaforge-types = { workspace = true }
+llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

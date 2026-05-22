@@ -4,7 +4,7 @@
 //! `log_format` is `json`; otherwise uses the pretty formatter. See design doc
 //! §7 (Observability) for the layered subscriber strategy.
 
-use llamaforge_config::LogFormat;
+use llamaforge_core::config::LogFormat;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub fn init(format: LogFormat) {

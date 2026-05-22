@@ -1,16 +1,16 @@
-use llamaforge_config::{
+use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
 };
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::types::ports::{SlotErasure, SlotError};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
 use llamaforge_dispatch::dispatcher::{CompletionRequest, Dispatcher};
 use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::types::ServerStateView;
-use llamaforge_types::ports::{SlotErasure, SlotError};
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId, SlotId};
 use proptest::prelude::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -30,12 +30,12 @@ impl BackendClient for MockBackendClient {
 
 struct MockClientManager;
 impl ClientManager for MockClientManager {
-    fn refresh(&self, _s: &ServerId, _e: llamaforge_types::ClientRefreshEvent) {}
+    fn refresh(&self, _s: &ServerId, _e: llamaforge_core::types::ClientRefreshEvent) {}
 }
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
         vec![]
     }
 }
@@ -57,7 +57,7 @@ fn create_dispatcher() -> Dispatcher {
     let mut app_config = AppConfig::default();
     app_config
         .servers
-        .insert(llamaforge_types::ServerId::from_config_id("s1"), ServerConfig::default());
+        .insert(llamaforge_core::types::ServerId::from_config_id("s1"), ServerConfig::default());
 
     let config =
         Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(app_config))).unwrap());

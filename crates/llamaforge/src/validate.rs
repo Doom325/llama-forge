@@ -1,4 +1,4 @@
-use llamaforge_config::{ConfigLoadError, ConfigPaths, ConfigSource, TomlFileConfigSource};
+use llamaforge_core::config::{ConfigLoadError, ConfigPaths, ConfigSource, TomlFileConfigSource};
 use std::path::Path;
 use std::process;
 use std::sync::Arc;

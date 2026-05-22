@@ -1,0 +1,967 @@
+//! Core configuration types and structs.
+//!
+//! See design doc Section 2.6 for field details and defaults.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
+
+/// Canonical Server Identity, defined in `llamaforge-types`. Re-exported
+/// here so callers that only depend on `llamaforge-config` keep a stable
+/// import path. The Uuid-backed type derives slugs from `[servers.<key>]`
+/// TOML tables via `ServerId::from_config_id`; see
+/// [`crate::config::handle::validate_server_id_slug`] for the load-time rule that
+/// gates which strings are accepted as slugs.
+pub use crate::types::ServerId;
+
+/// Newtype wrapper for Task Type Identity.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct TaskTypeId(pub String);
+
+impl fmt::Display for TaskTypeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for TaskTypeId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for TaskTypeId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+/// Newtype wrapper for Task Class Name.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct TaskClassName(pub String);
+
+impl fmt::Display for TaskClassName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for TaskClassName {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for TaskClassName {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+/// Newtype wrapper for Requestor Identity.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct RequestorId(pub String);
+
+impl fmt::Display for RequestorId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for RequestorId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for RequestorId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+/// Structured logging level.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    #[default]
+    Info,
+    Warn,
+    Error,
+}
+
+/// Structured logging format.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    #[default]
+    Pretty,
+    Json,
+    Compact,
+}
+
+/// Inference backend type.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    #[default]
+    LlamaServer,
+    Custom,
+}
+
+/// KV cache quantization type.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CacheType {
+    #[default]
+    F16,
+    Q8_0,
+    Q4_0,
+}
+
+/// Flash attention mode.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FlashAttnMode {
+    #[default]
+    Auto,
+    Enabled,
+    Disabled,
+}
+
+/// Speculative decoding method.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum SpeculativeMethod {
+    #[default]
+    None,
+    DraftModel {
+        path: std::path::PathBuf,
+    },
+    Lookup {
+        #[serde(default = "default_lookup_ngram_size")]
+        ngram_size: u32,
+    },
+}
+
+fn default_lookup_ngram_size() -> u32 {
+    2
+}
+
+/// Deserialize `[servers.<key>]` tables: validate each raw TOML key
+/// against `validate_server_id_slug` *before* converting to the
+/// UUID-backed `ServerId`. Without this hook the slug shape is lost
+/// (the conversion is one-way), so a bogus key like `"has space"`
+/// would silently become a UUIDv5 and pass validation. Running the
+/// rule on the raw String preserves the load-time contract from when
+/// `ServerId` was itself a String.
+fn deserialize_servers_map<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<ServerId, ServerConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: HashMap<String, ServerConfig> = HashMap::deserialize(deserializer)?;
+    let mut out = HashMap::with_capacity(raw.len());
+    for (slug, cfg) in raw {
+        crate::config::handle::validate_server_id_slug(&slug).map_err(serde::de::Error::custom)?;
+        out.insert(ServerId::from_config_id(&slug), cfg);
+    }
+    Ok(out)
+}
+
+/// Model architecture classification.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelArchitecture {
+    #[default]
+    Transformer,
+    Recurrent,
+}
+
+/// GPU identity (usually index).
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct GpuId(pub u32);
+
+/// GPU device specification.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct DeviceSpec {
+    pub gpu_id: GpuId,
+    #[serde(default)]
+    pub layer_range: Option<std::ops::Range<u32>>,
+}
+
+/// LoRA adapter configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct LoraAdapterConfig {
+    pub path: PathBuf,
+    pub scale: f32,
+}
+
+/// Top-level configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub global: GlobalConfig,
+    #[serde(default)]
+    pub grpc: GrpcConfig,
+    #[serde(default)]
+    pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub prometheus: PrometheusConfig,
+    #[serde(default)]
+    pub web_ui: WebUiConfig,
+    #[serde(default)]
+    pub cors: CorsConfig,
+    #[serde(default, deserialize_with = "deserialize_servers_map")]
+    pub servers: HashMap<ServerId, ServerConfig>,
+    #[serde(default)]
+    pub priority_rules: PriorityRulesConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
+}
+
+/// Gateway / large-body request handling configuration.
+/// See design doc Section 6.2 (gateway knobs).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayConfig {
+    /// Maximum allowed request body size in bytes. Default 50 MiB.
+    #[serde(default = "default_max_request_body_bytes")]
+    pub max_request_body_bytes: u64,
+    /// Threshold above which a request is classified as "large body" and
+    /// subject to per-shape concurrency limits, in megabytes. Default 1.
+    #[serde(default = "default_large_body_threshold_mb")]
+    pub large_body_threshold_mb: u64,
+    /// Maximum concurrent large-body requests admitted at any time. Default 5.
+    #[serde(default = "default_max_concurrent_large_requests")]
+    pub max_concurrent_large_requests: usize,
+    /// Default WAL checkpoint mode used by the `wal_checkpoint` REST handler
+    /// when the request does not specify one. Default `Passive`.
+    #[serde(default)]
+    pub wal_checkpoint_mode: WalCheckpointMode,
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            max_request_body_bytes: default_max_request_body_bytes(),
+            large_body_threshold_mb: default_large_body_threshold_mb(),
+            max_concurrent_large_requests: default_max_concurrent_large_requests(),
+            wal_checkpoint_mode: WalCheckpointMode::default(),
+        }
+    }
+}
+
+fn default_max_request_body_bytes() -> u64 {
+    50 * 1024 * 1024
+}
+fn default_large_body_threshold_mb() -> u64 {
+    1
+}
+fn default_max_concurrent_large_requests() -> usize {
+    5
+}
+
+/// Config-side WAL checkpoint mode (mirrors `llamaforge_metrics::CheckpointMode`
+/// without creating a dependency edge in the wrong direction). Hand-mapped at
+/// the transport boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WalCheckpointMode {
+    #[default]
+    Passive,
+    Truncate,
+}
+
+/// CORS configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CorsConfig {
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self { allowed_origins: default_allowed_origins() }
+    }
+}
+
+fn default_allowed_origins() -> Vec<String> {
+    vec!["*".to_string()]
+}
+
+/// Routing configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoutingConfig {
+    #[serde(default = "default_session_affinity_max_entries")]
+    pub session_affinity_max_entries: u32,
+    #[serde(default = "default_startup_wait_secs")]
+    pub startup_wait_secs: u64,
+    #[serde(default)]
+    pub weights: RoutingWeightsConfig,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            session_affinity_max_entries: default_session_affinity_max_entries(),
+            startup_wait_secs: default_startup_wait_secs(),
+            weights: RoutingWeightsConfig::default(),
+        }
+    }
+}
+
+fn default_session_affinity_max_entries() -> u32 {
+    10_000
+}
+
+fn default_startup_wait_secs() -> u64 {
+    30
+}
+
+/// Routing weights configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RoutingWeightsConfig {
+    #[serde(default = "default_w_slots")]
+    pub w_slots: f64,
+    #[serde(default = "default_w_kv")]
+    pub w_kv: f64,
+    #[serde(default = "default_w_queue")]
+    pub w_queue: f64,
+    #[serde(default = "default_w_affinity")]
+    pub w_affinity: f64,
+}
+
+impl Default for RoutingWeightsConfig {
+    fn default() -> Self {
+        Self {
+            w_slots: default_w_slots(),
+            w_kv: default_w_kv(),
+            w_queue: default_w_queue(),
+            w_affinity: default_w_affinity(),
+        }
+    }
+}
+
+fn default_w_slots() -> f64 {
+    0.4
+}
+fn default_w_kv() -> f64 {
+    0.2
+}
+fn default_w_queue() -> f64 {
+    0.2
+}
+fn default_w_affinity() -> f64 {
+    0.2
+}
+
+/// Global system configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GlobalConfig {
+    #[serde(default = "default_bind_address")]
+    pub bind_address: IpAddr,
+    #[serde(default = "default_grpc_port")]
+    pub grpc_port: u16,
+    #[serde(default = "default_http_port")]
+    pub http_port: u16,
+    #[serde(default)]
+    pub log_level: LogLevel,
+    #[serde(default)]
+    pub log_format: LogFormat,
+    #[serde(default = "default_metrics_db_path")]
+    pub metrics_db_path: PathBuf,
+    #[serde(default = "default_retention_days")]
+    pub metrics_retention_days: u32,
+    #[serde(default = "default_queue_max_depth")]
+    pub queue_max_depth: u32,
+    #[serde(default = "default_queue_timeout_secs")]
+    pub queue_default_timeout_secs: u64,
+    #[serde(default = "default_restart_stagger_secs")]
+    pub restart_stagger_secs: u64,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "default_state_dir")]
+    pub state_dir: PathBuf,
+    #[serde(default)]
+    pub telemetry_backend: Option<String>,
+}
+
+impl Default for GlobalConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: default_bind_address(),
+            grpc_port: default_grpc_port(),
+            http_port: default_http_port(),
+            log_level: LogLevel::default(),
+            log_format: LogFormat::default(),
+            metrics_db_path: default_metrics_db_path(),
+            metrics_retention_days: default_retention_days(),
+            queue_max_depth: default_queue_max_depth(),
+            queue_default_timeout_secs: default_queue_timeout_secs(),
+            restart_stagger_secs: default_restart_stagger_secs(),
+            api_key: None,
+            state_dir: default_state_dir(),
+            telemetry_backend: None,
+        }
+    }
+}
+
+fn default_bind_address() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+}
+fn default_grpc_port() -> u16 {
+    50051
+}
+fn default_http_port() -> u16 {
+    8000
+}
+fn default_metrics_db_path() -> PathBuf {
+    PathBuf::from("llamaforge.db")
+}
+fn default_retention_days() -> u32 {
+    30
+}
+fn default_queue_max_depth() -> u32 {
+    1000
+}
+fn default_queue_timeout_secs() -> u64 {
+    300
+}
+fn default_restart_stagger_secs() -> u64 {
+    5
+}
+fn default_state_dir() -> PathBuf {
+    PathBuf::from("/var/run/llamaforge/")
+}
+
+/// gRPC listener configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GrpcConfig {
+    #[serde(default = "default_grpc_max_message_size_mb")]
+    pub max_message_size_mb: u32,
+    #[serde(default = "default_grpc_keepalive_interval_secs")]
+    pub keepalive_interval_secs: u32,
+    #[serde(default = "default_grpc_keepalive_timeout_secs")]
+    pub keepalive_timeout_secs: u32,
+    #[serde(default = "default_grpc_max_concurrent_streams")]
+    pub max_concurrent_streams: u32,
+    /// Whether to terminate TLS on the gRPC listener. When true,
+    /// `tls_cert` and `tls_key` must both be set. Default false.
+    #[serde(default)]
+    pub tls_enabled: bool,
+    #[serde(default)]
+    pub tls_cert: Option<PathBuf>,
+    #[serde(default)]
+    pub tls_key: Option<PathBuf>,
+}
+
+impl Default for GrpcConfig {
+    fn default() -> Self {
+        Self {
+            max_message_size_mb: default_grpc_max_message_size_mb(),
+            keepalive_interval_secs: default_grpc_keepalive_interval_secs(),
+            keepalive_timeout_secs: default_grpc_keepalive_timeout_secs(),
+            max_concurrent_streams: default_grpc_max_concurrent_streams(),
+            tls_enabled: false,
+            tls_cert: None,
+            tls_key: None,
+        }
+    }
+}
+
+fn default_grpc_max_message_size_mb() -> u32 {
+    16
+}
+fn default_grpc_keepalive_interval_secs() -> u32 {
+    30
+}
+fn default_grpc_keepalive_timeout_secs() -> u32 {
+    10
+}
+fn default_grpc_max_concurrent_streams() -> u32 {
+    1000
+}
+
+/// Prometheus metrics configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PrometheusConfig {
+    #[serde(default = "default_prometheus_port")]
+    pub port: u16,
+    #[serde(default = "default_prometheus_path")]
+    pub path: String,
+}
+fn default_prometheus_port() -> u16 {
+    9090
+}
+fn default_prometheus_path() -> String {
+    "/metrics".to_string()
+}
+
+/// Web UI configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct WebUiConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+fn default_true() -> bool {
+    true
+}
+
+/// Single llama-server instance configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// Path to the `llama-server` executable.
+    pub binary_path: PathBuf,
+    /// Path to the GGUF model file, passed to `llama-server` as `--model`.
+    pub model_path: PathBuf,
+    #[serde(default)]
+    pub alias: Option<String>,
+    pub port: u16,
+    #[serde(default)]
+    pub backend: Backend,
+    #[serde(default)]
+    pub devices: Vec<DeviceSpec>,
+    #[serde(default = "default_gpu_layers")]
+    pub gpu_layers: i32,
+    #[serde(default = "default_parallel_slots")]
+    pub parallel_slots: u32,
+    #[serde(default = "default_ctx_size")]
+    pub ctx_size: u32,
+    #[serde(default)]
+    pub cache_type_k: CacheType,
+    #[serde(default)]
+    pub cache_type_v: CacheType,
+    #[serde(default)]
+    pub flash_attn: FlashAttnMode,
+    #[serde(default)]
+    pub lora_adapters: Vec<LoraAdapterConfig>,
+    #[serde(default)]
+    pub estimated_vram_mb: Option<u64>,
+    #[serde(default)]
+    pub shutdown_drain_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub speculative_method: SpeculativeMethod,
+    #[serde(default)]
+    pub model_architecture: ModelArchitecture,
+    #[serde(default = "default_max_restart_attempts")]
+    pub max_restart_attempts: u32,
+    #[serde(default = "default_restart_on_degradation")]
+    pub restart_on_degradation: bool,
+    #[serde(default = "default_restart_cooldown_secs")]
+    pub restart_cooldown_secs: u64,
+    #[serde(default = "default_startup_timeout_secs")]
+    pub startup_timeout_secs: u32,
+}
+
+fn default_max_restart_attempts() -> u32 {
+    3
+}
+
+fn default_restart_on_degradation() -> bool {
+    true
+}
+
+fn default_restart_cooldown_secs() -> u64 {
+    10
+}
+
+fn default_startup_timeout_secs() -> u32 {
+    300
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            binary_path: PathBuf::new(),
+            model_path: PathBuf::new(),
+            alias: None,
+            port: 0,
+            backend: Backend::default(),
+            devices: Vec::new(),
+            gpu_layers: default_gpu_layers(),
+            parallel_slots: default_parallel_slots(),
+            ctx_size: default_ctx_size(),
+            cache_type_k: CacheType::default(),
+            cache_type_v: CacheType::default(),
+            flash_attn: FlashAttnMode::default(),
+            lora_adapters: Vec::new(),
+            estimated_vram_mb: None,
+            shutdown_drain_timeout_secs: None,
+            speculative_method: SpeculativeMethod::default(),
+            model_architecture: ModelArchitecture::default(),
+            max_restart_attempts: default_max_restart_attempts(),
+            restart_on_degradation: default_restart_on_degradation(),
+            restart_cooldown_secs: default_restart_cooldown_secs(),
+            startup_timeout_secs: default_startup_timeout_secs(),
+        }
+    }
+}
+
+fn default_gpu_layers() -> i32 {
+    -1
+}
+fn default_parallel_slots() -> u32 {
+    1
+}
+fn default_ctx_size() -> u32 {
+    0
+}
+
+/// Priority-aware queuing and scheduling rules.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PriorityRulesConfig {
+    #[serde(default)]
+    pub task_types: HashMap<TaskTypeId, u32>,
+    #[serde(default)]
+    pub custom_task_types: HashMap<TaskTypeId, u32>,
+    #[serde(default)]
+    pub task_type_classes: HashMap<TaskTypeId, TaskClassName>,
+    #[serde(default)]
+    pub requestor_bonuses: HashMap<RequestorId, i32>,
+    #[serde(default)]
+    pub requestor_classes: HashMap<String, RequestorClassPolicy>,
+    #[serde(default)]
+    pub starvation: StarvationConfig,
+    #[serde(default)]
+    pub fair_share: FairShareConfig,
+    #[serde(default)]
+    pub preemption: PreemptionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct AllowedPriorityRange {
+    pub min: u32,
+    pub max: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct RequestorClassPolicy {
+    pub max_concurrent: u32,
+    pub allowed_task_types: HashMap<TaskTypeId, AllowedPriorityRange>,
+    pub priority_bonus: i32,
+    pub queue_timeout_secs: Option<u32>,
+}
+
+/// Request starvation boost configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StarvationConfig {
+    #[serde(default = "default_check_interval_secs")]
+    pub check_interval_secs: u32,
+    #[serde(default = "default_boost_scale")]
+    pub boost_scale: f64,
+    #[serde(default = "default_boost_start_after_secs")]
+    pub boost_start_after_secs: u32,
+    #[serde(default = "default_max_boost")]
+    pub max_boost: u32,
+}
+impl Default for StarvationConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_secs: default_check_interval_secs(),
+            boost_scale: default_boost_scale(),
+            boost_start_after_secs: default_boost_start_after_secs(),
+            max_boost: default_max_boost(),
+        }
+    }
+}
+fn default_check_interval_secs() -> u32 {
+    5
+}
+fn default_boost_scale() -> f64 {
+    50.0
+}
+fn default_boost_start_after_secs() -> u32 {
+    30
+}
+fn default_max_boost() -> u32 {
+    400
+}
+
+/// Fair share scheduling weights.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FairShareConfig {
+    #[serde(default)]
+    pub weights: HashMap<RequestorId, u32>,
+}
+
+/// Queue preemption configuration.
+/// See design doc Section 2.6.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PreemptionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_preempt_min_tokens")]
+    pub min_tokens_before_preempt: u32,
+}
+fn default_preempt_min_tokens() -> u32 {
+    10
+}
+
+/// Paths to all configuration and state files.
+/// See design doc Section 3.3.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConfigPaths {
+    pub main_config: PathBuf,
+    pub priority_rules: PathBuf,
+    pub state_dir: PathBuf,
+    pub lock_file: PathBuf,
+}
+
+impl ConfigPaths {
+    pub fn new(main_config: PathBuf, priority_rules: PathBuf, state_dir: PathBuf) -> Self {
+        let lock_file = state_dir.join("config.lock");
+        Self { main_config, priority_rules, state_dir, lock_file }
+    }
+}
+/// Mutations that can be applied to the configuration at runtime.
+/// See design doc Section 2.6.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigMutation {
+    /// Replace the LoRA adapter list for a specific server.
+    SetLoraAdapters { server_id: ServerId, adapters: Vec<LoraAdapterConfig> },
+}
+
+/// The result of applying a `ConfigMutation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MutationOutcome {
+    Applied,
+    Unchanged,
+    TargetMissing,
+}
+
+impl ConfigMutation {
+    /// Applies the mutation in-place to an AppConfig.
+    pub fn apply(&self, config: &mut AppConfig) -> MutationOutcome {
+        match self {
+            ConfigMutation::SetLoraAdapters { server_id, adapters } => {
+                if let Some(server) = config.servers.get_mut(server_id) {
+                    if server.lora_adapters != *adapters {
+                        server.lora_adapters = adapters.clone();
+                        MutationOutcome::Applied
+                    } else {
+                        MutationOutcome::Unchanged
+                    }
+                } else {
+                    MutationOutcome::TargetMissing
+                }
+            }
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gateway_config_defaults() {
+        let g = GatewayConfig::default();
+        assert_eq!(g.max_request_body_bytes, 50 * 1024 * 1024);
+        assert_eq!(g.large_body_threshold_mb, 1);
+        assert_eq!(g.max_concurrent_large_requests, 5);
+        assert_eq!(g.wal_checkpoint_mode, WalCheckpointMode::Passive);
+    }
+
+    #[test]
+    fn test_gateway_config_serde_roundtrip() {
+        let g = GatewayConfig {
+            max_request_body_bytes: 100 * 1024 * 1024,
+            large_body_threshold_mb: 4,
+            max_concurrent_large_requests: 8,
+            wal_checkpoint_mode: WalCheckpointMode::Truncate,
+        };
+        let toml = toml::to_string(&g).unwrap();
+        let parsed: GatewayConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn test_gateway_config_parses_from_toml_section() {
+        let toml = r#"
+[gateway]
+max_request_body_bytes = 10485760
+max_concurrent_large_requests = 2
+wal_checkpoint_mode = "truncate"
+"#;
+        let parsed: AppConfig = toml::from_str(toml).unwrap();
+        assert_eq!(parsed.gateway.max_request_body_bytes, 10485760);
+        assert_eq!(parsed.gateway.max_concurrent_large_requests, 2);
+        assert_eq!(parsed.gateway.large_body_threshold_mb, 1); // default preserved
+        assert_eq!(parsed.gateway.wal_checkpoint_mode, WalCheckpointMode::Truncate);
+    }
+
+    #[test]
+    fn test_grpc_tls_serde_roundtrip() {
+        let g = GrpcConfig {
+            tls_enabled: true,
+            tls_cert: Some(PathBuf::from("/etc/cert.pem")),
+            tls_key: Some(PathBuf::from("/etc/key.pem")),
+            ..Default::default()
+        };
+        let toml = toml::to_string(&g).unwrap();
+        let parsed: GrpcConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(g, parsed);
+    }
+
+    #[test]
+    fn test_app_config_serde_roundtrip() {
+        let mut config = AppConfig::default();
+        config.servers.insert(
+            ServerId::from_config_id("llama-3"),
+            ServerConfig {
+                model_path: PathBuf::from("models/llama-3.gguf"),
+                port: 8080,
+                ..Default::default()
+            },
+        );
+
+        let toml = toml::to_string(&config).unwrap();
+        let parsed: AppConfig = toml::from_str(&toml).unwrap();
+        assert_eq!(config, parsed);
+    }
+
+    #[test]
+    fn test_app_config_full_roundtrip() {
+        let mut config = AppConfig {
+            global: GlobalConfig {
+                bind_address: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                grpc_port: 9000,
+                http_port: 9001,
+                log_level: LogLevel::Debug,
+                log_format: LogFormat::Json,
+                metrics_db_path: PathBuf::from("test.db"),
+                metrics_retention_days: 7,
+                queue_max_depth: 50,
+                queue_default_timeout_secs: 60,
+                restart_stagger_secs: 1,
+                api_key: Some("secret".to_string()),
+                state_dir: PathBuf::from("/tmp/test"),
+                telemetry_backend: Some("nvml".to_string()),
+            },
+            grpc: GrpcConfig {
+                tls_cert: Some(PathBuf::from("cert.pem")),
+                tls_key: Some(PathBuf::from("key.pem")),
+                ..Default::default()
+            },
+            gateway: GatewayConfig::default(),
+            prometheus: PrometheusConfig { port: 9999, path: "/metrics_test".to_string() },
+            web_ui: WebUiConfig { enabled: false },
+            cors: CorsConfig::default(),
+            servers: HashMap::new(),
+            priority_rules: PriorityRulesConfig {
+                task_types: HashMap::from([(TaskTypeId::from("chat"), 500)]),
+                custom_task_types: HashMap::from([(TaskTypeId::from("ext"), 150)]),
+                task_type_classes: HashMap::from([(
+                    TaskTypeId::from("chat"),
+                    TaskClassName::from("ui"),
+                )]),
+                requestor_bonuses: HashMap::from([(RequestorId::from("vip"), 100)]),
+                requestor_classes: HashMap::new(),
+                starvation: StarvationConfig {
+                    check_interval_secs: 5,
+                    boost_scale: 50.0,
+                    boost_start_after_secs: 30,
+                    max_boost: 400,
+                },
+                fair_share: FairShareConfig {
+                    weights: HashMap::from([(RequestorId::from("default"), 100)]),
+                },
+                preemption: PreemptionConfig { enabled: true, min_tokens_before_preempt: 5 },
+            },
+            routing: Default::default(),
+        };
+
+        config.servers.insert(
+            ServerId::from_config_id("s1"),
+            ServerConfig {
+                binary_path: PathBuf::from("/usr/local/bin/llama-server"),
+                model_path: PathBuf::from("model.gguf"),
+                alias: Some("alias".to_string()),
+                port: 1234,
+                backend: Backend::Custom,
+                devices: vec![DeviceSpec { gpu_id: GpuId(0), layer_range: Some(0..10) }],
+                gpu_layers: 32,
+                parallel_slots: 2,
+                ctx_size: 4096,
+                cache_type_k: CacheType::Q8_0,
+                cache_type_v: CacheType::Q4_0,
+                flash_attn: FlashAttnMode::Enabled,
+                lora_adapters: vec![LoraAdapterConfig {
+                    path: PathBuf::from("lora.gguf"),
+                    scale: 0.5,
+                }],
+                estimated_vram_mb: Some(1024),
+                shutdown_drain_timeout_secs: None,
+                speculative_method: SpeculativeMethod::Lookup { ngram_size: 3 },
+                model_architecture: ModelArchitecture::Recurrent,
+                max_restart_attempts: 5,
+                restart_on_degradation: true,
+                restart_cooldown_secs: 10,
+                startup_timeout_secs: 300,
+            },
+        );
+
+        let toml_str = toml::to_string(&config).expect("failed to serialize full config");
+        let parsed: AppConfig = toml::from_str(&toml_str).expect("failed to parse full config");
+        assert_eq!(config, parsed, "roundtrip failed for fully populated config");
+    }
+
+    #[test]
+    fn test_global_config_defaults() {
+        let toml = "[global]\n";
+        let config: AppConfig = toml::from_str(toml).unwrap();
+        let g = config.global;
+        assert_eq!(g.bind_address, IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
+        assert_eq!(g.grpc_port, 50051);
+        assert_eq!(g.http_port, 8000);
+        assert_eq!(g.log_level, LogLevel::Info);
+        assert_eq!(g.log_format, LogFormat::Pretty);
+        assert_eq!(g.metrics_db_path, PathBuf::from("llamaforge.db"));
+        assert_eq!(g.metrics_retention_days, 30);
+        assert_eq!(g.queue_max_depth, 1000);
+        assert_eq!(g.queue_default_timeout_secs, 300);
+        assert_eq!(g.restart_stagger_secs, 5);
+        assert_eq!(g.api_key, None);
+        assert_eq!(g.state_dir, PathBuf::from("/var/run/llamaforge/"));
+    }
+
+    #[test]
+    fn test_unknown_keys_ignored() {
+        let toml = "[global]\nbogus_key = 42\n";
+        let result: Result<AppConfig, _> = toml::from_str(toml);
+        assert!(result.is_ok());
+    }
+}

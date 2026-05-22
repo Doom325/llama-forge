@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use llamaforge_config::{ConfigHandle, ConfigReader, ConfigWriter};
+use llamaforge_core::config::{ConfigHandle, ConfigReader, ConfigWriter};
 use llamaforge_server_manager::ServerManager;
 use tokio_util::sync::CancellationToken;
 
@@ -128,7 +128,7 @@ async fn wait_for_shutdown_or_reload(config: &Arc<ConfigHandle>) {
                             changes = diff.changes.len(),
                             "lifecycle.config.reload.completed"
                         ),
-                        Err(llamaforge_config::ConfigReloadError::RestartRequired { fields }) => {
+                        Err(llamaforge_core::config::ConfigReloadError::RestartRequired { fields }) => {
                             tracing::warn!(
                                 ?fields,
                                 "lifecycle.config.reload.restart_required"

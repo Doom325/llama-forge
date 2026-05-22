@@ -67,7 +67,7 @@ impl MetricsPipeline {
 /// Assembles the complete metrics pipeline.
 pub fn create_metrics_pipeline(
     config: &MetricsConfig,
-    config_reader: Arc<dyn llamaforge_config::ConfigReader>,
+    config_reader: Arc<dyn llamaforge_core::config::ConfigReader>,
 ) -> Result<MetricsPipeline, StoreError> {
     // 1. Open and migrate the database. Also acquires the advisory lock.
     let (conn, lock_file) = open_and_migrate(&config.db_path)?;

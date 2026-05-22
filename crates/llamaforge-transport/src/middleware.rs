@@ -3,7 +3,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use llamaforge_config::ConfigReader;
+use llamaforge_core::config::ConfigReader;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -127,7 +127,7 @@ pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Respo
     let request_id = Uuid::now_v7();
     let request_id_str = request_id.to_string();
 
-    req.extensions_mut().insert(llamaforge_types::RequestId::new(request_id));
+    req.extensions_mut().insert(llamaforge_core::types::RequestId::new(request_id));
 
     let method = req.method().to_string();
     let path = req.uri().path().to_string();
@@ -238,7 +238,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
-    use llamaforge_config::{
+    use llamaforge_core::config::{
         source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
     };
     use std::sync::Arc;

@@ -18,15 +18,17 @@ use futures_core::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
-use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::{Router, RoutingDecision};
-use llamaforge_transport::InferenceEngine;
-use llamaforge_types::traits::{DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter};
-use llamaforge_types::{
+use llamaforge_core::routing::{Router, RoutingDecision};
+use llamaforge_core::types::traits::{
+    DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
+};
+use llamaforge_core::types::{
     ChatCompletionChunk, ChatCompletionRequest, GenerationParams, ModelAlias, ModelTarget,
     RequestId, RequestorClass, RequestorId, Role, StreamError,
 };
+use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
+use llamaforge_metrics::MetricsIngest;
+use llamaforge_transport::InferenceEngine;
 
 /// Adapter implementing [`InferenceEngine`] by composing the queue, router,
 /// dispatcher and metrics layers. See module-level docs.
@@ -63,7 +65,7 @@ fn map_stream_error(e: llamaforge_dispatch::error::StreamError) -> StreamError {
     }
 }
 
-fn render_prompt(messages: &[llamaforge_types::Message]) -> String {
+fn render_prompt(messages: &[llamaforge_core::types::Message]) -> String {
     messages
         .iter()
         .map(|m| format!("{}: {}", role_str(&m.role), m.content))
@@ -198,8 +200,8 @@ impl InferenceEngine for InferenceEngineAdapter {
             let metrics_for_audit = metrics_for_audit.clone();
             let audit_ctx = crate::audit::AuditContext {
                 model_name: audit_model.clone(),
-                requestor: llamaforge_config::RequestorId("anonymous".to_string()),
-                task_type: llamaforge_config::TaskTypeId("default".to_string()),
+                requestor: llamaforge_core::config::RequestorId("anonymous".to_string()),
+                task_type: llamaforge_core::config::TaskTypeId("default".to_string()),
                 received_at: chrono::Utc::now(),
             };
             tokio::spawn(async move {
@@ -288,17 +290,17 @@ impl InferenceEngine for InferenceEngineAdapter {
 mod tests {
     use super::*;
     use futures_util::StreamExt;
+    use llamaforge_core::routing::types::ServerStateView;
+    use llamaforge_core::types::ports::{SlotErasure, SlotError};
+    use llamaforge_core::types::traits::SlotNotifier;
+    use llamaforge_core::types::traits::{
+        AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
+    };
+    use llamaforge_core::types::{ClientRefreshEvent, Message, RequestId, ServerId, SlotId};
     use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
     use llamaforge_dispatch::error::DispatchError as DispatchCrateError;
     use llamaforge_dispatch::slot_map::SlotDispatchMap;
     use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
-    use llamaforge_routing::types::ServerStateView;
-    use llamaforge_types::ports::{SlotErasure, SlotError};
-    use llamaforge_types::traits::SlotNotifier;
-    use llamaforge_types::traits::{
-        AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
-    };
-    use llamaforge_types::{ClientRefreshEvent, Message, RequestId, ServerId, SlotId};
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -392,12 +394,12 @@ mod tests {
     }
     struct EmptyServerState;
     impl ServerStateView for EmptyServerState {
-        fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+        fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
             vec![]
         }
     }
     struct ZeroDispatchCounts;
-    impl llamaforge_routing::DispatchCountView for ZeroDispatchCounts {
+    impl llamaforge_core::routing::DispatchCountView for ZeroDispatchCounts {
         fn in_flight_count(&self, _: &ServerId) -> usize {
             0
         }
@@ -414,16 +416,16 @@ mod tests {
         }
     }
 
-    fn test_config() -> Arc<llamaforge_config::ConfigHandle> {
+    fn test_config() -> Arc<llamaforge_core::config::ConfigHandle> {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(tmp.path(), "[global]\n").unwrap();
-        let paths = llamaforge_config::ConfigPaths::new(
+        let paths = llamaforge_core::config::ConfigPaths::new(
             tmp.path().to_path_buf(),
             tmp.path().to_path_buf(),
             tmp.path().to_path_buf(),
         );
-        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
-        Arc::new(llamaforge_config::ConfigHandle::load(source).unwrap())
+        let source = Arc::new(llamaforge_core::config::TomlFileConfigSource::new(paths));
+        Arc::new(llamaforge_core::config::ConfigHandle::load(source).unwrap())
     }
 
     fn test_router() -> Arc<Router> {

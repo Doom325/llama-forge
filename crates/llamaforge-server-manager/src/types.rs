@@ -1,8 +1,8 @@
 //! Domain types for Server Manager
 //! See design doc Section 2.3.
 
-use llamaforge_types::ServerId;
-pub use llamaforge_types::{ModelArchitecture, ServerLifecycle};
+use llamaforge_core::types::ServerId;
+pub use llamaforge_core::types::{ModelArchitecture, ServerLifecycle};
 use serde::{Deserialize, Serialize};
 
 /// The speculative decoding method used by the server.

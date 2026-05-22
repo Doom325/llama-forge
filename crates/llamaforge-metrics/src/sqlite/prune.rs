@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tracing::{error, info};
 
-use llamaforge_config::ConfigReader;
+use llamaforge_core::config::ConfigReader;
 
 use crate::metrics_recording::StoreHealthRecorder;
 use crate::traits::StoreMaintenance;

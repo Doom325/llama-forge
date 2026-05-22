@@ -1,7 +1,12 @@
 use bytes::Bytes;
-use llamaforge_config::{
+use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
 };
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::routing::RoutingDecision;
+use llamaforge_core::types::ports::{SlotDispatchView, SlotErasure, SlotError};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
 use llamaforge_dispatch::dispatcher::{
     CompletionParams, CompletionRequest, DispatchCandidate, Dispatcher,
@@ -10,11 +15,6 @@ use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
-use llamaforge_types::ports::{SlotDispatchView, SlotErasure, SlotError};
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -64,14 +64,14 @@ struct MockClientManager {
     refreshed: std::sync::atomic::AtomicBool,
 }
 impl ClientManager for MockClientManager {
-    fn refresh(&self, _s: &ServerId, _e: llamaforge_types::ClientRefreshEvent) {
+    fn refresh(&self, _s: &ServerId, _e: llamaforge_core::types::ClientRefreshEvent) {
         self.refreshed.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
         vec![]
     }
 }
@@ -105,7 +105,7 @@ struct TestContext {
 fn setup_context() -> TestContext {
     let server_id = ServerId::new(Uuid::now_v7());
     let mut app_config = AppConfig::default();
-    let config_srv_id = llamaforge_types::ServerId::from_config_id(&server_id.to_string());
+    let config_srv_id = llamaforge_core::types::ServerId::from_config_id(&server_id.to_string());
     app_config.servers.insert(config_srv_id, ServerConfig::default());
 
     let config =
@@ -300,7 +300,7 @@ async fn test_vc3_4_client_refresh() {
     let ctx = setup_context();
     ctx.dispatcher.refresh_client(
         &ctx.server_id,
-        llamaforge_types::ClientRefreshEvent {
+        llamaforge_core::types::ClientRefreshEvent {
             server_id: ctx.server_id,
             new_port: 8080,
             tls_config: None,

@@ -6,12 +6,12 @@ use std::time::Duration;
 use chrono::Utc;
 use tokio::sync::mpsc as tokio_mpsc;
 
-use llamaforge_config::{RequestorId, TaskTypeId};
+use llamaforge_core::config::{RequestorId, TaskTypeId};
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{
     batch_collector_main, cmd_channel_drops, AuditRecord, MetricsConfig, RequestId, RequestMetrics,
     RequestStatus, TelemetryEvent, TelemetryEventKind, WriterCommand,
 };
-use llamaforge_types::ServerId;
 
 fn dummy_telemetry_event() -> TelemetryEvent {
     TelemetryEvent {

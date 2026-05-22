@@ -16,15 +16,15 @@ pub(crate) mod openai;
 pub use error::{AnthropicProtocolError, ApiError, TransportError};
 pub use grpc::start_grpc_server;
 pub use http::{start_http_server, HttpAppState};
-pub use llamaforge_types::traits::{
+pub use llamaforge_core::types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
 pub use middleware::LargeBodyConcurrencyLimit;
 
 use futures_core::Stream;
-use llamaforge_config::{ConfigReader, ConfigWriter};
+use llamaforge_core::config::{ConfigReader, ConfigWriter};
+use llamaforge_core::types::{ChatCompletionChunk, ChatCompletionRequest, StreamError};
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
-use llamaforge_types::{ChatCompletionChunk, ChatCompletionRequest, StreamError};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ pub trait InferenceEngine: Send + Sync + 'static {
         request: ChatCompletionRequest,
     ) -> Result<
         Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
-        llamaforge_types::traits::DispatchError,
+        llamaforge_core::types::traits::DispatchError,
     >;
 }
 
@@ -184,10 +184,10 @@ mod tests {
     use super::*;
     use futures_core::Stream;
     use futures_util::stream;
-    use llamaforge_config::{
+    use llamaforge_core::config::{
         source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
     };
-    use llamaforge_types::{traits::*, ChatCompletionChunk, StreamError};
+    use llamaforge_core::types::{traits::*, ChatCompletionChunk, StreamError};
 
     struct MockEngine {
         sleep_ms: u64,
@@ -223,8 +223,8 @@ mod tests {
     impl RouteValidator for MockRouteValidator {
         fn validate_routable(
             &self,
-            _model: &llamaforge_types::ModelTarget,
-            _capabilities: &llamaforge_types::RequestCapabilities,
+            _model: &llamaforge_core::types::ModelTarget,
+            _capabilities: &llamaforge_core::types::RequestCapabilities,
         ) -> Result<(), AdmissionError> {
             Ok(())
         }
@@ -243,10 +243,16 @@ mod tests {
         async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
             Ok(vec![])
         }
-        async fn start_server(&self, _id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
+        async fn start_server(
+            &self,
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), ServerError> {
             Ok(())
         }
-        async fn stop_server(&self, _id: &llamaforge_types::ServerId) -> Result<(), ServerError> {
+        async fn stop_server(
+            &self,
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), ServerError> {
             Ok(())
         }
     }
@@ -255,13 +261,13 @@ mod tests {
     impl QueueSubmitter for MockQueueSubmitter {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
             Ok(QueueTicket {
-                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 events: tokio::sync::mpsc::channel(1).1,
             })
         }
-        fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+        fn cancel(&self, _id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
             Ok(())
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {

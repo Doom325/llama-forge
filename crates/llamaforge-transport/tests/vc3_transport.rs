@@ -2,7 +2,7 @@
 mod mocks;
 
 use futures_core::Stream;
-use llamaforge_config::{
+use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
 };
 use llamaforge_metrics::InMemoryStore;
@@ -10,7 +10,7 @@ use llamaforge_transport::{start_servers, TransportDeps};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 
-use llamaforge_types::{
+use llamaforge_core::types::{
     traits::{
         AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
         RouteValidator, ServerControl, ServerError, ServerSummary,
@@ -273,7 +273,7 @@ async fn test_vc3_5_queue_full_returns_429() {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
             Err(AdmissionError::QueueFull)
         }
-        fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+        fn cancel(&self, _id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
             Ok(())
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {
@@ -287,8 +287,8 @@ async fn test_vc3_5_queue_full_returns_429() {
     impl RouteValidator for MockRouteValidatorRejects {
         fn validate_routable(
             &self,
-            _model: &llamaforge_types::ModelTarget,
-            _capabilities: &llamaforge_types::RequestCapabilities,
+            _model: &llamaforge_core::types::ModelTarget,
+            _capabilities: &llamaforge_core::types::RequestCapabilities,
         ) -> Result<(), AdmissionError> {
             Err(AdmissionError::QueueFull)
         }
@@ -361,13 +361,13 @@ async fn test_vc3_7_client_disconnect_cleanup() {
     impl QueueSubmitter for MockQueueSubmitterCancels {
         fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
             Ok(QueueTicket {
-                request_id: llamaforge_types::RequestId::new(uuid::Uuid::now_v7()),
+                request_id: llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7()),
                 admitted_at: chrono::Utc::now(),
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 events: tokio::sync::mpsc::channel(1).1,
             })
         }
-        fn cancel(&self, _id: &llamaforge_types::RequestId) -> Result<(), QueueError> {
+        fn cancel(&self, _id: &llamaforge_core::types::RequestId) -> Result<(), QueueError> {
             self.0.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
@@ -590,12 +590,12 @@ async fn test_vc3_13_panic_recovery_http() {
     impl llamaforge_transport::InferenceEngine for PanicEngine {
         async fn chat_completion(
             &self,
-            _req: llamaforge_types::ChatCompletionRequest,
+            _req: llamaforge_core::types::ChatCompletionRequest,
         ) -> Result<
             std::pin::Pin<
                 Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>,
             >,
-            llamaforge_types::traits::DispatchError,
+            llamaforge_core::types::traits::DispatchError,
         > {
             panic!("Test panic")
         }
@@ -627,12 +627,12 @@ async fn test_vc3_14_panic_recovery_grpc() {
     impl llamaforge_transport::InferenceEngine for PanicEngine {
         async fn chat_completion(
             &self,
-            _req: llamaforge_types::ChatCompletionRequest,
+            _req: llamaforge_core::types::ChatCompletionRequest,
         ) -> Result<
             std::pin::Pin<
                 Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>,
             >,
-            llamaforge_types::traits::DispatchError,
+            llamaforge_core::types::traits::DispatchError,
         > {
             panic!("Test panic")
         }

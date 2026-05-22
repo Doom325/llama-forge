@@ -1,5 +1,5 @@
 use crate::telemetry::{GpuDevice, GpuTelemetry, TelemetryError};
-use llamaforge_config::GpuId;
+use llamaforge_core::config::GpuId;
 use std::fs;
 use std::path::{Path, PathBuf};
 

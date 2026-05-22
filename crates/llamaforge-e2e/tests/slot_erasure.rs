@@ -1,10 +1,10 @@
 //! End-to-end test: `ReqwestClientStore` as `SlotErasure` actually
 //! POSTs to `/slots/{id}?action=erase` on the registered server.
 
+use llamaforge_core::types::ports::SlotErasure;
+use llamaforge_core::types::{ServerId, SlotId};
 use llamaforge_dispatch::client::ReqwestClientStore;
 use llamaforge_e2e::Harness;
-use llamaforge_types::ports::SlotErasure;
-use llamaforge_types::{ServerId, SlotId};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn real_slot_erasure_hits_mock_llama() {
 
     // Register a single server pointing at the live mock-llama.
     let server_id = ServerId::new(uuid::Uuid::now_v7());
-    let cfg = llamaforge_config::ServerConfig {
+    let cfg = llamaforge_core::config::ServerConfig {
         port: h.mock.addr.port(),
         parallel_slots: 1,
         ..Default::default()
@@ -52,7 +52,7 @@ async fn erase_slot_unregistered_server_returns_unreachable() {
         .expect_err("unregistered server should fail");
 
     match err {
-        llamaforge_types::ports::SlotError::ServerUnreachable { .. } => {}
+        llamaforge_core::types::ports::SlotError::ServerUnreachable { .. } => {}
         other => panic!("expected ServerUnreachable, got {:?}", other),
     }
 }

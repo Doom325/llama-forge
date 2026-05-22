@@ -1276,14 +1276,11 @@ dependencies = [
  "chrono",
  "clap",
  "llamaforge-adapters",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-dispatch",
  "llamaforge-metrics",
- "llamaforge-queue",
- "llamaforge-routing",
  "llamaforge-server-manager",
  "llamaforge-transport",
- "llamaforge-types",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1302,14 +1299,11 @@ dependencies = [
  "chrono",
  "futures-core",
  "futures-util",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-dispatch",
  "llamaforge-metrics",
- "llamaforge-queue",
- "llamaforge-routing",
  "llamaforge-server-manager",
  "llamaforge-transport",
- "llamaforge-types",
  "metrics",
  "metrics-exporter-prometheus",
  "serde_json",
@@ -1322,24 +1316,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamaforge-config"
+name = "llamaforge-core"
 version = "0.1.0-draft"
 dependencies = [
  "arc-swap",
  "async-trait",
- "llamaforge-types",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "filetime",
+ "futures-core",
+ "lru",
  "metrics",
+ "metrics-util 0.18.0",
  "nix",
+ "opentelemetry",
  "parking_lot",
  "proptest",
+ "scopeguard",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "toml",
  "toml_edit",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
+ "tracing-test",
  "typed-builder",
  "uuid",
 ]
@@ -1354,10 +1361,8 @@ dependencies = [
  "dashmap",
  "futures-core",
  "futures-util",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-metrics",
- "llamaforge-routing",
- "llamaforge-types",
  "metrics",
  "pin-project-lite",
  "proptest",
@@ -1383,15 +1388,12 @@ dependencies = [
  "futures-util",
  "llamaforge",
  "llamaforge-adapters",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-dispatch",
  "llamaforge-metrics",
  "llamaforge-proto",
- "llamaforge-queue",
- "llamaforge-routing",
  "llamaforge-server-manager",
  "llamaforge-transport",
- "llamaforge-types",
  "mock-llama",
  "reqwest",
  "rusqlite",
@@ -1415,9 +1417,8 @@ dependencies = [
  "deadpool",
  "deadpool-sqlite",
  "deadpool-sync",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-metrics",
- "llamaforge-types",
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-util 0.18.0",
@@ -1447,63 +1448,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamaforge-queue"
-version = "0.1.0-draft"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "dashmap",
- "futures-core",
- "llamaforge-config",
- "llamaforge-routing",
- "llamaforge-types",
- "metrics",
- "metrics-util 0.18.0",
- "opentelemetry",
- "proptest",
- "scopeguard",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tracing-opentelemetry",
- "uuid",
-]
-
-[[package]]
-name = "llamaforge-routing"
-version = "0.1.0-draft"
-dependencies = [
- "dashmap",
- "filetime",
- "llamaforge-config",
- "llamaforge-types",
- "lru",
- "metrics",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-test",
- "uuid",
-]
-
-[[package]]
 name = "llamaforge-server-manager"
 version = "0.1.0-draft"
 dependencies = [
  "axum",
  "chrono",
  "dashmap",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-metrics",
- "llamaforge-types",
  "metrics",
  "metrics-util 0.18.0",
  "mock-llama",
@@ -1536,10 +1488,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "hyper",
- "llamaforge-config",
+ "llamaforge-core",
  "llamaforge-metrics",
  "llamaforge-proto",
- "llamaforge-types",
  "metrics",
  "pin-project-lite",
  "reqwest",
@@ -1556,22 +1507,6 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
- "uuid",
-]
-
-[[package]]
-name = "llamaforge-types"
-version = "0.1.0-draft"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "futures-core",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
  "uuid",
 ]
 

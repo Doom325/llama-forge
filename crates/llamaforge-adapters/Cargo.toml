@@ -7,11 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-llamaforge-types = { workspace = true }
-llamaforge-config = { workspace = true }
-llamaforge-queue = { workspace = true }
+llamaforge-core = { workspace = true }
 llamaforge-server-manager = { workspace = true }
-llamaforge-routing = { workspace = true }
 llamaforge-dispatch = { workspace = true }
 llamaforge-metrics = { workspace = true }
 llamaforge-transport = { workspace = true }

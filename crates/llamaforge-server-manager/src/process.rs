@@ -1,4 +1,4 @@
-use llamaforge_config::ServerConfig;
+use llamaforge_core::config::ServerConfig;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 use tokio::process::Command;

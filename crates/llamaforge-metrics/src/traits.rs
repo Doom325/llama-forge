@@ -1,7 +1,7 @@
 //! Storage traits for the metrics subsystem.
 
 use chrono::{DateTime, Utc};
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 
 use crate::error::StoreError;
 use crate::filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};

@@ -2,7 +2,7 @@
 //! See design doc Section 3.3.
 
 use crate::types::ModelArchitecture;
-use llamaforge_config::ServerConfig;
+use llamaforge_core::config::ServerConfig;
 use std::path::Path;
 
 #[derive(Debug, thiserror::Error)]

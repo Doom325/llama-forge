@@ -1,6 +1,11 @@
-use llamaforge_config::{
+use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, ServerConfig,
 };
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::routing::RoutingDecision;
+use llamaforge_core::types::ports::{SlotErasure, SlotError};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
 use llamaforge_dispatch::dispatcher::{
     CompletionParams, CompletionRequest, DispatchCandidate, Dispatcher,
@@ -9,11 +14,6 @@ use llamaforge_dispatch::error::DispatchError;
 use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
-use llamaforge_types::ports::{SlotErasure, SlotError};
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -35,12 +35,12 @@ impl BackendClient for MockBackendClient {
 
 struct MockClientManager;
 impl ClientManager for MockClientManager {
-    fn refresh(&self, _s: &ServerId, _e: llamaforge_types::ClientRefreshEvent) {}
+    fn refresh(&self, _s: &ServerId, _e: llamaforge_core::types::ClientRefreshEvent) {}
 }
 
 struct MockServerStateView;
 impl ServerStateView for MockServerStateView {
-    fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
         vec![]
     }
 }
@@ -60,7 +60,7 @@ impl SlotErasure for MockSlotErasure {
 
 fn create_dispatcher(srv_id: ServerId) -> Dispatcher {
     let mut app_config = AppConfig::default();
-    let config_srv_id = llamaforge_types::ServerId::from_config_id(&srv_id.to_string());
+    let config_srv_id = llamaforge_core::types::ServerId::from_config_id(&srv_id.to_string());
     app_config.servers.insert(config_srv_id, ServerConfig::default());
 
     let config =
@@ -141,7 +141,7 @@ async fn test_8_8_stress_rapid_client_refresh() {
             tokio::spawn(async move {
                 d_clone.refresh_client(
                     &s_clone,
-                    llamaforge_types::ClientRefreshEvent {
+                    llamaforge_core::types::ClientRefreshEvent {
                         server_id: s_clone,
                         new_port: 8080,
                         tls_config: None,

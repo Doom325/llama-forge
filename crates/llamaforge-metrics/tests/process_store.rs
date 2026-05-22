@@ -3,11 +3,11 @@ use std::sync::mpsc;
 use chrono::Utc;
 use tempfile::TempDir;
 
+use llamaforge_core::types::ServerId;
 use llamaforge_metrics::{
     create_read_pool, open_and_migrate, writer_thread_main, ManagedProcess, MetricsConfig,
     ProcessId, ProcessStore, SqliteMetricsStore,
 };
-use llamaforge_types::ServerId;
 
 async fn setup_store() -> (TempDir, SqliteMetricsStore) {
     let temp_dir = TempDir::new().unwrap();

@@ -210,13 +210,13 @@ estimated_vram_mb = 100
 
         // Load via the file source so hot-reload and writeback paths
         // match production.
-        let paths = llamaforge_config::ConfigPaths::new(
+        let paths = llamaforge_core::config::ConfigPaths::new(
             config_path.clone(),
             config_path.with_file_name("priority_rules.toml"),
             state_dir,
         );
-        let source = Arc::new(llamaforge_config::TomlFileConfigSource::new(paths));
-        let handle = Arc::new(llamaforge_config::ConfigHandle::load(source)?);
+        let source = Arc::new(llamaforge_core::config::TomlFileConfigSource::new(paths));
+        let handle = Arc::new(llamaforge_core::config::ConfigHandle::load(source)?);
 
         // Build the orchestrator. Mirrors `llamaforge::serve::run` minus
         // the signal-handling loop and shutdown sequence — those live on
@@ -240,7 +240,7 @@ estimated_vram_mb = 100
         let config_for_forwarder = handle.clone();
         let sm_for_forwarder = server_manager.clone();
         let _diff_task = tokio::spawn(async move {
-            use llamaforge_config::ConfigReader;
+            use llamaforge_core::config::ConfigReader;
             let mut rx = config_for_forwarder.subscribe();
             while let Ok(diff) = rx.recv().await {
                 if diff.changes.is_empty() {

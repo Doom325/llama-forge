@@ -1,8 +1,8 @@
 //! Error types for Server Manager
 //! See design doc Section 2.4.
 
-use llamaforge_config::GpuId;
-use llamaforge_types::ServerId;
+use llamaforge_core::config::GpuId;
+use llamaforge_core::types::ServerId;
 
 /// Errors that can occur within the Server Manager component.
 /// See design doc Section 2.4.

@@ -3,8 +3,8 @@
 //! Maps database flat rows to typed domain objects.
 
 use chrono::{DateTime, Utc};
-use llamaforge_config::{RequestorId, TaskTypeId};
-use llamaforge_types::ServerId;
+use llamaforge_core::config::{RequestorId, TaskTypeId};
+use llamaforge_core::types::ServerId;
 
 use crate::traits::ConfigOverlay;
 use crate::types::{

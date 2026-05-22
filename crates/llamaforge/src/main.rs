@@ -2,7 +2,7 @@ mod init;
 mod validate;
 
 use clap::Parser;
-use llamaforge_config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
+use llamaforge_core::config::{ConfigHandle, ConfigLoadError, ConfigPaths, TomlFileConfigSource};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

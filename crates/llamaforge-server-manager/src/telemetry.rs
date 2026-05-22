@@ -1,7 +1,7 @@
 //! GPU telemetry port and FFI.
 //! See design doc Section 2.2.
 
-use llamaforge_config::GpuId;
+use llamaforge_core::config::GpuId;
 
 /// A GPU device managed by the system.
 #[derive(Debug, Clone, PartialEq, Eq)]

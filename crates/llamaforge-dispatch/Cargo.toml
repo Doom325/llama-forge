@@ -7,9 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-llamaforge-types = { workspace = true }
-llamaforge-routing = { workspace = true }
-llamaforge-config = { workspace = true }
+llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
 reqwest = { workspace = true }
 dashmap = { workspace = true }
@@ -35,5 +33,5 @@ wiremock = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 tempfile = { workspace = true }
 llamaforge-metrics = { workspace = true, features = ["test-utils"] }
-llamaforge-config = { workspace = true, features = ["test-utils"] }
+llamaforge-core = { workspace = true, features = ["test-utils"] }
 proptest = { workspace = true }

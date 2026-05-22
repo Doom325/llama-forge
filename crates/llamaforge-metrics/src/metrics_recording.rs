@@ -2,7 +2,7 @@
 //!
 //! See design doc Section 2.7 for metrics definitions.
 
-use llamaforge_types::ServerId;
+use llamaforge_core::types::ServerId;
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 

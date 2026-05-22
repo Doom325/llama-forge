@@ -7,13 +7,13 @@ use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use crate::tracker::DispatchTrackerRegistry;
 use dashmap::DashMap;
-use llamaforge_config::ConfigHandle;
+use llamaforge_core::config::ConfigHandle;
+use llamaforge_core::routing::types::ServerStateView;
+use llamaforge_core::routing::RoutingDecision;
+use llamaforge_core::types::ports::SlotErasure;
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_routing::types::ServerStateView;
-use llamaforge_routing::RoutingDecision;
-use llamaforge_types::ports::SlotErasure;
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -177,7 +177,7 @@ impl Dispatcher {
     pub fn refresh_client(
         &self,
         server_id: &ServerId,
-        event: llamaforge_types::ClientRefreshEvent,
+        event: llamaforge_core::types::ClientRefreshEvent,
     ) {
         self.client_manager.refresh(server_id, event);
     }
@@ -240,7 +240,7 @@ impl Dispatcher {
 
     /// Reconciles slot states based on the periodic server status update.
     pub async fn reconcile_slots(&self, server_id: &ServerId, processing_slots: &[SlotId]) {
-        use llamaforge_config::ConfigReader;
+        use llamaforge_core::config::ConfigReader;
         let grace_period = {
             let config = self.config.snapshot();
             if let Some(server_config) = config.servers.get(server_id) {
@@ -251,7 +251,7 @@ impl Dispatcher {
         };
 
         // Forward reconciliation: detects orphaned slots
-        use llamaforge_types::ports::SlotDispatchView;
+        use llamaforge_core::types::ports::SlotDispatchView;
         for &slot_id in processing_slots {
             if self.slot_dispatch_map.get_request_for_slot(server_id, &slot_id).is_none() {
                 let key = (*server_id, slot_id);
@@ -323,8 +323,8 @@ mod tests {
     use super::*;
     use crate::client::BackendResponseStream;
     use crate::error::DispatchError;
-    use llamaforge_config::TomlFileConfigSource;
-    use llamaforge_types::RequestId;
+    use llamaforge_core::config::TomlFileConfigSource;
+    use llamaforge_core::types::RequestId;
     use uuid::Uuid;
 
     struct MockBackendClient;
@@ -341,12 +341,17 @@ mod tests {
 
     struct MockClientManager;
     impl ClientManager for MockClientManager {
-        fn refresh(&self, _server_id: &ServerId, _event: llamaforge_types::ClientRefreshEvent) {}
+        fn refresh(
+            &self,
+            _server_id: &ServerId,
+            _event: llamaforge_core::types::ClientRefreshEvent,
+        ) {
+        }
     }
 
     struct MockServerStateView;
     impl ServerStateView for MockServerStateView {
-        fn all_servers(&self) -> Vec<llamaforge_routing::types::ServerSnapshot> {
+        fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
             vec![]
         }
     }
@@ -363,7 +368,7 @@ mod tests {
             &self,
             _server_id: &ServerId,
             _slot_id: &SlotId,
-        ) -> Result<(), llamaforge_types::ports::SlotError> {
+        ) -> Result<(), llamaforge_core::types::ports::SlotError> {
             Ok(())
         }
     }
@@ -373,7 +378,7 @@ mod tests {
         let path = temp.path().to_path_buf();
         std::fs::write(&path, "[global]\n").unwrap();
         let paths =
-            llamaforge_config::ConfigPaths::new(path, Default::default(), Default::default());
+            llamaforge_core::config::ConfigPaths::new(path, Default::default(), Default::default());
         Arc::new(ConfigHandle::load(Arc::new(TomlFileConfigSource::new(paths))).unwrap())
     }
 

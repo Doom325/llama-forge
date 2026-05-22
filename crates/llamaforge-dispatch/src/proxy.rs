@@ -8,8 +8,8 @@ use crate::error::{CancellationPhase, StreamError};
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use futures_util::StreamExt;
-use llamaforge_types::traits::SlotNotifier;
-use llamaforge_types::{RequestId, ServerId};
+use llamaforge_core::types::traits::SlotNotifier;
+use llamaforge_core::types::{RequestId, ServerId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
@@ -300,7 +300,7 @@ fn cleanup(
     mut token: DispatchToken,
     server_id: ServerId,
     request_id: RequestId,
-    id_slot: Option<llamaforge_types::SlotId>,
+    id_slot: Option<llamaforge_core::types::SlotId>,
     start_time: Instant,
     ttft: Option<Duration>,
     tokens_predicted: u32,
