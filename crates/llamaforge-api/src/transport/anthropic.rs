@@ -1,4 +1,4 @@
-use crate::error::{AnthropicProtocolError, AnthropicStreamPhase, ApiError};
+use super::error::{AnthropicProtocolError, AnthropicStreamPhase, ApiError};
 use llamaforge_core::types::{ChatCompletionChunk, ChatCompletionRequest, Message, Role};
 use serde::{Deserialize, Serialize};
 

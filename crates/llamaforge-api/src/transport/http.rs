@@ -12,7 +12,7 @@ use llamaforge_core::types::traits::{
 use std::sync::Arc;
 use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
 
-use crate::{
+use super::{
     anthropic::{
         format_anthropic_event, parse_anthropic_request, AnthropicMessagesRequest, AnthropicState,
     },
@@ -628,7 +628,7 @@ where
     RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
     SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
-    let management_state = crate::management::ManagementState {
+    let management_state = super::management::ManagementState {
         server_control: state.server_control.clone(),
         queue_submitter: state.queue_submitter.clone(),
         config_reader: state.config_reader.clone(),
@@ -637,7 +637,7 @@ where
         store_maintenance: state.store_maintenance.clone(),
     };
 
-    let management_router = crate::management::management_routes(management_state);
+    let management_router = super::management::management_routes(management_state);
 
     let max_body_bytes = state.config_reader.snapshot().gateway.max_request_body_bytes as usize;
 
@@ -666,7 +666,7 @@ where
             large_body_limit_middleware,
         ))
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
-        .layer(crate::middleware::build_cors_layer(state.config_reader.clone()))
+        .layer(super::middleware::build_cors_layer(state.config_reader.clone()))
         .layer(CatchPanicLayer::new())
 }
 
@@ -1070,7 +1070,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitterFull),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         let app = build_router(state);

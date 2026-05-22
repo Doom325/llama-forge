@@ -7,13 +7,13 @@ use llamaforge_core::routing::RoutingDecision;
 use llamaforge_core::types::ports::{SlotErasure, SlotError};
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
-use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{
+use llamaforge_api::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+use llamaforge_api::dispatch::dispatcher::{
     CompletionParams, CompletionRequest, DispatchCandidate, Dispatcher,
 };
-use llamaforge_dispatch::error::DispatchError;
-use llamaforge_dispatch::slot_map::SlotDispatchMap;
-use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
+use llamaforge_api::dispatch::error::DispatchError;
+use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
+use llamaforge_api::dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use std::sync::Arc;
 use std::time::Duration;
@@ -161,7 +161,7 @@ async fn test_slot_released_before_audit_send() {
     let (audit_tx, mut audit_rx) = mpsc::channel(1);
     // Fill the audit channel
     audit_tx
-        .send(llamaforge_dispatch::proxy::AuditRecord {
+        .send(llamaforge_api::dispatch::proxy::AuditRecord {
             request_id: RequestId::new(Uuid::now_v7()),
             server_id,
             duration: Duration::from_secs(1),

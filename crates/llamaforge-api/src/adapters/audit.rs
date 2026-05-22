@@ -15,7 +15,7 @@
 
 use chrono::{DateTime, Utc};
 use llamaforge_core::config::{RequestorId as ConfigRequestorId, TaskTypeId};
-use llamaforge_dispatch::proxy::AuditRecord as DispatchAuditRecord;
+use crate::dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use llamaforge_metrics::{
     AuditRecord as MetricsAuditRecord, RequestId as MetricsRequestId, RequestMetrics, RequestStatus,
 };

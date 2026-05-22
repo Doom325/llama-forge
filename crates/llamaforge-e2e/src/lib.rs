@@ -46,7 +46,7 @@ pub struct OrchestratorHandle {
     /// [`OrchestratorHandle::shutdown_and_wait`], which is the only
     /// path that also drains transports and joins the scheduler.
     shutdown: CancellationToken,
-    transport: Option<llamaforge_transport::TransportHandles>,
+    transport: Option<llamaforge_api::transport::TransportHandles>,
     server_manager: Arc<llamaforge_server_manager::ServerManager>,
     scheduler: Option<JoinHandle<()>>,
     _tmp: TempDir,
@@ -250,7 +250,7 @@ estimated_vram_mb = 100
             }
         });
 
-        let transport = llamaforge_transport::start_servers(deps)
+        let transport = llamaforge_api::transport::start_servers(deps)
             .await
             .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;
 

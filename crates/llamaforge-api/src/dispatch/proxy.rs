@@ -2,11 +2,11 @@
 //!
 //! See design doc Section 3
 
-use crate::client::BackendClient;
-use crate::dispatcher::CompletionRequest;
-use crate::error::{CancellationPhase, StreamError};
-use crate::slot_map::SlotDispatchMap;
-use crate::token::DispatchToken;
+use super::client::BackendClient;
+use super::dispatcher::CompletionRequest;
+use super::error::{CancellationPhase, StreamError};
+use super::slot_map::SlotDispatchMap;
+use super::token::DispatchToken;
 use futures_util::StreamExt;
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId};

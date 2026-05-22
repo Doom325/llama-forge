@@ -2,10 +2,10 @@
 //!
 //! See design doc Section 2.1
 
-use crate::client::{BackendClient, ClientManager};
-use crate::slot_map::SlotDispatchMap;
-use crate::token::DispatchToken;
-use crate::tracker::DispatchTrackerRegistry;
+use super::client::{BackendClient, ClientManager};
+use super::slot_map::SlotDispatchMap;
+use super::token::DispatchToken;
+use super::tracker::DispatchTrackerRegistry;
 use dashmap::DashMap;
 use llamaforge_core::config::ConfigHandle;
 use llamaforge_core::routing::types::ServerStateView;
@@ -107,10 +107,10 @@ impl Dispatcher {
     pub async fn dispatch(
         &self,
         candidate: DispatchCandidate,
-        audit_tx: tokio::sync::mpsc::Sender<crate::proxy::AuditRecord>,
+        audit_tx: tokio::sync::mpsc::Sender<super::proxy::AuditRecord>,
     ) -> (
         tokio::task::AbortHandle,
-        tokio::sync::mpsc::Receiver<Result<crate::proxy::ParsedChunk, crate::error::StreamError>>,
+        tokio::sync::mpsc::Receiver<Result<super::proxy::ParsedChunk, super::error::StreamError>>,
     ) {
         let server_id = *candidate.routing.server_id();
 
@@ -147,7 +147,7 @@ impl Dispatcher {
         let (response_tx, response_rx) = tokio::sync::mpsc::channel(32);
 
         let handle = tasks.spawn(async move {
-            crate::proxy::proxy_task(
+            super::proxy::proxy_task(
                 token,
                 backend_client,
                 request,
@@ -321,8 +321,8 @@ impl Dispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::BackendResponseStream;
-    use crate::error::DispatchError;
+    use super::client::BackendResponseStream;
+    use super::error::DispatchError;
     use llamaforge_core::config::TomlFileConfigSource;
     use llamaforge_core::types::RequestId;
     use uuid::Uuid;

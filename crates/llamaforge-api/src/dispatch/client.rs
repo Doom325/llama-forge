@@ -16,8 +16,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::dispatcher::CompletionRequest;
-use crate::error::{DispatchError, HttpStatus, StreamError};
+use super::dispatcher::CompletionRequest;
+use super::error::{DispatchError, HttpStatus, StreamError};
 
 /// A pinned, boxed, thread-safe stream of chunks from the backend.
 ///

@@ -1,4 +1,4 @@
-use crate::error::ApiError;
+use super::error::ApiError;
 use llamaforge_core::types::{ChatCompletionChunk, ChatCompletionRequest, Message, Role};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;

@@ -3,7 +3,7 @@
 
 use llamaforge_core::types::ports::SlotErasure;
 use llamaforge_core::types::{ServerId, SlotId};
-use llamaforge_dispatch::client::ReqwestClientStore;
+use llamaforge_api::dispatch::client::ReqwestClientStore;
 use llamaforge_e2e::Harness;
 use std::sync::Arc;
 

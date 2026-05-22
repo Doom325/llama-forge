@@ -6,7 +6,7 @@ use llamaforge_core::config::{
     source::memory::InMemoryConfigSource, AppConfig, ConfigHandle, GlobalConfig,
 };
 use llamaforge_metrics::InMemoryStore;
-use llamaforge_transport::{start_servers, TransportDeps};
+use llamaforge_api::transport::{start_servers, TransportDeps};
 use reqwest::{Client, StatusCode};
 use std::sync::Arc;
 
@@ -26,9 +26,9 @@ async fn setup_test_server(
     config_modifier: impl FnOnce(&mut AppConfig),
     route_validator: Arc<dyn RouteValidator>,
     queue_submitter: Arc<dyn QueueSubmitter>,
-    inference_engine: Arc<dyn llamaforge_transport::InferenceEngine>,
+    inference_engine: Arc<dyn llamaforge_api::transport::InferenceEngine>,
     server_control: Arc<dyn ServerControl>,
-) -> (llamaforge_transport::TransportHandles, Arc<ConfigHandle>) {
+) -> (llamaforge_api::transport::TransportHandles, Arc<ConfigHandle>) {
     let mut config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
     config.global.http_port = 0;
     config.global.grpc_port = 0;
@@ -54,11 +54,11 @@ async fn setup_test_server(
     (handles, handle)
 }
 
-fn http_url(handles: &llamaforge_transport::TransportHandles, path: &str) -> String {
+fn http_url(handles: &llamaforge_api::transport::TransportHandles, path: &str) -> String {
     format!("http://{}{}", handles.http_addr, path)
 }
 
-fn grpc_url(handles: &llamaforge_transport::TransportHandles) -> String {
+fn grpc_url(handles: &llamaforge_api::transport::TransportHandles) -> String {
     format!("http://{}", handles.grpc_addr)
 }
 
@@ -66,7 +66,7 @@ fn grpc_url(handles: &llamaforge_transport::TransportHandles) -> String {
 fn default_deps() -> (
     Arc<dyn RouteValidator>,
     Arc<dyn QueueSubmitter>,
-    Arc<dyn llamaforge_transport::InferenceEngine>,
+    Arc<dyn llamaforge_api::transport::InferenceEngine>,
     Arc<dyn ServerControl>,
 ) {
     (
@@ -587,7 +587,7 @@ async fn test_vc3_12_graceful_shutdown_drain() {
 async fn test_vc3_13_panic_recovery_http() {
     struct PanicEngine;
     #[async_trait::async_trait]
-    impl llamaforge_transport::InferenceEngine for PanicEngine {
+    impl llamaforge_api::transport::InferenceEngine for PanicEngine {
         async fn chat_completion(
             &self,
             _req: llamaforge_core::types::ChatCompletionRequest,
@@ -624,7 +624,7 @@ async fn test_vc3_13_panic_recovery_http() {
 async fn test_vc3_14_panic_recovery_grpc() {
     struct PanicEngine;
     #[async_trait::async_trait]
-    impl llamaforge_transport::InferenceEngine for PanicEngine {
+    impl llamaforge_api::transport::InferenceEngine for PanicEngine {
         async fn chat_completion(
             &self,
             _req: llamaforge_core::types::ChatCompletionRequest,

@@ -22,10 +22,10 @@
 
 use std::sync::Arc;
 
-use llamaforge_adapters::inference_engine::InferenceEngineAdapter;
-use llamaforge_adapters::metrics_exporter::MetricsExporterAdapter;
-use llamaforge_adapters::queue::QueueSubmitterAdapter;
-use llamaforge_adapters::server_control::ServerControlAdapter;
+use llamaforge_api::adapters::inference_engine::InferenceEngineAdapter;
+use llamaforge_api::adapters::metrics_exporter::MetricsExporterAdapter;
+use llamaforge_api::adapters::queue::QueueSubmitterAdapter;
+use llamaforge_api::adapters::server_control::ServerControlAdapter;
 use llamaforge_core::config::{ConfigHandle, ConfigReader};
 use llamaforge_core::queue::admission::AdmissionController;
 use llamaforge_core::queue::pipeline::{run_scheduler, HealthTracker, RequestPipeline};
@@ -34,13 +34,13 @@ use llamaforge_core::routing::types::{ServerSnapshot, ServerStateView};
 use llamaforge_core::routing::Router;
 use llamaforge_core::types::ports::SlotErasure;
 use llamaforge_core::types::traits::SlotNotifier;
-use llamaforge_dispatch::client::ReqwestClientStore;
-use llamaforge_dispatch::dispatcher::Dispatcher;
-use llamaforge_dispatch::slot_map::SlotDispatchMap;
-use llamaforge_dispatch::tracker::{DispatchCountAdapter, DispatchTrackerRegistry};
+use llamaforge_api::dispatch::client::ReqwestClientStore;
+use llamaforge_api::dispatch::dispatcher::Dispatcher;
+use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
+use llamaforge_api::dispatch::tracker::{DispatchCountAdapter, DispatchTrackerRegistry};
 use llamaforge_metrics::{create_metrics_pipeline, InstrumentedMetricsStore};
 use llamaforge_server_manager::ServerManager;
-use llamaforge_transport::TransportDeps;
+use llamaforge_api::transport::TransportDeps;
 use std::sync::atomic::AtomicU32;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;

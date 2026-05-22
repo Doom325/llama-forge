@@ -2,7 +2,7 @@
 //!
 //! See design doc Section 2.2
 
-use crate::tracker::DispatchTracker;
+use super::tracker::DispatchTracker;
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId};
 use std::sync::Arc;

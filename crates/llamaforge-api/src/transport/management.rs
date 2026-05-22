@@ -12,7 +12,7 @@ use llamaforge_core::types::{
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use std::sync::Arc;
 
-use crate::error::ApiError;
+use super::error::ApiError;
 
 pub struct ManagementState<CW, RMS, SM> {
     pub server_control: Arc<dyn ServerControl>,

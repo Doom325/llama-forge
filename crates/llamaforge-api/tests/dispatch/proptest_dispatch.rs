@@ -5,11 +5,11 @@ use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::types::ports::{SlotErasure, SlotError};
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
-use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{CompletionRequest, Dispatcher};
-use llamaforge_dispatch::error::DispatchError;
-use llamaforge_dispatch::slot_map::SlotDispatchMap;
-use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
+use llamaforge_api::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+use llamaforge_api::dispatch::dispatcher::{CompletionRequest, Dispatcher};
+use llamaforge_api::dispatch::error::DispatchError;
+use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
+use llamaforge_api::dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -90,7 +90,7 @@ proptest! {
         for _ in 0..inserts {
             let req_id = RequestId::new(Uuid::now_v7());
             let tracker = registry.get_or_create(&server_id);
-            let token = llamaforge_dispatch::token::DispatchToken::new(
+            let token = llamaforge_api::dispatch::token::DispatchToken::new(
                 tracker, req_id, server_id, Arc::new(MockSlotNotifier)
             );
             tokens.push(token);

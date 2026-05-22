@@ -8,7 +8,7 @@ use llamaforge_core::types::{
     },
     ChatCompletionChunk, RequestId, ServerId, StreamError,
 };
-use llamaforge_transport::InferenceEngine;
+use llamaforge_api::transport::InferenceEngine;
 
 pub struct MockEngine {
     pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,

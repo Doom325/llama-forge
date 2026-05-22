@@ -52,7 +52,7 @@ pub(crate) async fn large_body_limit_middleware(
     state: axum::extract::State<LargeBodyConcurrencyLimit>,
     req: Request,
     next: Next,
-) -> Result<Response, crate::error::ApiError> {
+) -> Result<Response, super::error::ApiError> {
     let content_length = req
         .headers()
         .get(axum::http::header::CONTENT_LENGTH)
@@ -69,7 +69,7 @@ pub(crate) async fn large_body_limit_middleware(
                 res.extensions_mut().insert(Arc::new(p));
                 Ok(res)
             }
-            Err(_) => Err(crate::error::ApiError::QueueFull { retry_after_secs: 30 }),
+            Err(_) => Err(super::error::ApiError::QueueFull { retry_after_secs: 30 }),
         }
     } else {
         Ok(next.run(req).await)
@@ -80,7 +80,7 @@ pub(crate) async fn auth_middleware(
     state: axum::extract::State<Arc<dyn ConfigReader>>,
     req: Request,
     next: Next,
-) -> Result<Response, crate::error::ApiError> {
+) -> Result<Response, super::error::ApiError> {
     let config = state.snapshot();
 
     if let Some(expected_key) = &config.global.api_key {
@@ -116,7 +116,7 @@ pub(crate) async fn auth_middleware(
                 "transport.auth_failed"
             );
             metrics::counter!("llamaforge_auth_failures_total").increment(1);
-            return Err(crate::error::ApiError::AuthFailure);
+            return Err(super::error::ApiError::AuthFailure);
         }
     }
 

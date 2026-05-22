@@ -26,9 +26,9 @@ use llamaforge_core::types::{
     ChatCompletionChunk, ChatCompletionRequest, GenerationParams, ModelAlias, ModelTarget,
     RequestId, RequestorClass, RequestorId, Role, StreamError,
 };
-use llamaforge_dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
+use crate::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_metrics::MetricsIngest;
-use llamaforge_transport::InferenceEngine;
+use crate::transport::InferenceEngine;
 
 /// Adapter implementing [`InferenceEngine`] by composing the queue, router,
 /// dispatcher and metrics layers. See module-level docs.
@@ -53,8 +53,8 @@ impl InferenceEngineAdapter {
     }
 }
 
-fn map_stream_error(e: llamaforge_dispatch::error::StreamError) -> StreamError {
-    use llamaforge_dispatch::error::StreamError as De;
+fn map_stream_error(e: crate::dispatch::error::StreamError) -> StreamError {
+    use crate::dispatch::error::StreamError as De;
     match e {
         De::BackendDisconnect => StreamError::BackendDisconnect,
         De::Timeout => StreamError::Timeout,
@@ -198,7 +198,7 @@ impl InferenceEngine for InferenceEngineAdapter {
             // and aggregates `RequestMetrics`.
             let (audit_tx, mut audit_rx) = tokio::sync::mpsc::channel(32);
             let metrics_for_audit = metrics_for_audit.clone();
-            let audit_ctx = crate::audit::AuditContext {
+            let audit_ctx = super::audit::AuditContext {
                 model_name: audit_model.clone(),
                 requestor: llamaforge_core::config::RequestorId("anonymous".to_string()),
                 task_type: llamaforge_core::config::TaskTypeId("default".to_string()),
@@ -206,7 +206,7 @@ impl InferenceEngine for InferenceEngineAdapter {
             };
             tokio::spawn(async move {
                 while let Some(record) = audit_rx.recv().await {
-                    let translated = crate::audit::translate_audit(record, &audit_ctx);
+                    let translated = super::audit::translate_audit(record, &audit_ctx);
                     if let Err(e) = metrics_for_audit.send_audit(translated).await {
                         tracing::debug!(error = %e, "inference_engine.audit_send_failed");
                     }
@@ -297,10 +297,10 @@ mod tests {
         AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
     };
     use llamaforge_core::types::{ClientRefreshEvent, Message, RequestId, ServerId, SlotId};
-    use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-    use llamaforge_dispatch::error::DispatchError as DispatchCrateError;
-    use llamaforge_dispatch::slot_map::SlotDispatchMap;
-    use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
+    use crate::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+    use crate::dispatch::error::DispatchError as DispatchCrateError;
+    use crate::dispatch::slot_map::SlotDispatchMap;
+    use crate::dispatch::tracker::DispatchTrackerRegistry;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Mutex as AsyncMutex};
@@ -365,12 +365,12 @@ mod tests {
 
     struct ScriptedBackend {
         script:
-            AsyncMutex<Option<Vec<Result<bytes::Bytes, llamaforge_dispatch::error::StreamError>>>>,
+            AsyncMutex<Option<Vec<Result<bytes::Bytes, crate::dispatch::error::StreamError>>>>,
     }
 
     impl ScriptedBackend {
         fn new(
-            script: Vec<Result<bytes::Bytes, llamaforge_dispatch::error::StreamError>>,
+            script: Vec<Result<bytes::Bytes, crate::dispatch::error::StreamError>>,
         ) -> Arc<Self> {
             Arc::new(Self { script: AsyncMutex::new(Some(script)) })
         }
@@ -381,7 +381,7 @@ mod tests {
         async fn post_completion(
             &self,
             _server_id: &ServerId,
-            _payload: llamaforge_dispatch::dispatcher::CompletionRequest,
+            _payload: crate::dispatch::dispatcher::CompletionRequest,
         ) -> Result<BackendResponseStream, DispatchCrateError> {
             let chunks = self.script.lock().await.take().unwrap_or_default();
             Ok(Box::pin(tokio_stream::iter(chunks)))
@@ -548,7 +548,7 @@ mod tests {
         let queue = MockQueue::new();
         let backend = ScriptedBackend::new(vec![
             Ok(llama_chunk("partial", false)),
-            Err(llamaforge_dispatch::error::StreamError::BackendDisconnect),
+            Err(crate::dispatch::error::StreamError::BackendDisconnect),
         ]);
         let adapter = InferenceEngineAdapter::new(
             queue.clone() as Arc<dyn QueueSubmitter>,

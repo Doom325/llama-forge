@@ -22,7 +22,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use tower::{Layer, Service};
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::{openai::OpenAiChatRequest, HttpAppState, InferenceEngine, TransportError};
+use super::{openai::OpenAiChatRequest, HttpAppState, InferenceEngine, TransportError};
 
 pub struct GrpcInferenceService {
     inference_engine: Arc<dyn InferenceEngine>,
@@ -50,7 +50,7 @@ impl InferenceService for GrpcInferenceService {
             .map_err(|e| Status::invalid_argument(format!("Invalid payload: {}", e)))?;
 
         let mut chat_req =
-            crate::openai::parse_openai_request(openai_req).map_err(tonic::Status::from)?;
+            super::openai::parse_openai_request(openai_req).map_err(tonic::Status::from)?;
 
         chat_req.model = req.model;
 
@@ -60,7 +60,7 @@ impl InferenceService for GrpcInferenceService {
         // `QueueFull` → `ResourceExhausted` — rather than the
         // previous "everything is `Internal`" shape.
         let request_id = llamaforge_core::types::RequestId::new(uuid::Uuid::now_v7());
-        let incoming = crate::http::build_incoming_request(request_id, &chat_req);
+        let incoming = super::http::build_incoming_request(request_id, &chat_req);
         self.route_validator
             .validate_routable(&incoming.model_target, &incoming.capabilities)
             .map_err(map_admission_error)?;
@@ -436,7 +436,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::ApiError;
+    use super::error::ApiError;
     use llamaforge_core::config::source::memory::InMemoryConfigSource;
     use llamaforge_core::config::ConfigHandle;
     use llamaforge_core::config::{AppConfig, GlobalConfig};
@@ -619,7 +619,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         // Bind ephemeral port so the test isn't flaky on port-collisions.
@@ -682,7 +682,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
-            large_body_limit: crate::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+            large_body_limit: super::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -5,11 +5,11 @@ use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::types::ports::{SlotErasure, SlotError};
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
-use llamaforge_dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
-use llamaforge_dispatch::dispatcher::{CompletionRequest, Dispatcher};
-use llamaforge_dispatch::error::DispatchError;
-use llamaforge_dispatch::slot_map::SlotDispatchMap;
-use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
+use llamaforge_api::dispatch::client::{BackendClient, BackendResponseStream, ClientManager};
+use llamaforge_api::dispatch::dispatcher::{CompletionRequest, Dispatcher};
+use llamaforge_api::dispatch::error::DispatchError;
+use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
+use llamaforge_api::dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -188,7 +188,7 @@ async fn test_7_12_reverse_reconciliation_skips_when_unresolved() {
     map.insert(req1, s1, slot);
 
     // To simulate unresolved, we add a request to the tracker but NOT the map
-    let _token = llamaforge_dispatch::token::DispatchToken::new(
+    let _token = llamaforge_api::dispatch::token::DispatchToken::new(
         d.trackers().get_or_create(&s1),
         req2,
         s1,
@@ -242,7 +242,7 @@ async fn test_7_14_end_to_end_reconciliation_cycle() {
     map.insert(req1, s1, slot);
 
     // Track the dispatch so it's formally active but not "unresolved"
-    let _token = llamaforge_dispatch::token::DispatchToken::new(
+    let _token = llamaforge_api::dispatch::token::DispatchToken::new(
         d.trackers().get_or_create(&s1),
         req1,
         s1,
