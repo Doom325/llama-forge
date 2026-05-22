@@ -8,7 +8,8 @@ use llamaforge_dispatch::slot_map::SlotDispatchMap;
 use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
-use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
+use llamaforge_types::ports::{SlotErasure, SlotError};
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -41,7 +42,7 @@ impl ServerStateView for MockServerStateView {
 
 struct MockSlotNotifier;
 impl SlotNotifier for MockSlotNotifier {
-    fn notify_slot_available(&self, _s: &ServerId) {}
+    fn notify_slot_available(&self) {}
 }
 
 struct MockSlotErasure {

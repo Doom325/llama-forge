@@ -8,7 +8,7 @@ use crate::error::{CancellationPhase, StreamError};
 use crate::slot_map::SlotDispatchMap;
 use crate::token::DispatchToken;
 use futures_util::StreamExt;
-use llamaforge_types::ports::SlotNotifier;
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -319,7 +319,7 @@ fn cleanup(
 
     // Release slot BEFORE audit
     token.release();
-    slot_notifier.notify_slot_available(&server_id);
+    slot_notifier.notify_slot_available();
 
     // Record final metrics
     metrics::counter!("llamaforge_dispatches_total", "server_id" => server_id.to_string())

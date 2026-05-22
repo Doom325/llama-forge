@@ -293,7 +293,8 @@ mod tests {
     use llamaforge_dispatch::slot_map::SlotDispatchMap;
     use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
     use llamaforge_routing::types::ServerStateView;
-    use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
+    use llamaforge_types::ports::{SlotErasure, SlotError};
+    use llamaforge_types::traits::SlotNotifier;
     use llamaforge_types::traits::{
         AdmissionError, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
     };
@@ -403,7 +404,7 @@ mod tests {
     }
     struct NoopSlotNotifier;
     impl SlotNotifier for NoopSlotNotifier {
-        fn notify_slot_available(&self, _: &ServerId) {}
+        fn notify_slot_available(&self) {}
     }
     struct NoopSlotErasure;
     #[async_trait::async_trait]

@@ -4,10 +4,9 @@
 //!
 //! Port-trait wiring summary:
 //!
-//! * `ports::SlotNotifier` is satisfied by `QueueSlotNotifier`, which
-//!   forwards into `DispatchQueue::notify_slot_available`. The queue's
-//!   wake channel is queue-wide, so the per-server `server_id` argument
-//!   is ignored — that matches the scheduler's actual semantics today.
+//! * `traits::SlotNotifier` is satisfied directly by `DispatchQueue`,
+//!   whose `notify_slot_available` wakes the scheduler via a queue-wide
+//!   notify. No adapter is needed.
 //! * `ports::SlotErasure` is satisfied by `ReqwestClientStore`, which
 //!   forwards to `POST {base_url}/slots/{id}?action=erase` per design
 //!   doc §6.629. Each configured server is registered in the store via
@@ -38,9 +37,8 @@ use llamaforge_routing::types::{ServerSnapshot, ServerStateView};
 use llamaforge_routing::Router;
 use llamaforge_server_manager::ServerManager;
 use llamaforge_transport::TransportDeps;
-use llamaforge_types::ports::{SlotErasure, SlotNotifier};
-use llamaforge_types::traits::{AdmissionError, IncomingRequest, RouteValidator};
-use llamaforge_types::ServerId;
+use llamaforge_types::ports::SlotErasure;
+use llamaforge_types::traits::{AdmissionError, IncomingRequest, RouteValidator, SlotNotifier};
 use std::sync::atomic::AtomicU32;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -142,7 +140,7 @@ pub async fn build(
     }
 
     // 8) Dispatcher.
-    let slot_notifier: Arc<dyn SlotNotifier> = Arc::new(QueueSlotNotifier(dispatch_queue.clone()));
+    let slot_notifier: Arc<dyn SlotNotifier> = dispatch_queue.clone();
     // Real slot-erasure: forwards to `POST /slots/{id}?action=erase` via
     // ReqwestClientStore. The store knows each server's base_url because
     // we registered it above. See dispatch::client::ReqwestClientStore
@@ -212,17 +210,6 @@ impl RouteValidator for RouterValidatorAdapter {
                 model: ModelAlias::new(std::sync::Arc::from(requested.as_str())),
             },
         })
-    }
-}
-
-/// Wraps `DispatchQueue`'s queue-wide wake notify into the per-server
-/// `ports::SlotNotifier` shape the dispatcher expects. The scheduler
-/// wake signal is queue-wide today, so `server_id` is ignored.
-struct QueueSlotNotifier(Arc<DispatchQueue>);
-
-impl SlotNotifier for QueueSlotNotifier {
-    fn notify_slot_available(&self, _server_id: &ServerId) {
-        self.0.notify_slot_available();
     }
 }
 

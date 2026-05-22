@@ -11,7 +11,8 @@ use llamaforge_config::ConfigHandle;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
 use llamaforge_routing::RoutingDecision;
-use llamaforge_types::ports::{SlotErasure, SlotNotifier};
+use llamaforge_types::ports::SlotErasure;
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -353,7 +354,7 @@ mod tests {
 
     struct MockSlotNotifier;
     impl SlotNotifier for MockSlotNotifier {
-        fn notify_slot_available(&self, _server_id: &ServerId) {}
+        fn notify_slot_available(&self) {}
     }
 
     struct MockSlotErasure;

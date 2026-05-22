@@ -12,7 +12,8 @@ use llamaforge_dispatch::tracker::DispatchTrackerRegistry;
 use llamaforge_metrics::MetricsIngest;
 use llamaforge_routing::types::ServerStateView;
 use llamaforge_routing::RoutingDecision;
-use llamaforge_types::ports::{SlotErasure, SlotError, SlotNotifier};
+use llamaforge_types::ports::{SlotErasure, SlotError};
+use llamaforge_types::traits::SlotNotifier;
 use llamaforge_types::{RequestId, ServerId, SlotId};
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,7 +71,7 @@ struct MockSlotNotifier {
     tx: mpsc::Sender<()>,
 }
 impl SlotNotifier for MockSlotNotifier {
-    fn notify_slot_available(&self, _s: &ServerId) {
+    fn notify_slot_available(&self) {
         let _ = self.tx.try_send(());
     }
 }
