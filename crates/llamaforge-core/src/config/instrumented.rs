@@ -207,67 +207,10 @@ mod tests {
         assert!(matches!(err, WritebackError::ServerNotFound));
     }
 
-    #[tokio::test]
-    async fn test_instrumented_handle_tracing_fields() {
-        use std::sync::atomic::{AtomicBool, Ordering};
-        use tracing::field::{Field, Visit};
-        use tracing::span::{Id, Record};
-        use tracing_subscriber::layer::{Context, SubscriberExt};
-        use tracing_subscriber::Layer;
-
-        static RECORDED: AtomicBool = AtomicBool::new(false);
-
-        struct TestLayer;
-
-        impl<S: tracing::Subscriber> Layer<S> for TestLayer {
-            fn on_record(&self, _span: &Id, values: &Record<'_>, _ctx: Context<'_, S>) {
-                struct FieldVisitor;
-                impl Visit for FieldVisitor {
-                    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-                        let s = format!("{:?}", value);
-                        if field.name() == "config.write_strategy"
-                            && (s.contains("Memory") || s.contains("AtomicRename"))
-                        {
-                            RECORDED.store(true, Ordering::SeqCst);
-                        }
-                    }
-                    fn record_str(&mut self, field: &Field, value: &str) {
-                        if field.name() == "config.write_strategy"
-                            && (value.contains("Memory") || value.contains("AtomicRename"))
-                        {
-                            RECORDED.store(true, Ordering::SeqCst);
-                        }
-                    }
-                }
-                values.record(&mut FieldVisitor);
-            }
-        }
-
-        // Initialize global subscriber if not already done
-        let _ =
-            tracing::subscriber::set_global_default(tracing_subscriber::registry().with(TestLayer));
-
-        RECORDED.store(false, Ordering::SeqCst);
-
-        let mut config = AppConfig::default();
-        config.servers.insert(
-            ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
-            crate::config::types::ServerConfig::default(),
-        );
-        let source = Arc::new(InMemoryConfigSource::new(config.clone()));
-        let handle = ConfigHandle::load(source).unwrap();
-        let instrumented = InstrumentedConfigHandle::new(handle);
-
-        let mutation = ConfigMutation::SetLoraAdapters {
-            server_id: ServerId::from_config_id("00000000-0000-0000-0000-000000000001"),
-            adapters: vec![crate::config::types::LoraAdapterConfig {
-                path: std::path::PathBuf::from("lora.gguf"),
-                scale: 1.0,
-            }],
-        };
-
-        let _ = instrumented.writeback(mutation).await.unwrap();
-
-        assert!(RECORDED.load(Ordering::SeqCst), "config.write_strategy was not recorded");
-    }
+    // `test_instrumented_handle_tracing_fields` was relocated to
+    // `tests/config/instrumented_tracing_fields.rs` so that it owns its
+    // own integration-test binary. The test installs a global tracing
+    // subscriber, which conflicts with `tracing_test::traced_test` used by
+    // `routing::weights` unit tests in this same crate. Each integration
+    // test gets its own process, so the global default is isolated.
 }

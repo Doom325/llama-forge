@@ -82,6 +82,11 @@ name = "config_writeback_integration"
 path = "tests/config/writeback_integration.rs"
 
 [[test]]
+name = "config_instrumented_tracing_fields"
+path = "tests/config/instrumented_tracing_fields.rs"
+required-features = ["test-utils"]
+
+[[test]]
 name = "queue_design_doc_tests"
 path = "tests/queue/design_doc_tests.rs"
 
