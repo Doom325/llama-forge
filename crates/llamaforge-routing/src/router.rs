@@ -3,11 +3,12 @@
 use crate::error::RoutingConstraint;
 use crate::types::{RoutingReason, ServerSnapshot, ServerStateView, SlotTarget};
 use crate::{
-    CapacityChecker, DispatchCountView, RequestCapabilities, RequestView, RouteValidator,
-    RoutingDecision, RoutingError, ServerSelector,
+    CapacityChecker, DispatchCountView, RequestCapabilities, RequestView, RoutingDecision,
+    RoutingError, ServerSelector,
 };
 use dashmap::DashMap;
 use llamaforge_config::{ConfigHandle, ConfigReader};
+use llamaforge_types::traits::{AdmissionError, RouteValidator};
 use llamaforge_types::{ModelAlias, ModelTarget, ServerId};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -521,13 +522,26 @@ impl ServerSelector for Router {
     }
 }
 
+/// Bridges the inherent `Router::validate_routable` (which returns
+/// `RoutingError`) into the transport-facing `types::traits::RouteValidator`
+/// contract (which returns `AdmissionError`). The error mapping collapses
+/// every routing failure into `NoServerForModel`, mirroring transport's
+/// "no capable backend → reject at admission" semantics.
 impl RouteValidator for Router {
     fn validate_routable(
         &self,
         model: &ModelTarget,
         capabilities: &RequestCapabilities,
-    ) -> Result<(), RoutingError> {
-        self.validate_routable(model, capabilities)
+    ) -> Result<(), AdmissionError> {
+        self.validate_routable(model, capabilities).map_err(|e| match e {
+            RoutingError::ModelNotFound { model, .. }
+            | RoutingError::ModelUnavailable { model, .. } => AdmissionError::NoServerForModel {
+                model: ModelAlias::new(std::sync::Arc::from(model.as_str())),
+            },
+            RoutingError::NoCapableServer { requested, .. } => AdmissionError::NoServerForModel {
+                model: ModelAlias::new(std::sync::Arc::from(requested.as_str())),
+            },
+        })
     }
 }
 

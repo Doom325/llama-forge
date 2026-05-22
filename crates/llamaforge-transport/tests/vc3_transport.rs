@@ -285,7 +285,11 @@ async fn test_vc3_5_queue_full_returns_429() {
 
     struct MockRouteValidatorRejects;
     impl RouteValidator for MockRouteValidatorRejects {
-        fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
+        fn validate_routable(
+            &self,
+            _model: &llamaforge_types::ModelTarget,
+            _capabilities: &llamaforge_types::RequestCapabilities,
+        ) -> Result<(), AdmissionError> {
             Err(AdmissionError::QueueFull)
         }
     }

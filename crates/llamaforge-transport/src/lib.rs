@@ -221,7 +221,11 @@ mod tests {
 
     struct MockRouteValidator;
     impl RouteValidator for MockRouteValidator {
-        fn validate_routable(&self, _req: &IncomingRequest) -> Result<(), AdmissionError> {
+        fn validate_routable(
+            &self,
+            _model: &llamaforge_types::ModelTarget,
+            _capabilities: &llamaforge_types::RequestCapabilities,
+        ) -> Result<(), AdmissionError> {
             Ok(())
         }
     }
