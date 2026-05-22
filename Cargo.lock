@@ -1275,12 +1275,10 @@ dependencies = [
  "async-trait",
  "chrono",
  "clap",
- "llamaforge-adapters",
+ "llamaforge-api",
  "llamaforge-core",
- "llamaforge-dispatch",
  "llamaforge-metrics",
  "llamaforge-server-manager",
- "llamaforge-transport",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1290,29 +1288,44 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamaforge-adapters"
+name = "llamaforge-api"
 version = "0.1.0-draft"
 dependencies = [
+ "arc-swap",
  "async-stream",
  "async-trait",
+ "axum",
  "bytes",
  "chrono",
+ "dashmap",
  "futures-core",
  "futures-util",
+ "hyper",
  "llamaforge-core",
- "llamaforge-dispatch",
  "llamaforge-metrics",
+ "llamaforge-proto",
  "llamaforge-server-manager",
- "llamaforge-transport",
  "metrics",
  "metrics-exporter-prometheus",
+ "pin-project-lite",
+ "proptest",
+ "reqwest",
+ "serde",
  "serde_json",
+ "serial_test",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tonic",
+ "tonic-health",
+ "tonic-reflection",
+ "tower",
+ "tower-http",
  "tracing",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -1352,34 +1365,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamaforge-dispatch"
-version = "0.1.0-draft"
-dependencies = [
- "arc-swap",
- "async-trait",
- "bytes",
- "dashmap",
- "futures-core",
- "futures-util",
- "llamaforge-core",
- "llamaforge-metrics",
- "metrics",
- "pin-project-lite",
- "proptest",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "uuid",
- "wiremock",
-]
-
-[[package]]
 name = "llamaforge-e2e"
 version = "0.1.0-draft"
 dependencies = [
@@ -1387,13 +1372,11 @@ dependencies = [
  "async-trait",
  "futures-util",
  "llamaforge",
- "llamaforge-adapters",
+ "llamaforge-api",
  "llamaforge-core",
- "llamaforge-dispatch",
  "llamaforge-metrics",
  "llamaforge-proto",
  "llamaforge-server-manager",
- "llamaforge-transport",
  "mock-llama",
  "reqwest",
  "rusqlite",
@@ -1476,38 +1459,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typed-builder",
-]
-
-[[package]]
-name = "llamaforge-transport"
-version = "0.1.0-draft"
-dependencies = [
- "async-trait",
- "axum",
- "chrono",
- "futures-core",
- "futures-util",
- "hyper",
- "llamaforge-core",
- "llamaforge-metrics",
- "llamaforge-proto",
- "metrics",
- "pin-project-lite",
- "reqwest",
- "serde",
- "serde_json",
- "serial_test",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
- "tonic-health",
- "tonic-reflection",
- "tower",
- "tower-http",
- "tracing",
- "uuid",
 ]
 
 [[package]]
