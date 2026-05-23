@@ -68,10 +68,10 @@ impl QueueSubmitter for QueueSubmitterAdapter {
                             match res {
                                 Ok(DispatchResult::Dispatched(server, slot)) => {
                                     // By design (PR6), the slot might be None if Auto.
-                                    // For now, default to SlotId 0 if Auto, or just wait for InferenceEngineAdapter to refine it.
+                                    // For now, default to SlotId 0 if Auto, or just wait for StreamingInferenceService to refine it.
                                     let slot_id = slot.unwrap_or_else(|| llamaforge_core::types::SlotId::new(0));
                                     let _ = events_tx.send(DispatchEvent::Dispatched { server_id: server, slot_id }).await;
-                                    // Wait for ticket to be dropped by the InferenceEngineAdapter
+                                    // Wait for ticket to be dropped by the StreamingInferenceService
                                     events_tx.closed().await;
                                     pipeline_clone.record_completion(&requestor_id);
                                 }

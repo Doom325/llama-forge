@@ -22,7 +22,7 @@ use llamaforge_metrics::{
 
 /// Context the dispatch `AuditRecord` doesn't carry but the metrics
 /// `RequestMetrics` needs. Populated by the caller (typically the
-/// `InferenceEngineAdapter`) at the moment the request is submitted.
+/// `StreamingInferenceService`) at the moment the request is submitted.
 #[derive(Debug, Clone)]
 pub struct AuditContext {
     pub model_name: String,
