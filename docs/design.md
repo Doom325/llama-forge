@@ -299,6 +299,21 @@ VACUUM INTO '/path/to/backups/llamaforge-backup-$(date +%Y%m%d-%H%M%S).db';
 
 `VACUUM INTO` creates a consistent snapshot without blocking concurrent readers or the writer thread. The backup file is a standalone SQLite database that can be queried independently.
 
+### 4.2 How a Request Flows Through the Code
+
+Post-Phase 9, a streaming chat-completion request touches **four crates** end to end:
+
+| Stage | Crate | File (canonical path) | What happens |
+|-------|-------|-----------------------|--------------|
+| 1. HTTP receipt | `llamaforge-api` | `crates/llamaforge-api/src/transport/http.rs` | axum router accepts `POST /v1/chat/completions` (or `/v1/messages` for Anthropic). Body parsed to a domain `ChatCompletionRequest`. |
+| 2. Admission + routing | `llamaforge-core` | `crates/llamaforge-core/src/queue/admission.rs`, `crates/llamaforge-core/src/queue/pipeline.rs`, `crates/llamaforge-core/src/routing/router.rs` | Admission controller checks per-requestor concurrency, priority rules, queue depth. Scheduler loop picks the request and asks the router to pick a server (slot availability + KV-cache affinity). |
+| 3. Dispatch | `llamaforge-api` | `crates/llamaforge-api/src/dispatch/dispatcher.rs`, `crates/llamaforge-api/src/dispatch/client.rs` | Dispatcher posts to the chosen `llama-server`'s `/v1/chat/completions` via `ReqwestClientStore`, then streams tokens back to the client connection from stage 1. |
+| 4. Backend | `llamaforge-server` for lifecycle; `mock-llama` or external `llama-server` as the subprocess | `crates/llamaforge-server/src/manager.rs` (supervision) | The supervised backend emits SSE tokens upstream; the dispatcher forwards them through. |
+
+`llamaforge-metrics` sits on the side: every stage emits TTFT, tokens/sec, queue-depth, and audit events into a SQLite-backed pipeline behind the `MetricsStore` trait. Reading metrics is not on the hot path.
+
+Pre-Phase 9 the same trace passed through **seven** crates (`transport` → `adapters/inference_engine` → `adapters/queue` → `queue` → `routing` → `dispatch` → `types`). Issue #154 — "the new-hire test" — was the structural-pressure finding that drove the consolidation: four files to follow a request instead of seven.
+
 ---
 
 ## 5. Component Deep Dives

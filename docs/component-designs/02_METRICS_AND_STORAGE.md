@@ -5,7 +5,8 @@
 **Estimated LOC:** ~2,500  
 **Risk:** Medium  
 **Dependencies:** Config Manager (DB path, retention policy)  
-**Consumers:** Dispatch & Proxy (audit channel), Server Manager (event logging, PID tracking), Transport Layer (Prometheus export, read queries)
+**Consumers:** Dispatch & Proxy (audit channel), Server Manager (event logging, PID tracking), Transport Layer (Prometheus export, read queries)  
+**Crate location:** `crates/llamaforge-metrics/` (unchanged across Phase 9).
 
 ---
 
