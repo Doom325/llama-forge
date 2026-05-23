@@ -36,9 +36,19 @@ async fn test_e2e_graceful_shutdown() {
     assert!(!first.is_empty());
 
     // Trigger shutdown; the in-flight stream must drain cleanly.
+    // Per-chunk timeout protects the join-pair against an SSE close-propagation
+    // hang on shutdown (issue #191).
     let drain_stream = async {
-        while let Some(chunk) = stream.next().await {
-            chunk.expect("mid-stream error during graceful drain");
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(30), stream.next())
+                .await
+                .expect("SSE stream did not drain within 30s during graceful shutdown");
+            match next {
+                Some(chunk) => {
+                    chunk.expect("mid-stream error during graceful drain");
+                }
+                None => break,
+            }
         }
     };
     let shutdown_task = orch.shutdown_and_wait();
