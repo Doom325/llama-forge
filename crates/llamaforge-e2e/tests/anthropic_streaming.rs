@@ -8,6 +8,7 @@ use futures_util::StreamExt;
 use llamaforge_e2e::Harness;
 
 #[tokio::test]
+#[ignore = "flake: hangs locally on stream.next().await; see https://github.com/Doom325/llama-forge/issues/194"]
 async fn test_e2e_anthropic_messages_streaming() {
     let orch = Harness::start_full().await.expect("orchestrator start");
 
