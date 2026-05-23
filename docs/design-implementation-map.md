@@ -13,11 +13,11 @@ For deferred items not yet implemented, see [`docs/v1.1-deferred.md`](v1.1-defer
 | §2 | Goals and Non-Goals | (narrative — no code) |
 | §3 | Related Work & Positioning | (narrative — no code) |
 | §4 | System Architecture Overview | `crates/llamaforge/src/lib.rs`, `crates/llamaforge/src/build.rs` (composition root) |
-| §4.1 | Failure Boundaries & Durability | `crates/llamaforge-metrics/src/sqlite/` (WAL, atomic writeback), `crates/llamaforge-server-manager/src/manager.rs` (orphan recovery) |
+| §4.1 | Failure Boundaries & Durability | `crates/llamaforge-metrics/src/sqlite/` (WAL, atomic writeback), `crates/llamaforge-server/src/manager.rs` (orphan recovery) |
 | §4.2 | Hexagonal Layering | `crates/llamaforge-adapters/src/` (port-trait adapters) |
 | §5.1 | Transport Layer | `crates/llamaforge-transport/`, `crates/llamaforge-dispatch/` |
 | §5.2 | Request Queue & Scheduler | `crates/llamaforge-queue/` |
-| §5.3 | Server Manager | `crates/llamaforge-server-manager/` |
+| §5.3 | Server Manager | `crates/llamaforge-server/` |
 | §5.4 | Metrics Collector & Aggregator | `crates/llamaforge-metrics/src/{ingest,sqlite,filter}.rs` |
 | §5.5 | Config Manager & Web UI | `crates/llamaforge-config/`, management routes in `crates/llamaforge-transport/src/management.rs` |
 | §5.6 | Audit Log & Event Store | `crates/llamaforge-metrics/src/sqlite/{batch_collector,writer}.rs`, `crates/llamaforge-adapters/src/audit.rs` |
@@ -32,7 +32,7 @@ For deferred items not yet implemented, see [`docs/v1.1-deferred.md`](v1.1-defer
 | §9.1 | Priority Computation | `crates/llamaforge-queue/src/admission.rs` (priority bonus, task-type base) |
 | §9.2 | Queue-Only Preemption (v1) | `crates/llamaforge-queue/src/starvation.rs`, `crates/llamaforge-queue/src/queue.rs` |
 | §9.3 | Preemptive Eviction (v2) | **Deferred to v1.1+** — see `docs/v1.1-deferred.md` |
-| §10.1 | `llama-server` Control Surfaces | `crates/llamaforge-server-manager/src/{process,task}.rs`, `crates/llamaforge-dispatch/src/client.rs` (`SlotErasure`) |
+| §10.1 | `llama-server` Control Surfaces | `crates/llamaforge-server/src/{process,task}.rs`, `crates/llamaforge-dispatch/src/client.rs` (`SlotErasure`) |
 | §10.2 | Routing Algorithm | `crates/llamaforge-routing/src/router.rs`, `weights.rs`, `affinity.rs` |
 | §10.3 | Prompt Cache Affinity | `crates/llamaforge-routing/src/affinity.rs` |
 | §10.4 | Request Coalescing | **Deferred** (design doc: "Future") |

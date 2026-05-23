@@ -26,12 +26,12 @@ anyhow = "1"
 uuid = { workspace = true }
 llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
-llamaforge-server-manager = { workspace = true }
+llamaforge-server = { workspace = true }
 llamaforge-api = { workspace = true }
 
 [features]
-telemetry-nvml = ["llamaforge-server-manager/telemetry-nvml"]
-telemetry-amdgpu = ["llamaforge-server-manager/telemetry-amdgpu"]
+telemetry-nvml = ["llamaforge-server/telemetry-nvml"]
+telemetry-amdgpu = ["llamaforge-server/telemetry-amdgpu"]
 
 [dev-dependencies]
 tempfile = { workspace = true }

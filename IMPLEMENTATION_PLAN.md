@@ -56,14 +56,14 @@ PR1 → PR2 → PR3 → PR4 → PR5 → PR6 → PR7 → PR8 (strict merge orderi
 
 ### Purpose
 
-Create the `llamaforge-server-manager` library crate, define all domain types from design doc Section 2.3, and error types from Section 2.4. This is the type foundation — every other PR builds on it.
+Create the `llamaforge-server` library crate, define all domain types from design doc Section 2.3, and error types from Section 2.4. This is the type foundation — every other PR builds on it.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| [ ] 1.1 | Add `llamaforge-server-manager` to workspace | New lib crate `crates/llamaforge-server-manager`. Add to workspace members. Depends on `llamaforge-config` (for `ServerId`, `ConfigHandle`) and `llamaforge-metrics`. | `Cargo.toml`, `crates/llamaforge-server-manager/Cargo.toml` |
-| [ ] 1.2 | Wire workspace dependencies | Inherit: `serde`, `thiserror`, `tokio` (with `process`, `sync`), `tracing`, `dashmap`, `reqwest`. Add dev-deps: `tempfile`, `tokio` (with `test-util`). | `crates/llamaforge-server-manager/Cargo.toml` |
+| [ ] 1.1 | Add `llamaforge-server` to workspace | New lib crate `crates/llamaforge-server`. Add to workspace members. Depends on `llamaforge-config` (for `ServerId`, `ConfigHandle`) and `llamaforge-metrics`. | `Cargo.toml`, `crates/llamaforge-server/Cargo.toml` |
+| [ ] 1.2 | Wire workspace dependencies | Inherit: `serde`, `thiserror`, `tokio` (with `process`, `sync`), `tracing`, `dashmap`, `reqwest`. Add dev-deps: `tempfile`, `tokio` (with `test-util`). | `crates/llamaforge-server/Cargo.toml` |
 | [ ] 1.3 | Create module structure | `lib.rs` declares `pub(crate) mod`: `types`, `error`, `telemetry`, `manager`, `process`, `state`, `health`. Explicit `pub use` re-exports for the public API. | `src/lib.rs`, `src/*.rs` |
 | [ ] 1.4 | Implement `ServerLifecycle` enum | `Stopped`, `Starting`, `Running`, `Draining`, `Restarting`, `Failed`. Derive `Debug, Clone, Copy, PartialEq, Eq`. | `src/types.rs` |
 | [ ] 1.5 | Implement `ServerCapabilities` & `SlotState` | From Section 2.3. Derive `Debug, Clone`. `SlotState` includes `id`, `is_processing`, `n_past`, `n_decoded`, `prompt_hash`. | `src/types.rs` |
@@ -74,7 +74,7 @@ Create the `llamaforge-server-manager` library crate, define all domain types fr
 ### PR1 Acceptance Criteria
 
 - [ ] `cargo build --workspace` succeeds with zero warnings
-- [ ] `llamaforge-server-manager` inherits workspace deps and uses Config types
+- [ ] `llamaforge-server` inherits workspace deps and uses Config types
 - [ ] All public enums have `#[non_exhaustive]`
 - [ ] `lib.rs` uses `pub(crate) mod` + explicit `pub use` pattern
 
@@ -368,7 +368,7 @@ Finalize the component with property tests, complete E2E integration tests, and 
 
 - [x] All property tests pass (256 cases)
 - [x] E2E lifecycle tests successfully transition through all states
-- [x] `cargo doc --no-deps -p llamaforge-server-manager` runs clean without warnings
+- [x] `cargo doc --no-deps -p llamaforge-server` runs clean without warnings
 
 ### PR8 Creation Steps
 
@@ -402,8 +402,8 @@ git push -u origin server-manager/08-verification
 |---|-------|--------|---------------|
 | VC-5.1 | All tests pass | `cargo test --workspace && cargo test --workspace -- --ignored` | Zero failures |
 | VC-5.2 | Zero clippy warnings | `cargo clippy --workspace -- -D warnings` | Exit code 0 |
-| VC-5.3 | Unrwap audit | `rg 'unwrap\(\)' crates/llamaforge-server-manager/src/` | Zero hits in production code |
-| VC-5.4 | Expect audit | `rg 'expect\(' crates/llamaforge-server-manager/src/` | Zero hits in production code |
+| VC-5.3 | Unrwap audit | `rg 'unwrap\(\)' crates/llamaforge-server/src/` | Zero hits in production code |
+| VC-5.4 | Expect audit | `rg 'expect\(' crates/llamaforge-server/src/` | Zero hits in production code |
 
 ---
 
@@ -469,7 +469,7 @@ llamaforge-config         llamaforge-metrics
     (ConfigHandle)           (MetricsStore)
           │                        │
           ▼                        ▼
-    llamaforge-server-manager (this plan)
+    llamaforge-server (this plan)
           │
           │ provides: ServerState, slot_states(), ClientRefreshEvent
           ▼

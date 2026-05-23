@@ -12,7 +12,7 @@
 //! `docs/component-designs/07_TRANSPORT_LAYER.md`.
 
 // Carry-over from PR1: the `clone_on_copy` lint is triggered by some
-// borrow patterns under llamaforge-server-manager that we deliberately
+// borrow patterns under llamaforge-server that we deliberately
 // kept rather than inline-fixing. The merged api crate has equivalent
 // patterns in the dispatch/transport interaction layer; rather than
 // scatter targeted fixes through behavior-preserving refactor code,

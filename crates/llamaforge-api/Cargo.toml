@@ -45,7 +45,7 @@ chrono.workspace = true
 # and the merged api crate is now a composition-root neighbour itself.
 llamaforge-core.workspace = true
 llamaforge-metrics.workspace = true
-llamaforge-server-manager.workspace = true
+llamaforge-server.workspace = true
 llamaforge-proto.workspace = true
 
 [features]
