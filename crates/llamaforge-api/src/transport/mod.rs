@@ -12,6 +12,7 @@ pub(crate) mod http;
 pub(crate) mod management;
 pub(crate) mod middleware;
 pub(crate) mod openai;
+pub mod streaming;
 
 pub use error::{AnthropicProtocolError, ApiError, TransportError};
 pub use grpc::start_grpc_server;

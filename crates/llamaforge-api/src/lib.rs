@@ -26,12 +26,12 @@ pub mod transport;
 // Re-exports of the load-bearing public surface (PLAN.md PR3 task 3.3).
 // These are the symbols `llamaforge::build::*` and `llamaforge-e2e`
 // import; surfacing them at the crate root is convenience, not policy.
+pub use transport::streaming::StreamingInferenceService;
 pub use transport::{start_servers, InferenceEngine, TransportDeps, TransportHandles};
 
 pub use dispatch::client::ReqwestClientStore;
 pub use dispatch::dispatcher::Dispatcher;
 
-pub use adapters::inference_engine::InferenceEngineAdapter;
 pub use adapters::metrics_exporter::MetricsExporterAdapter;
 pub use adapters::queue::QueueSubmitterAdapter;
 pub use adapters::server_control::ServerControlAdapter;
