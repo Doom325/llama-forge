@@ -10,32 +10,31 @@
 
 ---
 
-> **Phase 9 PR3 note — adapter collapse opportunity deferred to PR5.**
+> **Phase 9 collapse status (issue #192 closed; #193 follow-ups pending).**
 > With `dispatch`, `transport`, and `adapters` now living in the same
 > crate (`llamaforge-api`), four adapter structs originally introduced
-> to bridge port traits between crates are no longer adapters at all —
-> they are intra-crate glue. PLAN.md PR3 explicitly defers the collapse
-> to PR5 to keep the merge diff bounded; they remain in place under
-> `crates/llamaforge-api/src/adapters/`.
+> to bridge port traits between crates have become intra-crate glue.
 >
-> Opportunities deferred to PR5:
-> 1. **`InferenceEngineAdapter`** — owns the queue-event→stream state
->    machine that bridges the dispatch streaming output into the
->    `transport::InferenceEngine` trait. With dispatch + transport
->    co-located, the trait can be implemented directly on a thinner
->    type, or the trait deleted in favour of a concrete service. This
->    is the load-bearing one; a follow-up issue should pick a new home
->    for the state machine before collapsing.
+> 1. **`StreamingInferenceService`** (issue #192, resolved). Formerly
+>    `InferenceEngineAdapter` under `adapters/inference_engine.rs`.
+>    Owns the queue-event→stream state machine that drives the
+>    `transport::InferenceEngine` trait. Renamed and relocated to
+>    `crates/llamaforge-api/src/transport/streaming.rs` to sit next to
+>    the HTTP/gRPC entrypoints it actually serves. The
+>    `InferenceEngine` trait was retained (it is the seam between
+>    streaming logic and the HTTP/gRPC handlers); it lives in
+>    `llamaforge-api::transport` as `pub`. Behavior-preserving rename
+>    — no public-API/HTTP/gRPC/metric/config change.
 > 2. **`QueueSubmitterAdapter`** — bridges `llamaforge-core`'s queue
 >    submit API to the `transport::QueueSubmitter` port. Trivial
->    delegation; can be inlined.
+>    delegation; can be inlined. Still deferred.
 > 3. **`ServerControlAdapter`** — bridges `llamaforge-server`'s
 >    server control to the `transport::ServerControl` port. Audit
 >    first: the trait may still be load-bearing for the management
->    HTTP API's serialization shape.
+>    HTTP API's serialization shape. Still deferred.
 > 4. **`MetricsExporterAdapter`** — wraps `PrometheusHandle::render()`
 >    to satisfy `transport::MetricsExporter`. ~30 lines; trivially
->    inlinable.
+>    inlinable. Still deferred.
 
 ---
 
