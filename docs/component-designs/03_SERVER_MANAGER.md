@@ -5,7 +5,8 @@
 **Estimated LOC:** ~3,000  
 **Risk:** High  
 **Dependencies:** Config Manager (server definitions, reload diffs), Metrics & Storage (event logging, PID tracking), OS/GPU APIs (NVML, IOKit, rocm-smi)  
-**Consumers:** Dispatch & Proxy (server state, capabilities), Smart Routing (slot state from /slots polling), Transport Layer (server status for health endpoints)
+**Consumers:** Dispatch & Proxy (server state, capabilities), Smart Routing (slot state from /slots polling), Transport Layer (server status for health endpoints)  
+**Crate location:** `crates/llamaforge-server/` (Phase 9 PR4 renamed from `crates/llamaforge-server-manager/`).
 
 ---
 

@@ -5,7 +5,8 @@
 **Estimated LOC:** ~1,500  
 **Risk:** Low  
 **Dependencies:** Filesystem (TOML files, flock), Metrics & Storage (overlay store in v1.1)  
-**Consumers:** Every other component (via ArcSwap read)
+**Consumers:** Every other component (via ArcSwap read)  
+**Crate location:** `crates/llamaforge-core/src/config/` (Phase 9 PR2 consolidation; pre-merge: `crates/llamaforge-config/`).
 
 ---
 

@@ -5,7 +5,8 @@
 **Estimated LOC:** ~2,000  
 **Risk:** Medium-High  
 **Dependencies:** Config Manager (priority rules, queue limits), Smart Routing (model-aware dispatch check), Dispatch & Proxy (hand off dispatched requests)  
-**Consumers:** Transport Layer (enqueue), Dispatch & Proxy (dequeue)
+**Consumers:** Transport Layer (enqueue), Dispatch & Proxy (dequeue)  
+**Crate location:** `crates/llamaforge-core/src/queue/` (Phase 9 PR2 consolidation; pre-merge: `crates/llamaforge-queue/`).
 
 ---
 

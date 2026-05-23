@@ -39,12 +39,20 @@ llama-forge/
 ├── Cargo.toml                # workspace root; all deps in [workspace.dependencies]
 ├── rust-toolchain.toml       # pinned stable toolchain
 ├── crates/
-│   ├── llamaforge/           # binary crate — the orchestrator process
-│   └── llamaforge-proto/     # generated tonic/prost bindings (build.rs from proto/)
+│   ├── llamaforge/           # binary — the orchestrator process (serve, build, cli)
+│   ├── llamaforge-core/      # config + types + routing + queue (post-Phase 9 PR2)
+│   ├── llamaforge-server/    # server-manager: process lifecycle, health, telemetry (renamed Phase 9 PR4)
+│   ├── llamaforge-api/       # transport + adapters + dispatch (post-Phase 9 PR3)
+│   ├── llamaforge-metrics/   # SQLite-backed metrics store
+│   ├── llamaforge-proto/     # generated tonic/prost bindings (build.rs from proto/)
+│   ├── llamaforge-e2e/       # end-to-end test infra (peer crate, test-only)
+│   └── mock-llama/           # in-process llama-server mock for deterministic tests
 ├── proto/                    # .proto definitions — source of truth for all gRPC types
 ├── config/                   # example llamaforge.toml configurations
 └── docs/                     # design and plans (see "Document hierarchy" below)
 ```
+
+The 8-crate layout is the Phase 9 consolidation target (down from 13). For the historical 13-crate map (`llamaforge-types`, `-config`, `-routing`, `-queue`, `-transport`, `-adapters`, `-dispatch`, `-server-manager`), see commits before `b75860a` (PR2) on `main`.
 
 ---
 

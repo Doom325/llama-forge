@@ -5,7 +5,8 @@
 **Estimated LOC:** ~1,500  
 **Risk:** Medium  
 **Dependencies:** Server Manager (slot state from /slots polling), Dispatch & Proxy (DispatchTracker counts), Config Manager (routing weights)  
-**Consumers:** Request Queue (model-aware dispatch check), Dispatch & Proxy (slot selection)
+**Consumers:** Request Queue (model-aware dispatch check), Dispatch & Proxy (slot selection)  
+**Crate location:** `crates/llamaforge-core/src/routing/` (Phase 9 PR2 consolidation; pre-merge: `crates/llamaforge-routing/`).
 
 ---
 
