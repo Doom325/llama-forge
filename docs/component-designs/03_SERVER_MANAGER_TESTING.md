@@ -8,7 +8,7 @@ These tests execute purely in-memory, without spawning actual subprocesses or hi
 
 ```bash
 # Runs all unit and property tests. Completes in < 5 seconds.
-cargo test -p llamaforge-server-manager
+cargo test -p llamaforge-server
 ```
 
 ## 2. End-to-End Integration Suite (Slow)
@@ -19,7 +19,7 @@ Because they rely on real wall-clock timeouts and OS-level process management, t
 
 ```bash
 # Runs the full integration suite. Completes in ~30-60 seconds.
-cargo test -p llamaforge-server-manager --features test-utils -- --ignored
+cargo test -p llamaforge-server --features test-utils -- --ignored
 ```
 
 ### Notes for Integration Tests

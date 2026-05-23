@@ -47,7 +47,7 @@ llamaforge-e2e      (test infra)                               [unchanged]
 ```
 
 **Crates removed**: `llamaforge-types`, `llamaforge-routing`, `llamaforge-queue`, `llamaforge-dispatch`, `llamaforge-adapters` (5 crates merged in).
-**Crates renamed**: `llamaforge-server-manager` → `llamaforge-server`.
+**Crates renamed**: `llamaforge-server` → `llamaforge-server`.
 **Crates added**: `llamaforge-core`, `llamaforge-api`.
 
 Module layout inside the new crates preserves the current source-file boundaries — e.g., `llamaforge-core/src/types/`, `llamaforge-core/src/routing/`, `llamaforge-core/src/queue/`. This makes the merge a `git mv` exercise rather than a rewrite, and keeps blame history intact.
@@ -114,7 +114,7 @@ Eliminate the `llamaforge_config::ServerId(String)` ↔ `llamaforge_types::Serve
 - `crates/llamaforge-config/src/types.rs` — `pub struct ServerId(pub String)` (the config-side slug/UUID-string variant)
 - `crates/llamaforge-config/src/handle.rs:27-35` — load-time validation that already coerces config IDs to canonical form
 - `crates/llamaforge/src/build.rs:281-287` — `fn config_server_id_to_types_id(s: &llamaforge_config::ServerId) -> llamaforge_types::ServerId` (the bridge being deleted)
-- `crates/llamaforge-server-manager/src/**` — `ServerStateSnapshot` uses `config::ServerId` in some adapters
+- `crates/llamaforge-server/src/**` — `ServerStateSnapshot` uses `config::ServerId` in some adapters
 
 ### Tasks
 
@@ -227,7 +227,7 @@ Create `crates/llamaforge-api/` by absorbing the three crates that together impl
 
 ---
 
-## PR4 — Rename `llamaforge-server-manager` → `llamaforge-server`
+## PR4 — Rename `llamaforge-server` → `llamaforge-server`
 
 **Branch:** `consolidate/04-server-rename`
 **Depends on:** PR3 merged
@@ -236,26 +236,26 @@ Create `crates/llamaforge-api/` by absorbing the three crates that together impl
 
 ### Purpose
 
-The crate's name today (`llamaforge-server-manager`) is awkward and inconsistent with the target layout's naming convention (`llamaforge-core`, `llamaforge-api`, `llamaforge-server`). Rename to `llamaforge-server`. Pure rename — no module restructure, no behavior change.
+The crate's name today (`llamaforge-server`) is awkward and inconsistent with the target layout's naming convention (`llamaforge-core`, `llamaforge-api`, `llamaforge-server`). Rename to `llamaforge-server`. Pure rename — no module restructure, no behavior change.
 
 ### Tasks
 
 | # | Task | File(s) |
 |---|------|---------|
-| 4.1 | `git mv crates/llamaforge-server-manager crates/llamaforge-server`. | — |
+| 4.1 | `git mv crates/llamaforge-server crates/llamaforge-server`. | — |
 | 4.2 | Edit `crates/llamaforge-server/Cargo.toml`: `name = "llamaforge-server"`. | `crates/llamaforge-server/Cargo.toml` |
 | 4.3 | Update workspace `[workspace.dependencies]`: rename the entry. | `Cargo.toml` |
 | 4.4 | Sweep `Cargo.toml`s in `llamaforge`, `llamaforge-api`, `llamaforge-e2e` to use the new name. | various |
-| 4.5 | Path-rename sweep: `llamaforge_server_manager::` → `llamaforge_server::`. Mechanical. | every member crate |
+| 4.5 | Path-rename sweep: `llamaforge_server::` → `llamaforge_server::`. Mechanical. | every member crate |
 | 4.6 | Update component design doc filename if it embeds the old crate name. | `docs/component-designs/03_SERVER_MANAGER.md` (content only — keep filename) |
 | 4.7 | `cargo doc --no-deps --workspace` to confirm the doc tree builds with the new name. | — |
 
 ### PR4 Acceptance Criteria
 
-- [ ] `ls crates/` shows `llamaforge-server`, not `llamaforge-server-manager`.
-- [ ] `grep -rn 'llamaforge_server_manager\|llamaforge-server-manager' .` returns 0 hits anywhere in the repo (including docs, CI, CLAUDE.md if applicable).
-- [ ] All 5 local gates green; 3/3 CI checks green.
-- [ ] `cargo doc` clean.
+- [x] `ls crates/` shows `llamaforge-server`, not `llamaforge-server-manager`.
+- [x] `grep -rn 'llamaforge_server_manager\|llamaforge-server-manager' .` returns 0 hits anywhere in the repo (including docs, CI, CLAUDE.md if applicable).
+- [x] All 5 local gates green; CI checks pending push.
+- [x] `cargo doc` clean.
 
 ---
 
@@ -361,7 +361,7 @@ If PR2 or PR3 runs long (>2 days each), do **not** carry forward partial work �
 | PR1 | `llamaforge-types/src/lib.rs`, `llamaforge-config/{src/handle.rs,Cargo.toml}`, `llamaforge/src/build.rs` | ~150 changed, ~50 deleted |
 | PR2 | `crates/llamaforge-core/` (new), four old crate directories deleted, workspace `Cargo.toml` + every member's `Cargo.toml`, every `use llamaforge_{types,config,routing,queue}` site | ~2,500 moved, ~200 deleted |
 | PR3 | `crates/llamaforge-api/` (new), three old crate directories deleted, workspace `Cargo.toml` + every member's `Cargo.toml`, every `use llamaforge_{transport,adapters,dispatch}` site | ~3,000 moved, ~400 deleted |
-| PR4 | `crates/llamaforge-server/` (renamed from `-server-manager`), workspace `Cargo.toml`, every member's `Cargo.toml`, every `use llamaforge_server_manager` site | ~50 changed |
+| PR4 | `crates/llamaforge-server/` (renamed from `-server-manager`), workspace `Cargo.toml`, every member's `Cargo.toml`, every `use llamaforge_server` site | ~50 changed |
 | PR5 | `docs/design.md`, `docs/component-designs/*.md`, `CLAUDE.md`, `README.md`, `PLAN.md`, possibly `crates/llamaforge-api/src/adapters/*.rs` (trivial collapses) | ~300 docs + ~100 code |
 | **Total** | | **~5,500 moved, ~750 deleted** (net **−750 LOC** if no new code) |
 

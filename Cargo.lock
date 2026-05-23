@@ -1278,7 +1278,7 @@ dependencies = [
  "llamaforge-api",
  "llamaforge-core",
  "llamaforge-metrics",
- "llamaforge-server-manager",
+ "llamaforge-server",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1304,7 +1304,7 @@ dependencies = [
  "llamaforge-core",
  "llamaforge-metrics",
  "llamaforge-proto",
- "llamaforge-server-manager",
+ "llamaforge-server",
  "metrics",
  "metrics-exporter-prometheus",
  "pin-project-lite",
@@ -1376,7 +1376,7 @@ dependencies = [
  "llamaforge-core",
  "llamaforge-metrics",
  "llamaforge-proto",
- "llamaforge-server-manager",
+ "llamaforge-server",
  "mock-llama",
  "reqwest",
  "rusqlite",
@@ -1431,7 +1431,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "llamaforge-server-manager"
+name = "llamaforge-server"
 version = "0.1.0-draft"
 dependencies = [
  "axum",

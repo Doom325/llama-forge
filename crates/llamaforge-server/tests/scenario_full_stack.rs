@@ -3,7 +3,7 @@
 use llamaforge_core::config::{ConfigHandle, ConfigPaths, ConfigWriter, TomlFileConfigSource};
 use llamaforge_core::types::ServerId;
 use llamaforge_metrics::create_metrics_pipeline;
-use llamaforge_server_manager::{
+use llamaforge_server::{
     InstrumentedServerManager, ServerLifecycle, ServerManager, TelemetryError,
 };
 use metrics_util::debugging::{DebuggingRecorder, Snapshot};
@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 struct MockTelemetry(Arc<std::sync::atomic::AtomicU8>);
-impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
+impl llamaforge_server::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_core::config::GpuId) -> Result<u64, TelemetryError> {
         Ok(10 * 1024 * 1024 * 1024)
     }
@@ -23,7 +23,7 @@ impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
     ) -> Result<u8, TelemetryError> {
         Ok(self.0.load(std::sync::atomic::Ordering::Relaxed))
     }
-    fn list_devices(&self) -> Result<Vec<llamaforge_server_manager::GpuDevice>, TelemetryError> {
+    fn list_devices(&self) -> Result<Vec<llamaforge_server::GpuDevice>, TelemetryError> {
         Ok(vec![])
     }
 }
@@ -94,7 +94,7 @@ async fn test_scenario_full_stack() {
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
     let _ = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
-        .with(llamaforge_server_manager::DomainMetricsLayer)
+        .with(llamaforge_server::DomainMetricsLayer)
         .try_init();
 
     // Install global recorder
@@ -126,7 +126,7 @@ async fn test_scenario_full_stack() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    llamaforge_server_manager::spawn_metrics_poller(mgr_started.clone());
+    llamaforge_server::spawn_metrics_poller(mgr_started.clone());
     let instrumented = InstrumentedServerManager::new(mgr_started.clone());
 
     let srv_id = ServerId::from_config_id("srv_scenario");

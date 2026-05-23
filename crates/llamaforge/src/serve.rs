@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use llamaforge_core::config::{ConfigHandle, ConfigReader, ConfigWriter};
-use llamaforge_server_manager::ServerManager;
+use llamaforge_server::ServerManager;
 use tokio_util::sync::CancellationToken;
 
 use crate::build;

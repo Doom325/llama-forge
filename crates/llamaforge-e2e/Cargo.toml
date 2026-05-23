@@ -14,7 +14,7 @@ path = "src/lib.rs"
 mock-llama = { workspace = true }
 llamaforge-core = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true }
-llamaforge-server-manager = { workspace = true }
+llamaforge-server = { workspace = true }
 llamaforge-api = { workspace = true }
 llamaforge = { workspace = true }
 llamaforge-proto = { workspace = true }

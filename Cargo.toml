@@ -5,7 +5,7 @@ members = [
     "crates/llamaforge-core",
     "crates/llamaforge-proto",
     "crates/llamaforge-metrics",
-    "crates/llamaforge-server-manager",
+    "crates/llamaforge-server",
     "crates/llamaforge-api",
     "crates/mock-llama",
     "crates/llamaforge-e2e",
@@ -28,7 +28,7 @@ llamaforge-core = { path = "crates/llamaforge-core", version = "0.1.0-draft" }
 llamaforge-metrics = { path = "crates/llamaforge-metrics", version = "0.1.0-draft" }
 llamaforge-proto = { path = "crates/llamaforge-proto", version = "0.1.0-draft" }
 mock-llama = { path = "crates/mock-llama", version = "0.1.0-draft" }
-llamaforge-server-manager = { path = "crates/llamaforge-server-manager", version = "0.1.0-draft" }
+llamaforge-server = { path = "crates/llamaforge-server", version = "0.1.0-draft" }
 llamaforge-api = { path = "crates/llamaforge-api", version = "0.1.0-draft" }
 llamaforge = { path = "crates/llamaforge", version = "0.1.0-draft" }
 anyhow = "1"

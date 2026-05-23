@@ -3,16 +3,14 @@
 use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_core::types::ServerId;
 use llamaforge_metrics::create_metrics_pipeline;
-use llamaforge_server_manager::{
-    ClientRefreshEvent, ServerLifecycle, ServerManager, TelemetryError,
-};
+use llamaforge_server::{ClientRefreshEvent, ServerLifecycle, ServerManager, TelemetryError};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 struct MockTelemetry;
-impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
+impl llamaforge_server::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_core::config::GpuId) -> Result<u64, TelemetryError> {
         Ok(10 * 1024 * 1024 * 1024)
     }
@@ -22,7 +20,7 @@ impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
     ) -> Result<u8, TelemetryError> {
         Ok(0)
     }
-    fn list_devices(&self) -> Result<Vec<llamaforge_server_manager::GpuDevice>, TelemetryError> {
+    fn list_devices(&self) -> Result<Vec<llamaforge_server::GpuDevice>, TelemetryError> {
         Ok(vec![])
     }
 }

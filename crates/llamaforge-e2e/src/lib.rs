@@ -47,7 +47,7 @@ pub struct OrchestratorHandle {
     /// path that also drains transports and joins the scheduler.
     shutdown: CancellationToken,
     transport: Option<llamaforge_api::transport::TransportHandles>,
-    server_manager: Arc<llamaforge_server_manager::ServerManager>,
+    server_manager: Arc<llamaforge_server::ServerManager>,
     scheduler: Option<JoinHandle<()>>,
     _tmp: TempDir,
 }
@@ -287,7 +287,7 @@ estimated_vram_mb = 100
 }
 
 /// Resolve the compiled `mock-llama` binary path. Mirrors the helper
-/// `crates/llamaforge-server-manager/tests/*.rs` use: respect
+/// `crates/llamaforge-server/tests/*.rs` use: respect
 /// `CARGO_TARGET_DIR` if set, otherwise walk up from this crate's
 /// manifest dir to the workspace `target/{debug|release}/mock-llama`.
 fn mock_llama_bin() -> PathBuf {
@@ -305,7 +305,7 @@ fn mock_llama_bin() -> PathBuf {
 /// Poll the server-manager until at least one configured server has
 /// reached `Running` lifecycle (i.e. health-check passed at least once).
 async fn wait_for_running_server(
-    sm: &llamaforge_server_manager::ServerManager,
+    sm: &llamaforge_server::ServerManager,
     deadline: Duration,
 ) -> anyhow::Result<()> {
     let start = tokio::time::Instant::now();
@@ -313,9 +313,10 @@ async fn wait_for_running_server(
         if start.elapsed() > deadline {
             anyhow::bail!("timeout waiting for any server to reach Running lifecycle");
         }
-        let any_running = sm.all_servers().iter().any(|(_, s)| {
-            matches!(s.lifecycle, llamaforge_server_manager::ServerLifecycle::Running)
-        });
+        let any_running = sm
+            .all_servers()
+            .iter()
+            .any(|(_, s)| matches!(s.lifecycle, llamaforge_server::ServerLifecycle::Running));
         if any_running {
             return Ok(());
         }

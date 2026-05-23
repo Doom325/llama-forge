@@ -2,15 +2,15 @@
 
 use llamaforge_core::config::{ConfigHandle, ConfigPaths, TomlFileConfigSource};
 use llamaforge_core::types::ServerId;
-use llamaforge_metrics::create_metrics_pipeline;
-use llamaforge_server_manager::{ServerLifecycle, ServerManager, TelemetryError};
+use llamaforge_metrics::{create_metrics_pipeline, ProcessStore};
+use llamaforge_server::{ServerLifecycle, ServerManager, TelemetryError};
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 struct MockTelemetry;
-impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
+impl llamaforge_server::GpuTelemetry for MockTelemetry {
     fn free_vram_bytes(&self, _id: &llamaforge_core::config::GpuId) -> Result<u64, TelemetryError> {
         Ok(10 * 1024 * 1024 * 1024)
     }
@@ -18,40 +18,34 @@ impl llamaforge_server_manager::GpuTelemetry for MockTelemetry {
         &self,
         _id: &llamaforge_core::config::GpuId,
     ) -> Result<u8, TelemetryError> {
-        Ok(100)
+        Ok(0)
     }
-    fn list_devices(&self) -> Result<Vec<llamaforge_server_manager::GpuDevice>, TelemetryError> {
+    fn list_devices(&self) -> Result<Vec<llamaforge_server::GpuDevice>, TelemetryError> {
         Ok(vec![])
     }
 }
 
-fn get_test_config(
-    tmp: &TempDir,
-    mock_port: u16,
-    restart_on_degradation: bool,
-) -> Arc<ConfigHandle> {
-    let main_path = tmp.path().join(format!("llamaforge_{}.toml", mock_port));
-    let state_dir = tmp.path().join(format!("state_{}", mock_port));
+fn get_test_config(tmp: &TempDir, mock_port: u16) -> Arc<ConfigHandle> {
+    let main_path = tmp.path().join("llamaforge.toml");
+    let state_dir = tmp.path().join("state");
     std::fs::create_dir_all(&state_dir).unwrap();
 
     let mut config_str = String::new();
     config_str.push_str("[metrics]\n");
     config_str.push_str(&format!(
         r#"
-[servers.srv_deg]
+[servers.00000000-0000-0000-0000-000000000000]
 binary_path = "{}"
 model_path = "{}"
-alias = "mock,tps=0.1"
+alias = "mock"
 port = {}
 ctx_size = 4096
 parallel_slots = 1
 estimated_vram_mb = 100
-restart_on_degradation = {}
 "#,
         mock_llama_bin(),
         mock_llama_bin(),
         mock_port,
-        restart_on_degradation
     ));
 
     std::fs::write(&main_path, config_str).unwrap();
@@ -60,16 +54,16 @@ restart_on_degradation = {}
     Arc::new(ConfigHandle::load(source).unwrap())
 }
 
-static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(19000);
+static NEXT_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(18600);
 
 #[tokio::test]
 #[ignore]
-async fn test_degradation_e2e_restart() {
+async fn test_e2e_lifecycle() {
     let _ = tracing_subscriber::fmt::try_init();
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-    let config = get_test_config(&tmp, port, true);
+    let config = get_test_config(&tmp, port);
     let db_path = tmp.path().join(format!("metrics_{}.db", port));
 
     let pipeline = create_metrics_pipeline(
@@ -89,48 +83,117 @@ async fn test_degradation_e2e_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId::from_config_id("srv_deg");
+
+    let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
     let mut is_running = false;
-    for _ in 0..100 {
+    let mut pid = None;
+    for _ in 0..50 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
             if state.lifecycle == ServerLifecycle::Running {
                 is_running = true;
+                pid = state.pid;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(is_running);
+    let pid = pid.unwrap();
 
-    // Warm up TPS window
-    mgr_started.force_warm_tps_window_for_test(&srv_id, 30, 10.0);
+    // Dispatch fake increments
+    mgr_started.increment_pending(&srv_id);
+    assert_eq!(mgr_started.pending_dispatches(&srv_id), 1);
 
-    // Wait for restart (3 ticks * 10s = ~30s)
-    let mut restarted = false;
-    for _ in 0..400 {
+    // Check row exists
+    let rows = pipeline.store.list_managed_processes().await.unwrap();
+    assert_eq!(rows.len(), 1);
+
+    // Stop server
+    mgr_started.stop_server(&srv_id).await;
+
+    // Verify Draining
+    let mut is_draining = false;
+    for _ in 0..20 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                restarted = true;
+            if state.lifecycle == ServerLifecycle::Draining {
+                is_draining = true;
                 break;
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(restarted, "Server should have restarted due to degradation");
+    assert!(is_draining);
 
-    mgr_started.shutdown_all().await;
+    // Decrement pending so it can finish draining
+    mgr_started.decrement_pending(&srv_id);
+
+    // Wait for it to be stopped
+    let mut is_stopped = false;
+    for _ in 0..150 {
+        if let Some(state) = mgr_started.server_state(&srv_id) {
+            if state.lifecycle == ServerLifecycle::Stopped {
+                is_stopped = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(is_stopped);
+
+    // Verify reaped and row deleted
+    let mut is_dead = false;
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+        if kill(Pid::from_raw(pid as i32), None).is_err() {
+            is_dead = true;
+        }
+    }
+    assert!(is_dead, "Process was not reaped");
+
+    let rows = pipeline.store.list_managed_processes().await.unwrap();
+    assert_eq!(rows.len(), 0, "SQLite row was not deleted");
+
+    token.cancel();
+}
+
+#[derive(Clone)]
+struct SharedWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedWriter {
+    type Writer = SharedWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
 }
 
 #[tokio::test]
-#[ignore]
-async fn test_degradation_e2e_no_restart() {
-    let _ = tracing_subscriber::fmt::try_init();
+async fn test_id_task_overflow() {
+    let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let writer = SharedWriter(output.clone());
+
+    let subscriber = tracing_subscriber::fmt().with_writer(writer).finish();
+
+    let _guard = tracing::subscriber::set_default(subscriber);
+
     let tmp = TempDir::new().unwrap();
     let port = NEXT_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-    let config = get_test_config(&tmp, port, false);
+    let config = get_test_config(&tmp, port);
     let db_path = tmp.path().join(format!("metrics_{}.db", port));
 
     let pipeline = create_metrics_pipeline(
@@ -150,11 +213,12 @@ async fn test_degradation_e2e_no_restart() {
 
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
-    let srv_id = ServerId::from_config_id("srv_deg");
+
+    let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
     let mut is_running = false;
-    for _ in 0..100 {
+    for _ in 0..50 {
         if let Some(state) = mgr_started.server_state(&srv_id) {
             if state.lifecycle == ServerLifecycle::Running {
                 is_running = true;
@@ -165,16 +229,23 @@ async fn test_degradation_e2e_no_restart() {
     }
     assert!(is_running);
 
-    // Warm up TPS window
-    mgr_started.force_warm_tps_window_for_test(&srv_id, 30, 10.0);
+    let threshold = (i32::MAX / 2) as u64;
 
-    // Wait for 35s to ensure no restart happens
-    tokio::time::sleep(Duration::from_secs(35)).await;
+    // Set to threshold - 1
+    mgr_started.set_cumulative_requests_for_test(&srv_id, threshold - 1);
 
-    let state = mgr_started.server_state(&srv_id).unwrap();
-    assert_eq!(state.lifecycle, ServerLifecycle::Running, "Server should not restart");
+    // Increment 3 times across the threshold
+    mgr_started.increment_requests(&srv_id); // Reaches threshold -> WARN
+    mgr_started.increment_requests(&srv_id); // threshold + 1 -> No WARN
+    mgr_started.increment_requests(&srv_id); // threshold + 2 -> No WARN
 
-    mgr_started.shutdown_all().await;
+    assert_eq!(mgr_started.cumulative_requests(&srv_id), threshold + 2);
+
+    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    let count = logs.matches("Consider a rolling restart soon").count();
+    assert_eq!(count, 1, "Warning should be emitted exactly once, but got {} matches", count);
+
+    token.cancel();
 }
 
 /// See `config_tests::mock_llama_bin` — same rationale (env! is only

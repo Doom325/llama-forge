@@ -40,7 +40,7 @@ use llamaforge_core::routing::Router;
 use llamaforge_core::types::ports::SlotErasure;
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_metrics::{create_metrics_pipeline, InstrumentedMetricsStore};
-use llamaforge_server_manager::ServerManager;
+use llamaforge_server::ServerManager;
 use std::sync::atomic::AtomicU32;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -86,7 +86,7 @@ pub async fn build(
 
     // 3) Server manager. Holds the lifecycle of `llama-server` instances.
     let backend_choice = config.snapshot().global.telemetry_backend.clone();
-    let gpu_telemetry = llamaforge_server_manager::create_telemetry(backend_choice.as_deref());
+    let gpu_telemetry = llamaforge_server::create_telemetry(backend_choice.as_deref());
     let server_manager = Arc::new(ServerManager::new(
         gpu_telemetry,
         config.clone(),

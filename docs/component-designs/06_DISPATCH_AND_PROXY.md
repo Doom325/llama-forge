@@ -29,7 +29,7 @@
 > 2. **`QueueSubmitterAdapter`** — bridges `llamaforge-core`'s queue
 >    submit API to the `transport::QueueSubmitter` port. Trivial
 >    delegation; can be inlined.
-> 3. **`ServerControlAdapter`** — bridges `llamaforge-server-manager`'s
+> 3. **`ServerControlAdapter`** — bridges `llamaforge-server`'s
 >    server control to the `transport::ServerControl` port. Audit
 >    first: the trait may still be load-bearing for the management
 >    HTTP API's serialization shape.

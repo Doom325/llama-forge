@@ -1,6 +1,6 @@
 #![cfg(feature = "test-utils")]
 
-use llamaforge_server_manager::__test_exports::compute_backoff_delay;
+use llamaforge_server::__test_exports::compute_backoff_delay;
 use std::time::Duration;
 use tokio::time::Instant;
 

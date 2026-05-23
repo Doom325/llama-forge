@@ -1,5 +1,5 @@
 use llamaforge_core::types::traits::{ServerControl, ServerError, ServerSummary};
-use llamaforge_server_manager::ServerManager;
+use llamaforge_server::ServerManager;
 use std::sync::Arc;
 
 pub struct ServerControlAdapter {
@@ -36,10 +36,10 @@ impl ServerControl for ServerControlAdapter {
     async fn start_server(&self, id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
         match self.manager.request_start(id).await {
             Ok(_) => Ok(()),
-            Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
+            Err(llamaforge_server::ServerManagerError::ServerNotFound { id: _ }) => {
                 Err(ServerError::NotFound { id: *id })
             }
-            Err(llamaforge_server_manager::ServerManagerError::StartFailed { id: _, reason }) => {
+            Err(llamaforge_server::ServerManagerError::StartFailed { id: _, reason }) => {
                 if reason.contains("already running") {
                     Err(ServerError::AlreadyRunning { id: *id })
                 } else {
@@ -53,7 +53,7 @@ impl ServerControl for ServerControlAdapter {
     async fn stop_server(&self, id: &llamaforge_core::types::ServerId) -> Result<(), ServerError> {
         match self.manager.request_stop(id).await {
             Ok(_) => Ok(()),
-            Err(llamaforge_server_manager::ServerManagerError::ServerNotFound { id: _ }) => {
+            Err(llamaforge_server::ServerManagerError::ServerNotFound { id: _ }) => {
                 Err(ServerError::NotFound { id: *id })
             }
             Err(e) => Err(ServerError::SpawnFailed { reason: e.to_string() }),
@@ -90,25 +90,23 @@ mod tests {
         let shutdown = tokio_util::sync::CancellationToken::new();
 
         struct DummyTelemetry;
-        impl llamaforge_server_manager::GpuTelemetry for DummyTelemetry {
+        impl llamaforge_server::GpuTelemetry for DummyTelemetry {
             fn utilization_percent(
                 &self,
                 _: &llamaforge_core::config::GpuId,
-            ) -> Result<u8, llamaforge_server_manager::TelemetryError> {
+            ) -> Result<u8, llamaforge_server::TelemetryError> {
                 Ok(0)
             }
             fn list_devices(
                 &self,
-            ) -> Result<
-                Vec<llamaforge_server_manager::GpuDevice>,
-                llamaforge_server_manager::TelemetryError,
-            > {
+            ) -> Result<Vec<llamaforge_server::GpuDevice>, llamaforge_server::TelemetryError>
+            {
                 Ok(vec![])
             }
             fn free_vram_bytes(
                 &self,
                 _: &llamaforge_core::config::GpuId,
-            ) -> Result<u64, llamaforge_server_manager::TelemetryError> {
+            ) -> Result<u64, llamaforge_server::TelemetryError> {
                 Ok(1000000)
             }
         }
