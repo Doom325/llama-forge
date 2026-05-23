@@ -10,6 +10,7 @@ use llamaforge_core::types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
 
 use super::{
@@ -179,27 +180,56 @@ where
     if stream {
         let qs = state.queue_submitter.clone();
         let req_id = request_id;
-        let sse_stream = response_stream.flat_map(move |res| {
-            let events: Vec<Result<axum::response::sse::Event, axum::Error>> = match res {
-                Ok(chunk) => format_openai_chunk(&req_id_str, &chunk)
-                    .into_iter()
-                    .map(|data| Ok(Event::default().data(data)))
-                    .collect(),
-                Err(_) => {
-                    let sse_data = serde_json::json!({
-                        "error": {
-                            "message": "Stream error",
-                            "type": "internal_error",
-                            "param": null,
-                            "code": null
+        // Per-chunk timeout — matches the non-streaming path's bound.
+        // Without this an upstream stall holds the SSE connection open
+        // indefinitely (issue #191).
+        let chunk_timeout =
+            Duration::from_secs(state.config_reader.snapshot().global.queue_default_timeout_secs);
+        let req_id_str_for_stream = req_id_str.clone();
+        let sse_stream = async_stream::stream! {
+            let mut response_stream = response_stream;
+            loop {
+                match tokio::time::timeout(chunk_timeout, response_stream.next()).await {
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            request_id = %req_id,
+                            timeout_secs = chunk_timeout.as_secs(),
+                            "openai.sse.upstream_stalled — closing client stream"
+                        );
+                        let sse_data = serde_json::json!({
+                            "error": {
+                                "message": "Upstream stalled; stream closed",
+                                "type": "timeout",
+                                "param": null,
+                                "code": null
+                            }
+                        })
+                        .to_string();
+                        yield Ok::<_, axum::Error>(Event::default().data(sse_data));
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(Ok(chunk))) => {
+                        for data in format_openai_chunk(&req_id_str_for_stream, &chunk) {
+                            yield Ok(Event::default().data(data));
                         }
-                    })
-                    .to_string();
-                    vec![Ok(Event::default().data(sse_data))]
+                    }
+                    Ok(Some(Err(_))) => {
+                        let sse_data = serde_json::json!({
+                            "error": {
+                                "message": "Stream error",
+                                "type": "internal_error",
+                                "param": null,
+                                "code": null
+                            }
+                        })
+                        .to_string();
+                        yield Ok(Event::default().data(sse_data));
+                        break;
+                    }
                 }
-            };
-            futures_util::stream::iter(events)
-        });
+            }
+        };
 
         struct StreamGuard<S> {
             inner: S,
@@ -435,36 +465,71 @@ where
     let req_id_str = format!("msg_{}", request_id.as_uuid());
 
     if stream {
-        let mut anthropic_state = AnthropicState::new();
         let qs = state.queue_submitter.clone();
         let req_id = request_id;
-
-        let sse_stream = response_stream.flat_map(move |res| {
-            let chunks = match res {
-                Ok(chunk) => {
-                    match format_anthropic_event(&req_id_str, &model, &chunk, &mut anthropic_state)
-                    {
-                        Ok(events) => {
-                            events.into_iter().map(|evt| Ok(Event::from(evt))).collect::<Vec<_>>()
+        // Per-chunk timeout — matches the non-streaming path's bound.
+        // Without this an upstream stall holds the SSE connection open
+        // indefinitely (issue #191).
+        let chunk_timeout =
+            Duration::from_secs(state.config_reader.snapshot().global.queue_default_timeout_secs);
+        let req_id_str_for_stream = req_id_str.clone();
+        let model_for_stream = model.clone();
+        let sse_stream = async_stream::stream! {
+            let mut response_stream = response_stream;
+            let mut anthropic_state = AnthropicState::new();
+            loop {
+                match tokio::time::timeout(chunk_timeout, response_stream.next()).await {
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            request_id = %req_id,
+                            timeout_secs = chunk_timeout.as_secs(),
+                            "anthropic.sse.upstream_stalled — closing client stream"
+                        );
+                        let err_json = serde_json::json!({
+                            "type": "error",
+                            "error": {
+                                "type": "timeout_error",
+                                "message": "Upstream stalled; stream closed"
+                            }
+                        })
+                        .to_string();
+                        yield Ok::<_, axum::Error>(Event::default().event("error").data(err_json));
+                        break;
+                    }
+                    Ok(None) => break,
+                    Ok(Some(Ok(chunk))) => {
+                        match format_anthropic_event(
+                            &req_id_str_for_stream,
+                            &model_for_stream,
+                            &chunk,
+                            &mut anthropic_state,
+                        ) {
+                            Ok(events) => {
+                                for evt in events {
+                                    yield Ok(Event::from(evt));
+                                }
+                            }
+                            Err(e) => {
+                                yield Err(axum::Error::new(e));
+                                break;
+                            }
                         }
-                        Err(e) => vec![Err(axum::Error::new(e))],
+                    }
+                    Ok(Some(Err(_))) => {
+                        let err_json = serde_json::json!({
+                            "type": "error",
+                            "error": {
+                                "type": "api_error",
+                                "message": "Stream error"
+                            }
+                        })
+                        .to_string();
+                        yield Ok(Event::default().event("error").data(err_json));
+                        break;
                     }
                 }
-                Err(_) => {
-                    let err_json = serde_json::json!({
-                        "type": "error",
-                        "error": {
-                            "type": "api_error",
-                            "message": "Stream error"
-                        }
-                    })
-                    .to_string();
-                    vec![Ok(Event::default().event("error").data(err_json))]
-                }
-            };
-
-            futures_util::stream::iter(chunks)
-        });
+            }
+        };
 
         struct StreamGuard<S> {
             inner: S,

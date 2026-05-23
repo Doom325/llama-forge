@@ -37,12 +37,13 @@ async fn test_e2e_anthropic_messages_streaming() {
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
     loop {
-        let next = tokio::time::timeout(SSE_READ_TIMEOUT, stream.next())
-            .await
-            .unwrap_or_else(|_| panic!(
-                "SSE stream did not produce a chunk within {:?}; events so far: {:?}",
-                SSE_READ_TIMEOUT, events,
-            ));
+        let next =
+            tokio::time::timeout(SSE_READ_TIMEOUT, stream.next()).await.unwrap_or_else(|_| {
+                panic!(
+                    "SSE stream did not produce a chunk within {:?}; events so far: {:?}",
+                    SSE_READ_TIMEOUT, events,
+                )
+            });
         let Some(chunk) = next else { break };
         let bytes = chunk.expect("stream chunk");
         buffer.push_str(&String::from_utf8_lossy(&bytes));
