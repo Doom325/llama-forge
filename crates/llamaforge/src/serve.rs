@@ -40,7 +40,7 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
     // boundary before they reach this path).
     let diff_task = spawn_diff_forwarder(config.clone(), server_manager.clone());
 
-    let handles = llamaforge_transport::start_servers(deps)
+    let handles = llamaforge_api::transport::start_servers(deps)
         .await
         .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;
 

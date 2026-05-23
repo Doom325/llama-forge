@@ -1,11 +1,41 @@
 # Component Design: Dispatch & Proxy
 
-**Component:** Dispatch & Proxy  
-**Phase:** 3 (Request Pipeline)  
-**Estimated LOC:** ~2,500  
-**Risk:** Critical  
-**Dependencies:** Server Manager (server state, capabilities), Smart Routing (slot selection), Metrics & Storage (audit channel), Config Manager (timeout values), Request Queue (dequeued candidates)  
+**Component:** Dispatch & Proxy
+**Phase:** 3 (Request Pipeline)
+**Estimated LOC:** ~2,500
+**Risk:** Critical
+**Dependencies:** Server Manager (server state, capabilities), Smart Routing (slot selection), Metrics & Storage (audit channel), Config Manager (timeout values), Request Queue (dequeued candidates)
 **Consumers:** Transport Layer (stream responses)
+**Crate location:** `crates/llamaforge-api/src/dispatch/` (merged in Phase 9 PR3). Pre-merge: `crates/llamaforge-dispatch/`.
+
+---
+
+> **Phase 9 PR3 note — adapter collapse opportunity deferred to PR5.**
+> With `dispatch`, `transport`, and `adapters` now living in the same
+> crate (`llamaforge-api`), four adapter structs originally introduced
+> to bridge port traits between crates are no longer adapters at all —
+> they are intra-crate glue. PLAN.md PR3 explicitly defers the collapse
+> to PR5 to keep the merge diff bounded; they remain in place under
+> `crates/llamaforge-api/src/adapters/`.
+>
+> Opportunities deferred to PR5:
+> 1. **`InferenceEngineAdapter`** — owns the queue-event→stream state
+>    machine that bridges the dispatch streaming output into the
+>    `transport::InferenceEngine` trait. With dispatch + transport
+>    co-located, the trait can be implemented directly on a thinner
+>    type, or the trait deleted in favour of a concrete service. This
+>    is the load-bearing one; a follow-up issue should pick a new home
+>    for the state machine before collapsing.
+> 2. **`QueueSubmitterAdapter`** — bridges `llamaforge-core`'s queue
+>    submit API to the `transport::QueueSubmitter` port. Trivial
+>    delegation; can be inlined.
+> 3. **`ServerControlAdapter`** — bridges `llamaforge-server-manager`'s
+>    server control to the `transport::ServerControl` port. Audit
+>    first: the trait may still be load-bearing for the management
+>    HTTP API's serialization shape.
+> 4. **`MetricsExporterAdapter`** — wraps `PrometheusHandle::render()`
+>    to satisfy `transport::MetricsExporter`. ~30 lines; trivially
+>    inlinable.
 
 ---
 

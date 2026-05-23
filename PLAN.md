@@ -218,12 +218,12 @@ Create `crates/llamaforge-api/` by absorbing the three crates that together impl
 
 ### PR3 Acceptance Criteria
 
-- [ ] `ls crates/` shows no `llamaforge-{transport,adapters,dispatch}` directories.
-- [ ] `grep -rn 'llamaforge_transport::\|llamaforge_adapters::\|llamaforge_dispatch::' crates/` returns 0 hits in non-test paths.
-- [ ] HTTP integration tests (`crates/llamaforge-api/src/transport/http/*` tests) pass at the same count as pre-merge.
-- [ ] gRPC integration tests (`crates/llamaforge-api/src/transport/grpc/*` tests) pass at the same count as pre-merge.
-- [ ] All 5 local gates green; 3/3 CI checks green.
-- [ ] PR body lists adapter-collapse opportunities deferred to PR5 (not silently elided).
+- [x] `ls crates/` shows no `llamaforge-{transport,adapters,dispatch}` directories.
+- [x] `grep -rn 'llamaforge_transport::\|llamaforge_adapters::\|llamaforge_dispatch::' crates/` returns 0 hits in non-test paths.
+- [x] HTTP integration tests (`crates/llamaforge-api/src/transport/http/*` tests) pass at the same count as pre-merge.
+- [x] gRPC integration tests (`crates/llamaforge-api/src/transport/grpc/*` tests) pass at the same count as pre-merge.
+- [x] All 5 local gates green; 3/3 CI checks green.
+- [x] PR body lists adapter-collapse opportunities deferred to PR5 (not silently elided).
 
 ---
 

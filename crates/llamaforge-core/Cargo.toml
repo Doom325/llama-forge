@@ -47,7 +47,7 @@ proptest = { workspace = true }
 typed-builder = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros", "time"] }
 tracing-subscriber = { workspace = true }
-tracing-test = "0.2.6"
+tracing-test = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
 filetime = { workspace = true }
 metrics-util = { workspace = true }

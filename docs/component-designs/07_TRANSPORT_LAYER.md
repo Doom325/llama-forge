@@ -1,11 +1,12 @@
 # Component Design: Transport Layer
 
-**Component:** Transport Layer  
-**Phase:** 4 (Client Interface)  
-**Estimated LOC:** ~2,000  
-**Risk:** Medium  
-**Dependencies:** All upstream components (Request Queue, Smart Routing, Dispatch & Proxy, Server Manager, Metrics & Storage, Config Manager)  
+**Component:** Transport Layer
+**Phase:** 4 (Client Interface)
+**Estimated LOC:** ~2,000
+**Risk:** Medium
+**Dependencies:** All upstream components (Request Queue, Smart Routing, Dispatch & Proxy, Server Manager, Metrics & Storage, Config Manager)
 **Consumers:** External clients (OpenAI SDK, Anthropic SDK, gRPC clients, Prometheus scrapers)
+**Crate location:** `crates/llamaforge-api/src/transport/` (merged in Phase 9 PR3 with `dispatch/` and `adapters/`). Pre-merge: `crates/llamaforge-transport/`. See `docs/component-designs/06_DISPATCH_AND_PROXY.md` for the adapter-collapse opportunities that the merge unlocked.
 
 ---
 

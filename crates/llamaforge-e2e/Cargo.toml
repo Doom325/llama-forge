@@ -15,9 +15,7 @@ mock-llama = { workspace = true }
 llamaforge-core = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true }
 llamaforge-server-manager = { workspace = true }
-llamaforge-dispatch = { workspace = true }
-llamaforge-transport = { workspace = true }
-llamaforge-adapters = { workspace = true }
+llamaforge-api = { workspace = true }
 llamaforge = { workspace = true }
 llamaforge-proto = { workspace = true }
 futures-util = { workspace = true }
