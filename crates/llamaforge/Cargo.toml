@@ -28,6 +28,7 @@ llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
 llamaforge-server = { workspace = true }
 llamaforge-api = { workspace = true }
+metrics.workspace = true
 
 [features]
 telemetry-nvml = ["llamaforge-server/telemetry-nvml"]

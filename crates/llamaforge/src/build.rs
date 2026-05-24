@@ -123,7 +123,40 @@ pub async fn build(
         let r = router.clone();
         let h = health.clone();
         let st = shutdown_token.clone();
-        tokio::spawn(run_scheduler(q, a, r.clone(), r, h, st))
+        tokio::spawn(async move {
+            let mut restart_count = 0;
+            let max_restarts = 5;
+            loop {
+                match tokio::spawn(run_scheduler(
+                    q.clone(),
+                    a.clone(),
+                    r.clone(),
+                    r.clone(),
+                    h.clone(),
+                    st.clone(),
+                ))
+                .await
+                {
+                    Ok(()) => break, // Clean shutdown
+                    Err(e) if e.is_panic() => {
+                        restart_count += 1;
+                        tracing::error!(
+                            "Scheduler panicked, restarting ({}/{}): {:?}",
+                            restart_count,
+                            max_restarts,
+                            e
+                        );
+                        metrics::counter!("llamaforge_scheduler_restarts_total").increment(1);
+                        if restart_count >= max_restarts {
+                            tracing::error!("Scheduler exceeded max restarts, giving up");
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                    Err(_) => break, // Cancelled
+                }
+            }
+        })
     };
 
     // 7) Backend HTTP clients to the llama-server fleet. Registered up
