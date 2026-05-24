@@ -127,6 +127,7 @@ pub async fn spawn_server_task(
                 match state.lifecycle.transition_to(ServerLifecycle::Running) {
                     Ok(s) => {
                         state.lifecycle = s;
+                        let _ = mgr.lifecycle_tx.send((server_id, s));
                         state.first_health_ok_at = Some(std::time::Instant::now());
                     }
                     Err(e) => {
@@ -221,7 +222,10 @@ pub async fn spawn_server_task(
                 state.pid = Some(pid);
                 state.restart_count = restart_count;
                 match state.lifecycle.transition_to(ServerLifecycle::Starting) {
-                    Ok(s) => state.lifecycle = s,
+                    Ok(s) => {
+                        state.lifecycle = s;
+                        let _ = mgr.lifecycle_tx.send((server_id, s));
+                    }
                     Err(e) => {
                         tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition")
                     }
@@ -538,6 +542,7 @@ async fn monitor_loop(
                                         match state2.lifecycle.transition_to(ServerLifecycle::Running) {
                                             Ok(s) => {
                                                 state2.lifecycle = s;
+                                                let _ = mgr.lifecycle_tx.send((*server_id, s));
                                                 state2.first_health_ok_at = Some(std::time::Instant::now());
                                             }
                                             Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
@@ -717,7 +722,10 @@ async fn monitor_loop(
 fn transition_to(mgr: &ServerManager, server_id: &ServerId, new_state: ServerLifecycle) {
     if let Some(mut state) = mgr.servers.get_mut(server_id) {
         match state.lifecycle.transition_to(new_state) {
-            Ok(s) => state.lifecycle = s,
+            Ok(s) => {
+                state.lifecycle = s;
+                let _ = mgr.lifecycle_tx.send((*server_id, s));
+            }
             Err(e) => {
                 tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition")
             }

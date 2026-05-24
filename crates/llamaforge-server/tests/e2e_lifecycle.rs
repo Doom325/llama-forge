@@ -87,20 +87,11 @@ async fn test_e2e_lifecycle() {
     let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
-    let mut is_running = false;
-    let mut pid = None;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                pid = state.pid;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_running = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(5))
+        .await;
     assert!(is_running);
-    let pid = pid.unwrap();
+    let pid = mgr_started.server_state(&srv_id).unwrap().pid.unwrap();
 
     // Dispatch fake increments
     mgr_started.increment_pending(&srv_id);
@@ -114,32 +105,18 @@ async fn test_e2e_lifecycle() {
     mgr_started.stop_server(&srv_id).await;
 
     // Verify Draining
-    let mut is_draining = false;
-    for _ in 0..20 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Draining {
-                is_draining = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_draining = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Draining, Duration::from_secs(2))
+        .await;
     assert!(is_draining);
 
     // Decrement pending so it can finish draining
     mgr_started.decrement_pending(&srv_id);
 
     // Wait for it to be stopped
-    let mut is_stopped = false;
-    for _ in 0..150 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Stopped {
-                is_stopped = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_stopped = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Stopped, Duration::from_secs(15))
+        .await;
     assert!(is_stopped);
 
     // Verify reaped and row deleted
@@ -217,16 +194,9 @@ async fn test_id_task_overflow() {
     let srv_id = ServerId::from_config_id("00000000-0000-0000-0000-000000000000");
 
     // Wait for Running
-    let mut is_running = false;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_running = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(5))
+        .await;
     assert!(is_running);
 
     let threshold = (i32::MAX / 2) as u64;

@@ -101,29 +101,40 @@ async fn test_gpu_semaphore() {
     let srv1_id = ServerId::from_config_id("srv1");
     let srv2_id = ServerId::from_config_id("srv2");
 
-    let mut srv1_running_time = None;
-    let mut srv2_running_time = None;
+    let mgr_clone1 = mgr_started.clone();
+    let mgr_clone2 = mgr_started.clone();
 
     // Wait until both are Running
-    for _ in 0..100 {
-        if srv1_running_time.is_none() {
-            if let Some(state) = mgr_started.server_state(&srv1_id) {
-                if state.lifecycle == llamaforge_server::ServerLifecycle::Running {
-                    srv1_running_time = Some(Instant::now());
-                }
-            }
+    let (res1, res2) = tokio::join!(
+        async move {
+            let success = mgr_clone1
+                .wait_for_lifecycle(
+                    &srv1_id,
+                    llamaforge_server::ServerLifecycle::Running,
+                    Duration::from_secs(10),
+                )
+                .await;
+            (success, Instant::now())
+        },
+        async move {
+            let success = mgr_clone2
+                .wait_for_lifecycle(
+                    &srv2_id,
+                    llamaforge_server::ServerLifecycle::Running,
+                    Duration::from_secs(10),
+                )
+                .await;
+            (success, Instant::now())
         }
-        if srv2_running_time.is_none() {
-            if let Some(state) = mgr_started.server_state(&srv2_id) {
-                if state.lifecycle == llamaforge_server::ServerLifecycle::Running {
-                    srv2_running_time = Some(Instant::now());
-                }
-            }
-        }
-        if srv1_running_time.is_some() && srv2_running_time.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+    );
+
+    let mut srv1_running_time = None;
+    let mut srv2_running_time = None;
+    if res1.0 {
+        srv1_running_time = Some(res1.1);
+    }
+    if res2.0 {
+        srv2_running_time = Some(res2.1);
     }
 
     assert!(srv1_running_time.is_some(), "srv1 did not reach Running");

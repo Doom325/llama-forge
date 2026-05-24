@@ -114,17 +114,12 @@ async fn test_metrics_surface() {
     let srv_id = ServerId::from_config_id("srv_metrics");
 
     // Wait for Running
-    let mut is_running = false;
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_running);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state"
+    );
 
     // Call instrumented functions
     for _ in 0..5 {
@@ -143,7 +138,9 @@ async fn test_metrics_surface() {
 
     println!("PENDING AFTER DECREMENTS: {}", instrumented.pending_dispatches(&srv_id));
     // Wait a tick for metrics to update (they update every 10s via poller, we need to wait for poller to run)
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(12)).await;
+    tokio::time::resume();
 
     let snapshot: Snapshot = snapshotter.snapshot();
 
