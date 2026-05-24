@@ -198,6 +198,37 @@ pub enum ServerLifecycle {
     Failed,
 }
 
+#[derive(Debug, thiserror::Error, PartialEq)]
+#[error("Illegal state transition from {from:?} to {to:?}")]
+pub struct IllegalTransition {
+    pub from: ServerLifecycle,
+    pub to: ServerLifecycle,
+}
+
+impl ServerLifecycle {
+    pub fn transition_to(
+        self,
+        target: ServerLifecycle,
+    ) -> Result<ServerLifecycle, IllegalTransition> {
+        if self == target {
+            return Ok(target);
+        }
+        let allowed = match self {
+            Self::Stopped => &[Self::Starting][..],
+            Self::Starting => &[Self::Running, Self::Failed, Self::Stopped],
+            Self::Running => &[Self::Draining, Self::Restarting, Self::Failed, Self::Stopped],
+            Self::Draining => &[Self::Stopped, Self::Failed],
+            Self::Restarting => &[Self::Starting, Self::Failed, Self::Stopped],
+            Self::Failed => &[Self::Starting, Self::Stopped],
+        };
+        if allowed.contains(&target) {
+            Ok(target)
+        } else {
+            Err(IllegalTransition { from: self, to: target })
+        }
+    }
+}
+
 impl ServerId {
     pub fn new(id: Uuid) -> Self {
         Self(id)
@@ -369,6 +400,53 @@ mod tests {
 
         let too_long = "a".repeat(129);
         assert!(matches!(SessionId::new(&too_long), Err(IdValidationError::TooLong)));
+    }
+
+    #[test]
+    fn test_server_lifecycle_transitions() {
+        use ServerLifecycle::*;
+
+        let valid_transitions = vec![
+            (Stopped, Starting),
+            (Starting, Running),
+            (Starting, Failed),
+            (Starting, Stopped),
+            (Running, Draining),
+            (Running, Restarting),
+            (Running, Failed),
+            (Running, Stopped),
+            (Draining, Stopped),
+            (Draining, Failed),
+            (Restarting, Starting),
+            (Restarting, Failed),
+            (Restarting, Stopped),
+            (Failed, Starting),
+            (Failed, Stopped),
+        ];
+
+        for state in [Stopped, Starting, Running, Draining, Restarting, Failed] {
+            // Identity transitions should be valid
+            assert_eq!(state.transition_to(state), Ok(state));
+
+            for target in [Stopped, Starting, Running, Draining, Restarting, Failed] {
+                if state == target {
+                    continue;
+                }
+
+                let res = state.transition_to(target);
+                if valid_transitions.contains(&(state, target)) {
+                    assert_eq!(res, Ok(target), "Expected {:?} -> {:?} to be valid", state, target);
+                } else {
+                    assert_eq!(
+                        res,
+                        Err(IllegalTransition { from: state, to: target }),
+                        "Expected {:?} -> {:?} to be invalid",
+                        state,
+                        target
+                    );
+                }
+            }
+        }
     }
 
     #[test]
