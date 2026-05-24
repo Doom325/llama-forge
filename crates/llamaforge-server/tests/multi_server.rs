@@ -170,17 +170,11 @@ async fn test_multi_server_orchestration() {
     }
 
     // Wait for it to restart, then remove srv_1 via config diff
-    let mut is_restarting = false;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_0_a) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                is_restarting = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_restarting);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_0_a, ServerLifecycle::Restarting, Duration::from_secs(5))
+            .await
+    );
 
     // Check that srv_0_b is still running undisturbed
     let state_b = mgr_started.server_state(&srv_0_b).unwrap();
@@ -228,16 +222,8 @@ estimated_vram_mb = 100
     let diff = mgr.config().reload().await.unwrap();
     mgr_started.apply_config_diff(&diff).await;
 
-    // Verify srv_1 removed cleanly
-    let mut is_s1_removed = false;
-    for _ in 0..50 {
-        if mgr_started.server_state(&srv_1).is_none() {
-            is_s1_removed = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_s1_removed, "srv_1 not removed");
+    // Verify srv_1 removed cleanly (apply_config_diff waits for Stopped internally now, so it should be gone)
+    assert!(mgr_started.server_state(&srv_1).is_none(), "srv_1 not removed");
 
     mgr_started.shutdown_all().await;
 

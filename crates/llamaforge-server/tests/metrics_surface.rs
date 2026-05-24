@@ -138,7 +138,9 @@ async fn test_metrics_surface() {
 
     println!("PENDING AFTER DECREMENTS: {}", instrumented.pending_dispatches(&srv_id));
     // Wait a tick for metrics to update (they update every 10s via poller, we need to wait for poller to run)
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(12)).await;
+    tokio::time::resume();
 
     let snapshot: Snapshot = snapshotter.snapshot();
 

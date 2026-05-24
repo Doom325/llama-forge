@@ -141,8 +141,10 @@ async fn test_scenario_full_stack() {
     let mut current_pid = instrumented.server_state(&srv_id).unwrap().pid.unwrap();
 
     // (a) wait for first /health success (already done to reach Running)
-    // Wait for poller to run at least once (10s interval)
-    tokio::time::sleep(Duration::from_secs(12)).await;
+    // Wait for poller to run at least once (10s interval) using virtual time to speed up the test.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(12)).await;
+    tokio::time::resume();
 
     let snapshot: Snapshot = snapshotter.snapshot();
     let metrics = snapshot.into_vec();

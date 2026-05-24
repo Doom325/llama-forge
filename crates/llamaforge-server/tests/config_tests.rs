@@ -204,15 +204,7 @@ restart_on_degradation = true
     let diff = mgr.config().reload().await.unwrap();
     mgr.apply_config_diff(&diff).await;
 
-    let mut is_added_removed = false;
-    for _ in 0..100 {
-        if mgr.server_state(&srv_added).is_none() {
-            is_added_removed = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_added_removed, "Removed server was not deleted from state");
+    assert!(mgr.server_state(&srv_added).is_none(), "Removed server was not deleted from state");
 
     // srv_test is untouched
     let state = mgr.server_state(&srv_id).unwrap();

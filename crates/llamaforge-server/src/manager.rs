@@ -161,11 +161,15 @@ impl ServerManager {
 
             let state = self.servers.get(server_id).map(|s| s.lifecycle);
             if state != Some(ServerLifecycle::Stopped) && state.is_some() {
-                while let Ok((id, state)) = rx.recv().await {
-                    if id == *server_id && state == ServerLifecycle::Stopped {
-                        break;
+                let _ = tokio::time::timeout(Duration::from_secs(30), async {
+                    while let Ok((id, state)) = rx.recv().await {
+                        if id == *server_id && state == ServerLifecycle::Stopped {
+                            break;
+                        }
                     }
-                }
+                }).await.map_err(|_| {
+                    tracing::warn!(server.id = %server_id, "apply_config_diff.timeout_waiting_for_stop");
+                });
             }
             self.servers.remove(server_id);
         }
@@ -178,13 +182,16 @@ impl ServerManager {
 
                 let state = self.servers.get(server_id).map(|s| s.lifecycle);
                 if state != Some(ServerLifecycle::Stopped) && state.is_some() {
-                    while let Ok((id, state)) = rx.recv().await {
-                        if id == *server_id && state == ServerLifecycle::Stopped {
-                            break;
+                    let _ = tokio::time::timeout(Duration::from_secs(30), async {
+                        while let Ok((id, state)) = rx.recv().await {
+                            if id == *server_id && state == ServerLifecycle::Stopped {
+                                break;
+                            }
                         }
-                    }
+                    }).await.map_err(|_| {
+                        tracing::warn!(server.id = %server_id, "apply_config_diff.timeout_waiting_for_stop");
+                    });
                 }
-
                 if let Some(server_config) = app_config.servers.get(server_id) {
                     let srv = server_id.clone();
                     let cfg = server_config.clone();

@@ -103,15 +103,13 @@ async fn test_gpu_semaphore() {
 
     let mgr_clone1 = mgr_started.clone();
     let mgr_clone2 = mgr_started.clone();
-    let srv1_id_clone = srv1_id.clone();
-    let srv2_id_clone = srv2_id.clone();
 
     // Wait until both are Running
     let (res1, res2) = tokio::join!(
         async move {
             let success = mgr_clone1
                 .wait_for_lifecycle(
-                    &srv1_id_clone,
+                    &srv1_id,
                     llamaforge_server::ServerLifecycle::Running,
                     Duration::from_secs(10),
                 )
@@ -121,7 +119,7 @@ async fn test_gpu_semaphore() {
         async move {
             let success = mgr_clone2
                 .wait_for_lifecycle(
-                    &srv2_id_clone,
+                    &srv2_id,
                     llamaforge_server::ServerLifecycle::Running,
                     Duration::from_secs(10),
                 )

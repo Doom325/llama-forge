@@ -147,8 +147,10 @@ async fn test_degradation_e2e_no_restart() {
     // Warm up TPS window
     mgr_started.force_warm_tps_window_for_test(&srv_id, 30, 10.0);
 
-    // Wait for 35s to ensure no restart happens
-    tokio::time::sleep(Duration::from_secs(35)).await;
+    // Wait for 35s to ensure no restart happens (advance virtual time to run instantly)
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(35)).await;
+    tokio::time::resume();
 
     let state = mgr_started.server_state(&srv_id).unwrap();
     assert_eq!(state.lifecycle, ServerLifecycle::Running, "Server should not restart");
