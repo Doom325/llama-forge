@@ -636,16 +636,16 @@ mod tests {
             alias: Some("test".into()),
             parallel_slots: 4,
             ctx_size: 4096,
-            devices: vec![llamaforge_core::config::DeviceAssignment {
+            devices: vec![llamaforge_core::config::DeviceSpec {
                 gpu_id: GpuId(0),
-                num_layers: None,
+                layer_range: None,
             }],
             ..Default::default()
         };
 
         manager.servers.insert(
             srv_id.clone(),
-            ServerState::new_starting(srv_id.clone(), &server_config, None),
+            ServerState::new_starting(srv_id.clone(), &server_config, Some(1234)),
         );
 
         assert_eq!(manager.running_servers().len(), 1);
