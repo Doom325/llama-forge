@@ -174,10 +174,13 @@ fn check_state_dir(path: &Path) {
 
 fn emit_boot_error(code: &str, message: &str) {
     let ts = chrono::Utc::now().to_rfc3339();
-    eprintln!(
-        r#"{{"timestamp":"{}","level":"ERROR","code":"{}","message":"{}"}}"#,
-        ts, code, message
-    );
+    let json = serde_json::json!({
+        "timestamp": ts,
+        "level": "ERROR",
+        "code": code,
+        "message": message
+    });
+    eprintln!("{}", json);
 }
 
 fn print_state_dir_error(path: &Path) {
