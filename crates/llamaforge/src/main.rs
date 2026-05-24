@@ -172,82 +172,50 @@ fn check_state_dir(path: &Path) {
     }
 }
 
+fn emit_boot_error(code: &str, message: &str) {
+    let ts = chrono::Utc::now().to_rfc3339();
+    let json = serde_json::json!({
+        "timestamp": ts,
+        "level": "ERROR",
+        "code": code,
+        "message": message
+    });
+    eprintln!("{}", json);
+}
+
 fn print_state_dir_error(path: &Path) {
-    eprintln!("error: state directory not writable: {}", path.display());
-    eprintln!();
-    eprintln!("LlamaForge needs a writable directory for its lock file (config.lock) and");
-    eprintln!("writeback temp files. Create it:");
-    eprintln!();
-    eprintln!("  mkdir -p {}", path.display());
-    eprintln!("  # If running as a non-root service user:");
-    eprintln!("  chown <user>:<group> {}", path.display());
-    eprintln!();
-    eprintln!("Or pass --state-dir <other-path> / set $LLAMAFORGE_STATE_DIR.");
+    let msg = format!("state directory not writable: {}. LlamaForge needs a writable directory for its lock file (config.lock) and writeback temp files. Create it: mkdir -p {} ; chown <user>:<group> {}  Or pass --state-dir <other-path> / set $LLAMAFORGE_STATE_DIR.", path.display(), path.display(), path.display());
+    emit_boot_error("STATE_DIR_NOT_WRITABLE", &msg);
 }
 
 pub(crate) fn handle_config_error(err: ConfigLoadError) -> ! {
     match err {
         ConfigLoadError::NotFound { path } => {
-            eprintln!("error: config file not found: {}", path.display());
-            eprintln!();
-            eprintln!("To get started:");
-            eprintln!("  1. Run `llamaforge init` to generate a default config");
-            eprintln!("  2. Edit `binary_path` (path to llama-server), `model_path`, `port`, `ctx_size` for your llama-server instances");
-            eprintln!("  3. Re-run llamaforge");
-            eprintln!();
-            eprintln!("Search order: --config, $LLAMAFORGE_CONFIG, $XDG_CONFIG_HOME/llamaforge/, /etc/llamaforge/");
-            eprintln!("See: docs/configuration.md");
+            let msg = format!("config file not found: {}. To get started: 1. Run `llamaforge init` to generate a default config. 2. Edit `binary_path`, `model_path`, `port`, `ctx_size` for your instances. 3. Re-run llamaforge. Search order: --config, $LLAMAFORGE_CONFIG, $XDG_CONFIG_HOME/llamaforge/, /etc/llamaforge/", path.display());
+            emit_boot_error("CONFIG_NOT_FOUND", &msg);
         }
         ConfigLoadError::EmptyFile { path } => {
-            eprintln!("error: config file is empty: {}", path.display());
-            eprintln!();
-            eprintln!(
-                "This can happen if a previous writeback was killed mid-write. The atomic-rename"
-            );
-            eprintln!(
-                "protocol should prevent this, but the truncation fallback path has a microsecond"
-            );
-            eprintln!("crash window.");
-            eprintln!();
-            eprintln!("Recovery:");
-            eprintln!("  1. Restore the file from version control (it should be checked in)");
-            eprintln!("  2. Or restore from your most recent backup");
-            eprintln!("  3. Or run `llamaforge init --force` to generate a new default config");
+            let msg = format!("config file is empty: {}. This can happen if a previous writeback was killed mid-write. Recovery: 1. Restore the file from version control. 2. Or restore from backup. 3. Or run `llamaforge init --force`.", path.display());
+            emit_boot_error("CONFIG_EMPTY", &msg);
         }
         ConfigLoadError::ParseError { path, source } => {
-            eprintln!("error: failed to parse {}:", path.display());
-            eprintln!("  {}", source);
-            eprintln!();
-            eprintln!("Common causes:");
-            eprintln!("  - Mismatched quotes or brackets");
-            eprintln!(
-                "  - Invalid TOML syntax (e.g. duplicate [[servers]] entries with the same key)"
-            );
-            eprintln!(
-                "  - Wrong field types (e.g. ctx_size = \"2048\" instead of ctx_size = 2048)"
-            );
-            eprintln!();
-            eprintln!("Try: toml-cli check {}  (or your editor's TOML linter)", path.display());
+            let msg = format!("failed to parse {}: {}. Common causes: mismatched quotes/brackets, invalid TOML syntax, wrong field types.", path.display(), source);
+            emit_boot_error("CONFIG_PARSE_ERROR", &msg);
         }
         ConfigLoadError::ValidationError { message } => {
-            eprintln!("error: config validation failed: {}", message);
-            eprintln!();
-            eprintln!("Validation rules (design §6.1):");
-            eprintln!("  - Server ports must be unique across all [servers] entries");
-            eprintln!("  - Every server must have a non-empty binary_path, non-empty model_path, parallel_slots > 0");
-            eprintln!("  - device.gpu_id must be unique within each server");
-            eprintln!("  - global.queue_default_timeout_secs must be > 0");
-            eprintln!();
-            eprintln!("Edit the config file to fix the issue and re-run.");
+            let msg = format!(
+                "config validation failed: {}. Edit the config file to fix the issue and re-run.",
+                message
+            );
+            emit_boot_error("CONFIG_VALIDATION_ERROR", &msg);
         }
         ConfigLoadError::IoError { path, source } => {
-            eprintln!("error: I/O error reading {}: {}", path.display(), source);
-            eprintln!();
-            eprintln!("Check file permissions and that the path is on a local filesystem (NFS/EFS");
-            eprintln!("is unsupported because flock semantics differ).");
+            let msg = format!("I/O error reading {}: {}. Check file permissions and that the path is on a local filesystem.", path.display(), source);
+            emit_boot_error("CONFIG_IO_ERROR", &msg);
         }
         _ => {
-            eprintln!("error: config load failed: {}", err);
+            let msg = format!("config load failed: {}", err);
+            emit_boot_error("CONFIG_LOAD_FAILED", &msg);
         }
     }
     process::exit(78);
@@ -311,12 +279,14 @@ fn run_serve(config_path: PathBuf, rules_path: PathBuf, state_dir: PathBuf) {
             let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    eprintln!("error: failed to construct tokio runtime: {}", e);
+                    let msg = format!("failed to construct tokio runtime: {}", e);
+                    emit_boot_error("RUNTIME_INIT_FAILED", &msg);
                     process::exit(70);
                 }
             };
             if let Err(e) = rt.block_on(llamaforge::run(Arc::new(handle))) {
-                eprintln!("error: {}", e);
+                let msg = format!("{}", e);
+                emit_boot_error("FATAL_ERROR", &msg);
                 process::exit(1);
             }
         }

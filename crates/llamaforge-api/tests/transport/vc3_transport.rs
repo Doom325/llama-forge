@@ -183,10 +183,23 @@ async fn test_vc3_3_grpc_streaming_lifecycle() {
 
     let mut client =
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
-    let mut stream = client.stream_inference(llamaforge_proto::inference::InferenceRequest {
-        model: "test".to_string(),
-        payload: r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}], "stream": true}"#.to_string(),
-    }).await.unwrap().into_inner();
+    let mut stream = client
+        .stream_inference(llamaforge_proto::inference::InferenceRequest {
+            model: "test".to_string(),
+            messages: vec![llamaforge_proto::inference::ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            max_tokens: None,
+            temperature: None,
+            stream: true,
+            logit_bias: std::collections::HashMap::new(),
+            tools: String::new(),
+            tool_choice: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
 
     let mut responses = Vec::new();
     while let Some(res) = stream.message().await.unwrap() {
@@ -342,7 +355,16 @@ async fn test_vc3_6_auth_on_both_transports() {
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
     let req = tonic::Request::new(llamaforge_proto::inference::InferenceRequest {
         model: "test".to_string(),
-        payload: r#"{"messages": [{"role": "user", "content": "hi"}], "stream": true}"#.to_string(),
+        messages: vec![llamaforge_proto::inference::ChatMessage {
+            role: "user".to_string(),
+            content: "hi".to_string(),
+        }],
+        max_tokens: None,
+        temperature: None,
+        stream: true,
+        logit_bias: std::collections::HashMap::new(),
+        tools: String::new(),
+        tool_choice: String::new(),
     });
 
     let grpc_res = grpc_client.stream_inference(req).await;
@@ -647,9 +669,16 @@ async fn test_vc3_14_panic_recovery_grpc() {
         llamaforge_proto::inference::inference_service_client::InferenceServiceClient::new(channel);
     let req = tonic::Request::new(llamaforge_proto::inference::InferenceRequest {
         model: "test".to_string(),
-        payload:
-            r#"{"model": "test", "messages": [{"role": "user", "content": "hi"}], "stream": true}"#
-                .to_string(),
+        messages: vec![llamaforge_proto::inference::ChatMessage {
+            role: "user".to_string(),
+            content: "hi".to_string(),
+        }],
+        max_tokens: None,
+        temperature: None,
+        stream: true,
+        logit_bias: std::collections::HashMap::new(),
+        tools: String::new(),
+        tool_choice: String::new(),
     });
 
     let grpc_res = grpc_client.stream_inference(req).await;

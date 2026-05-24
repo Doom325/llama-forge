@@ -81,6 +81,51 @@ pub(crate) struct ServerState {
 }
 
 impl ServerState {
+    pub(crate) fn new_starting(
+        id: llamaforge_core::types::ServerId,
+        cfg: &llamaforge_core::config::ServerConfig,
+        orphan_pid: Option<u32>,
+    ) -> Self {
+        use llamaforge_core::types::ServerLifecycle;
+        Self {
+            id,
+            lifecycle: if orphan_pid.is_some() {
+                ServerLifecycle::Running
+            } else {
+                ServerLifecycle::Starting
+            },
+            pid: orphan_pid,
+            port: cfg.port,
+            model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
+            parallel_slots: cfg.parallel_slots,
+            ctx_size: cfg.ctx_size,
+            resolved_ctx_size: cfg.ctx_size,
+            slots: Vec::new(),
+            last_health_check: None,
+            restart_count: 0,
+            cumulative_requests: 0,
+            capabilities: None,
+            first_health_ok_at: if orphan_pid.is_some() {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            },
+            last_n_decoded: std::collections::HashMap::new(),
+            gpu_id: cfg
+                .devices
+                .first()
+                .map(|d| d.gpu_id.clone())
+                .unwrap_or_else(|| llamaforge_core::config::GpuId(0)),
+            gguf_metadata: None,
+            reserved_vram_bytes: 0,
+            task_shutdown_token: tokio_util::sync::CancellationToken::new(),
+            started_at: Some(chrono::Utc::now()),
+            last_restart_at: None,
+            #[cfg(any(test, feature = "test-utils"))]
+            test_warm_tps_samples: None,
+        }
+    }
+
     /// Convert the internal state into a public, read-only snapshot.
     #[allow(dead_code)]
     pub(crate) fn to_snapshot(&self) -> ServerStateSnapshot {

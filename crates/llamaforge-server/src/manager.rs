@@ -135,46 +135,8 @@ impl ServerManager {
             let orphan_pid = adopted_pids.get(&srv).copied();
 
             // Insert initial state
-            mgr.servers.insert(
-                srv.clone(),
-                ServerState {
-                    id: srv.clone(),
-                    lifecycle: if orphan_pid.is_some() {
-                        ServerLifecycle::Running
-                    } else {
-                        ServerLifecycle::Starting
-                    },
-                    pid: orphan_pid,
-                    port: cfg.port,
-                    model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
-                    parallel_slots: cfg.parallel_slots,
-                    ctx_size: cfg.ctx_size,
-                    resolved_ctx_size: cfg.ctx_size,
-                    slots: Vec::new(),
-                    last_health_check: None,
-                    restart_count: 0,
-                    cumulative_requests: 0,
-                    capabilities: None,
-                    first_health_ok_at: if orphan_pid.is_some() {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    },
-                    last_n_decoded: std::collections::HashMap::new(),
-                    gpu_id: cfg
-                        .devices
-                        .first()
-                        .map(|d| d.gpu_id.clone())
-                        .unwrap_or_else(|| GpuId(0)),
-                    gguf_metadata: None,
-                    reserved_vram_bytes: 0,
-                    task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                    started_at: Some(chrono::Utc::now()),
-                    last_restart_at: None,
-                    #[cfg(any(test, feature = "test-utils"))]
-                    test_warm_tps_samples: None,
-                },
-            );
+            mgr.servers
+                .insert(srv.clone(), ServerState::new_starting(srv.clone(), &cfg, orphan_pid));
 
             self.tasks.lock().await.spawn(async move {
                 crate::task::spawn_server_task(mgr, srv, cfg, orphan_pid).await;
@@ -219,38 +181,8 @@ impl ServerManager {
                     let cfg = server_config.clone();
                     let mgr = self.clone();
 
-                    mgr.servers.insert(
-                        srv.clone(),
-                        ServerState {
-                            id: srv.clone(),
-                            lifecycle: ServerLifecycle::Starting,
-                            pid: None,
-                            port: cfg.port,
-                            model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
-                            parallel_slots: cfg.parallel_slots,
-                            ctx_size: cfg.ctx_size,
-                            resolved_ctx_size: cfg.ctx_size,
-                            slots: Vec::new(),
-                            last_health_check: None,
-                            restart_count: 0,
-                            cumulative_requests: 0,
-                            capabilities: None,
-                            first_health_ok_at: None,
-                            last_n_decoded: std::collections::HashMap::new(),
-                            gpu_id: cfg
-                                .devices
-                                .first()
-                                .map(|d| d.gpu_id.clone())
-                                .unwrap_or_else(|| GpuId(0)),
-                            gguf_metadata: None,
-                            reserved_vram_bytes: 0,
-                            task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                            started_at: Some(chrono::Utc::now()),
-                            last_restart_at: None,
-                            #[cfg(any(test, feature = "test-utils"))]
-                            test_warm_tps_samples: None,
-                        },
-                    );
+                    mgr.servers
+                        .insert(srv.clone(), ServerState::new_starting(srv.clone(), &cfg, None));
 
                     self.tasks.lock().await.spawn(async move {
                         crate::task::spawn_server_task(mgr, srv, cfg, None).await;
@@ -273,38 +205,7 @@ impl ServerManager {
                 let cfg = server_config.clone();
                 let mgr = self.clone();
 
-                mgr.servers.insert(
-                    srv.clone(),
-                    ServerState {
-                        id: srv.clone(),
-                        lifecycle: ServerLifecycle::Starting,
-                        pid: None,
-                        port: cfg.port,
-                        model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
-                        parallel_slots: cfg.parallel_slots,
-                        ctx_size: cfg.ctx_size,
-                        resolved_ctx_size: cfg.ctx_size,
-                        slots: Vec::new(),
-                        last_health_check: None,
-                        restart_count: 0,
-                        cumulative_requests: 0,
-                        capabilities: None,
-                        first_health_ok_at: None,
-                        last_n_decoded: std::collections::HashMap::new(),
-                        gpu_id: cfg
-                            .devices
-                            .first()
-                            .map(|d| d.gpu_id.clone())
-                            .unwrap_or_else(|| GpuId(0)),
-                        gguf_metadata: None,
-                        reserved_vram_bytes: 0,
-                        task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                        started_at: Some(chrono::Utc::now()),
-                        last_restart_at: None,
-                        #[cfg(any(test, feature = "test-utils"))]
-                        test_warm_tps_samples: None,
-                    },
-                );
+                mgr.servers.insert(srv.clone(), ServerState::new_starting(srv.clone(), &cfg, None));
 
                 self.tasks.lock().await.spawn(async move {
                     crate::task::spawn_server_task(mgr, srv, cfg, None).await;
@@ -515,38 +416,7 @@ impl ServerManager {
             let cfg = server_config.clone();
             let mgr = self.clone();
 
-            mgr.servers.insert(
-                srv.clone(),
-                ServerState {
-                    id: srv.clone(),
-                    lifecycle: ServerLifecycle::Starting,
-                    pid: None,
-                    port: cfg.port,
-                    model_alias: cfg.alias.clone().unwrap_or_else(|| "default".to_string()),
-                    parallel_slots: cfg.parallel_slots,
-                    ctx_size: cfg.ctx_size,
-                    resolved_ctx_size: cfg.ctx_size,
-                    slots: Vec::new(),
-                    last_health_check: None,
-                    restart_count: 0,
-                    cumulative_requests: 0,
-                    capabilities: None,
-                    first_health_ok_at: None,
-                    last_n_decoded: std::collections::HashMap::new(),
-                    gpu_id: cfg
-                        .devices
-                        .first()
-                        .map(|d| d.gpu_id.clone())
-                        .unwrap_or_else(|| GpuId(0)),
-                    gguf_metadata: None,
-                    reserved_vram_bytes: 0,
-                    task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                    started_at: Some(chrono::Utc::now()),
-                    last_restart_at: None,
-                    #[cfg(any(test, feature = "test-utils"))]
-                    test_warm_tps_samples: None,
-                },
-            );
+            mgr.servers.insert(srv.clone(), ServerState::new_starting(srv.clone(), &cfg, None));
 
             self.tasks.lock().await.spawn(async move {
                 crate::task::spawn_server_task(mgr, srv, cfg, None).await;
@@ -729,31 +599,7 @@ mod tests {
         let srv_id = ServerId::from_config_id("srv_vram");
         manager.servers.insert(
             srv_id.clone(),
-            ServerState {
-                id: srv_id.clone(),
-                lifecycle: ServerLifecycle::Starting,
-                pid: None,
-                port: 8080,
-                model_alias: "test".into(),
-                parallel_slots: 4,
-                ctx_size: 4096,
-                resolved_ctx_size: 4096,
-                slots: vec![],
-                last_health_check: None,
-                restart_count: 0,
-                cumulative_requests: 0,
-                capabilities: None,
-                first_health_ok_at: None,
-                last_n_decoded: HashMap::new(),
-                gpu_id: GpuId(0),
-                gguf_metadata: None,
-                reserved_vram_bytes: 0,
-                task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                started_at: Some(chrono::Utc::now()),
-                last_restart_at: None,
-                #[cfg(any(test, feature = "test-utils"))]
-                test_warm_tps_samples: None,
-            },
+            ServerState::new_starting(srv_id.clone(), &server_config, None),
         );
 
         assert!(manager.pre_spawn_vram_check(&srv_id, &server_config, &gpu, &meta).is_ok());
@@ -783,33 +629,23 @@ mod tests {
         let manager = ServerManager::new(telemetry, config, ingest, metrics, token);
         let srv_id = ServerId::from_config_id("srv1");
 
+        let server_config = llamaforge_core::config::ServerConfig {
+            binary_path: "mock".into(),
+            model_path: "mock".into(),
+            port: 8080,
+            alias: Some("test".into()),
+            parallel_slots: 4,
+            ctx_size: 4096,
+            devices: vec![llamaforge_core::config::DeviceSpec {
+                gpu_id: GpuId(0),
+                layer_range: None,
+            }],
+            ..Default::default()
+        };
+
         manager.servers.insert(
             srv_id.clone(),
-            ServerState {
-                id: srv_id.clone(),
-                lifecycle: ServerLifecycle::Running,
-                pid: None,
-                port: 8080,
-                model_alias: "test".into(),
-                parallel_slots: 4,
-                ctx_size: 4096,
-                resolved_ctx_size: 4096,
-                slots: vec![],
-                last_health_check: None,
-                restart_count: 0,
-                cumulative_requests: 0,
-                capabilities: None,
-                first_health_ok_at: None,
-                last_n_decoded: HashMap::new(),
-                gpu_id: GpuId(0),
-                gguf_metadata: None,
-                reserved_vram_bytes: 0,
-                task_shutdown_token: tokio_util::sync::CancellationToken::new(),
-                started_at: Some(chrono::Utc::now()),
-                last_restart_at: None,
-                #[cfg(any(test, feature = "test-utils"))]
-                test_warm_tps_samples: None,
-            },
+            ServerState::new_starting(srv_id.clone(), &server_config, Some(1234)),
         );
 
         assert_eq!(manager.running_servers().len(), 1);

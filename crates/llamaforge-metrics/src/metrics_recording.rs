@@ -54,6 +54,10 @@ impl MetricsFacadeRecorder {
         describe_gauge!("llamaforge_server_slots_total", "Total available slots");
         describe_counter!("llamaforge_server_restarts_total", "Total server restarts");
         describe_counter!("llamaforge_config_reloads_total", "Total config reloads");
+        describe_gauge!(
+            "llamaforge_scheduler_dispatch_tasks",
+            "Number of tasks in the scheduler's dispatch JoinSet"
+        );
 
         describe_gauge!("llamaforge_sqlite_wal_size_bytes", "Size of the SQLite WAL file");
         describe_gauge!(

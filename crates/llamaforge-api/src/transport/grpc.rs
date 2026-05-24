@@ -22,7 +22,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use tower::{Layer, Service};
 use tower_http::catch_panic::CatchPanicLayer;
 
-use super::{openai::OpenAiChatRequest, HttpAppState, InferenceEngine, TransportError};
+use super::{HttpAppState, InferenceEngine, TransportError};
 
 pub struct GrpcInferenceService {
     inference_engine: Arc<dyn InferenceEngine>,
@@ -46,13 +46,34 @@ impl InferenceService for GrpcInferenceService {
     ) -> Result<Response<Self::StreamInferenceStream>, Status> {
         let req = request.into_inner();
 
-        let openai_req: OpenAiChatRequest = serde_json::from_str(&req.payload)
-            .map_err(|e| Status::invalid_argument(format!("Invalid payload: {}", e)))?;
+        let mut messages = Vec::with_capacity(req.messages.len());
+        for m in req.messages {
+            let role = match m.role.as_str() {
+                "system" => llamaforge_core::types::Role::System,
+                "assistant" => llamaforge_core::types::Role::Assistant,
+                _ => llamaforge_core::types::Role::User,
+            };
+            messages.push(llamaforge_core::types::Message { role, content: m.content });
+        }
 
-        let mut chat_req =
-            super::openai::parse_openai_request(openai_req).map_err(tonic::Status::from)?;
-
-        chat_req.model = req.model;
+        let chat_req = llamaforge_core::types::ChatCompletionRequest {
+            model: req.model.clone(),
+            messages,
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            stream: req.stream,
+            logit_bias: if req.logit_bias.is_empty() {
+                None
+            } else {
+                Some(req.logit_bias.into_iter().collect())
+            },
+            tools: if req.tools.is_empty() { None } else { serde_json::from_str(&req.tools).ok() },
+            tool_choice: if req.tool_choice.is_empty() {
+                None
+            } else {
+                serde_json::from_str(&req.tool_choice).ok()
+            },
+        };
 
         // Mirror the HTTP shim: validate the model is routable before
         // calling chat_completion. Map admission errors to the
@@ -637,15 +658,18 @@ mod tests {
         let url = format!("http://{}", bound);
         let mut client = InferenceServiceClient::connect(url).await.unwrap();
 
-        let payload = serde_json::json!({
-            "model": "test",
-            "messages": [{"role": "user", "content": "hi"}],
-            "stream": true
-        });
-
         let req = tonic::Request::new(InferenceRequest {
             model: "test".to_string(),
-            payload: payload.to_string(),
+            messages: vec![llamaforge_proto::inference::ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            max_tokens: None,
+            temperature: None,
+            stream: true,
+            logit_bias: std::collections::HashMap::new(),
+            tools: String::new(),
+            tool_choice: String::new(),
         });
 
         let mut stream = client.stream_inference(req).await.unwrap().into_inner();

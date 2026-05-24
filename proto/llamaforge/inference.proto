@@ -6,9 +6,20 @@ service InferenceService {
   rpc StreamInference (InferenceRequest) returns (stream InferenceResponse);
 }
 
+message ChatMessage {
+  string role = 1;
+  string content = 2;
+}
+
 message InferenceRequest {
   string model = 1;
-  string payload = 2; // JSON-encoded ChatCompletionRequest for v1 simplicity
+  repeated ChatMessage messages = 2;
+  optional uint32 max_tokens = 3;
+  optional float temperature = 4;
+  bool stream = 5;
+  map<int32, double> logit_bias = 6;
+  string tools = 7; // JSON-encoded tools array
+  string tool_choice = 8; // JSON-encoded tool_choice object
 }
 
 message InferenceResponse {
