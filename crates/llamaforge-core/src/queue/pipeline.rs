@@ -146,6 +146,7 @@ pub async fn run_scheduler(
     });
 
     loop {
+        metrics::gauge!("llamaforge_scheduler_dispatch_tasks").set(dispatch_tasks.len() as f64);
         tokio::select! {
             _ = shutdown.cancelled() => {
                 info!("Shutdown signal received, draining queue");
