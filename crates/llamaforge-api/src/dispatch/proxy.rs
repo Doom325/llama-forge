@@ -4,7 +4,7 @@
 
 use super::client::BackendClient;
 use super::dispatcher::CompletionRequest;
-use super::error::{CancellationPhase, StreamError};
+use super::error::{CancellationPhase, DispatchError, HttpStatus, StreamError};
 use super::slot_map::SlotDispatchMap;
 use super::token::DispatchToken;
 use futures_util::StreamExt;
@@ -113,8 +113,32 @@ pub async fn proxy_task(
     // backend that accepts the TCP connection but never writes a response
     // cannot pin this dispatch slot indefinitely (the reqwest connect_timeout
     // only covers TCP handshake, not waiting for response headers).
-    let connect_future =
-        timeout(Duration::from_secs(30), client.post_completion(&server_id, request));
+    let connect_future = async {
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let res = client.post_completion(&server_id, request.clone()).await;
+            match res {
+                Ok(s) => return Ok(s),
+                Err(e) if attempts < 2 => {
+                    let should_retry = matches!(
+                        e,
+                        DispatchError::ConnectionFailed(_)
+                            | DispatchError::BackendError { status: HttpStatus(503) }
+                            | DispatchError::Timeout
+                    );
+                    if should_retry {
+                        tracing::debug!(error = %e, attempt = attempts, "dispatch.retry_scheduled");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    };
+    let connect_future = timeout(Duration::from_secs(30), connect_future);
 
     let mut stream = tokio::select! {
         biased;
