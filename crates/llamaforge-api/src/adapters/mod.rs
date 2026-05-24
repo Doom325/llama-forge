@@ -2,7 +2,6 @@
 //! See design doc §4.2 Hexagonal layering.
 
 pub mod audit;
-pub mod inference_engine;
 pub mod metrics_exporter;
 pub mod queue;
 pub mod server_control;

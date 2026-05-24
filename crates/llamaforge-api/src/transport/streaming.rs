@@ -1,7 +1,17 @@
-//! `InferenceEngineAdapter` — the keystone adapter that wires queue, routing,
-//! dispatch and metrics into the `InferenceEngine` port consumed by transport.
+//! `StreamingInferenceService` — transport's stream handler that wires
+//! queue, routing, dispatch and metrics behind the `InferenceEngine`
+//! trait consumed by the HTTP/gRPC entrypoints in this same crate.
 //!
 //! See design doc §4.2 (Hexagonal layering) and §5.4 (Request lifecycle).
+//!
+//! ## History
+//!
+//! Until issue #192 this type lived under `adapters/inference_engine.rs`
+//! and was named `InferenceEngineAdapter`. After Phase 9 PR3 collapsed
+//! `transport`/`adapters`/`dispatch` into a single crate, the "Adapter"
+//! suffix no longer crossed a real boundary, so it was renamed and moved
+//! next to the transport entrypoints it serves. The behavior is
+//! unchanged.
 //!
 //! ## SmartRouter integration
 //!
@@ -9,7 +19,7 @@
 //! `llamaforge-queue::pipeline::run_scheduler`), which calls
 //! `ServerSelector::select_server` and emits the picked
 //! `(server_id, slot_id)` on the `DispatchEvent::Dispatched` channel
-//! carried by `QueueTicket`. This adapter therefore does **not** call
+//! carried by `QueueTicket`. This service therefore does **not** call
 //! `Router::select` directly; it forwards the scheduler's pick into
 //! `Dispatcher::dispatch` via `RoutingDecision::for_scheduler_pick`.
 
@@ -18,8 +28,8 @@ use futures_core::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use super::InferenceEngine;
 use crate::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
-use crate::transport::InferenceEngine;
 use llamaforge_core::routing::{Router, RoutingDecision};
 use llamaforge_core::types::traits::{
     DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
@@ -30,9 +40,9 @@ use llamaforge_core::types::{
 };
 use llamaforge_metrics::MetricsIngest;
 
-/// Adapter implementing [`InferenceEngine`] by composing the queue, router,
-/// dispatcher and metrics layers. See module-level docs.
-pub struct InferenceEngineAdapter {
+/// Transport-side service implementing [`InferenceEngine`] by composing
+/// the queue, router, dispatcher and metrics layers. See module-level docs.
+pub struct StreamingInferenceService {
     queue: Arc<dyn QueueSubmitter>,
     /// Held for future RAG/affinity decisions made outside the scheduler
     /// hot path; not consulted by `chat_completion` today (see module docs).
@@ -42,7 +52,7 @@ pub struct InferenceEngineAdapter {
     metrics: Arc<MetricsIngest>,
 }
 
-impl InferenceEngineAdapter {
+impl StreamingInferenceService {
     pub fn new(
         queue: Arc<dyn QueueSubmitter>,
         router: Arc<Router>,
@@ -82,7 +92,7 @@ fn role_str(r: &Role) -> &'static str {
 }
 
 #[async_trait::async_trait]
-impl InferenceEngine for InferenceEngineAdapter {
+impl InferenceEngine for StreamingInferenceService {
     async fn chat_completion(
         &self,
         req: ChatCompletionRequest,
@@ -198,7 +208,7 @@ impl InferenceEngine for InferenceEngineAdapter {
             // and aggregates `RequestMetrics`.
             let (audit_tx, mut audit_rx) = tokio::sync::mpsc::channel(32);
             let metrics_for_audit = metrics_for_audit.clone();
-            let audit_ctx = super::audit::AuditContext {
+            let audit_ctx = crate::adapters::audit::AuditContext {
                 model_name: audit_model.clone(),
                 requestor: llamaforge_core::config::RequestorId("anonymous".to_string()),
                 task_type: llamaforge_core::config::TaskTypeId("default".to_string()),
@@ -206,7 +216,7 @@ impl InferenceEngine for InferenceEngineAdapter {
             };
             tokio::spawn(async move {
                 while let Some(record) = audit_rx.recv().await {
-                    let translated = super::audit::translate_audit(record, &audit_ctx);
+                    let translated = crate::adapters::audit::translate_audit(record, &audit_ctx);
                     if let Err(e) = metrics_for_audit.send_audit(translated).await {
                         tracing::debug!(error = %e, "inference_engine.audit_send_failed");
                     }
@@ -482,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn translates_request_into_incoming_fields() {
         let queue = MockQueue::new();
-        let adapter = InferenceEngineAdapter::new(
+        let adapter = StreamingInferenceService::new(
             queue.clone() as Arc<dyn QueueSubmitter>,
             test_router(),
             build_dispatcher(ScriptedBackend::new(vec![])),
@@ -511,7 +521,7 @@ mod tests {
             Ok(llama_chunk("lo", false)),
             Ok(llama_chunk("", true)),
         ]);
-        let adapter = InferenceEngineAdapter::new(
+        let adapter = StreamingInferenceService::new(
             queue.clone() as Arc<dyn QueueSubmitter>,
             test_router(),
             build_dispatcher(backend),
@@ -549,7 +559,7 @@ mod tests {
             Ok(llama_chunk("partial", false)),
             Err(crate::dispatch::error::StreamError::BackendDisconnect),
         ]);
-        let adapter = InferenceEngineAdapter::new(
+        let adapter = StreamingInferenceService::new(
             queue.clone() as Arc<dyn QueueSubmitter>,
             test_router(),
             build_dispatcher(backend),
@@ -584,7 +594,7 @@ mod tests {
     #[tokio::test]
     async fn cancellation_ends_stream() {
         let queue = MockQueue::new();
-        let adapter = InferenceEngineAdapter::new(
+        let adapter = StreamingInferenceService::new(
             queue.clone() as Arc<dyn QueueSubmitter>,
             test_router(),
             build_dispatcher(ScriptedBackend::new(vec![])),

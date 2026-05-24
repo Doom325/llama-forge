@@ -22,7 +22,6 @@
 
 use std::sync::Arc;
 
-use llamaforge_api::adapters::inference_engine::InferenceEngineAdapter;
 use llamaforge_api::adapters::metrics_exporter::MetricsExporterAdapter;
 use llamaforge_api::adapters::queue::QueueSubmitterAdapter;
 use llamaforge_api::adapters::server_control::ServerControlAdapter;
@@ -30,6 +29,7 @@ use llamaforge_api::dispatch::client::ReqwestClientStore;
 use llamaforge_api::dispatch::dispatcher::Dispatcher;
 use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
 use llamaforge_api::dispatch::tracker::{DispatchCountAdapter, DispatchTrackerRegistry};
+use llamaforge_api::transport::streaming::StreamingInferenceService;
 use llamaforge_api::transport::TransportDeps;
 use llamaforge_core::config::{ConfigHandle, ConfigReader};
 use llamaforge_core::queue::admission::AdmissionController;
@@ -106,7 +106,7 @@ pub async fn build(
     let router = Arc::new(Router::new(config.clone(), server_state_view.clone(), dispatch_counts));
 
     // 6) Queue + scheduler. Routing is performed by the scheduler loop,
-    //    not the dispatch adapter (see InferenceEngineAdapter docs).
+    //    not the dispatch adapter (see StreamingInferenceService docs).
     let queue_depth = Arc::new(AtomicU32::new(0));
     let admission =
         Arc::new(AdmissionController::new(config.clone(), queue_depth.clone(), router.clone()));
@@ -164,7 +164,7 @@ pub async fn build(
     let server_control = Arc::new(ServerControlAdapter::new(server_manager.clone()));
 
     // 10) The keystone — wires queue/router/dispatcher/metrics.
-    let inference_engine = Arc::new(InferenceEngineAdapter::new(
+    let inference_engine = Arc::new(StreamingInferenceService::new(
         queue_submitter.clone(),
         router.clone(),
         dispatcher.clone(),

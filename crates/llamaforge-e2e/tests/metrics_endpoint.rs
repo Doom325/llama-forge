@@ -83,7 +83,7 @@ async fn test_e2e_metrics_endpoint() {
         metrics.contains("llamaforge_active_connections"),
         "expected llamaforge_active_connections gauge in /metrics"
     );
-    // `llamaforge_tokens_total` is incremented by `InferenceEngineAdapter`
+    // `llamaforge_tokens_total` is incremented by `StreamingInferenceService`
     // on the streaming Stop chunk; the non-streaming path in this test
     // doesn't exercise it directly. The aggregate counter family is
     // present (the inference adapter declares it at build time even at
