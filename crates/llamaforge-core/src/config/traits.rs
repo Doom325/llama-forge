@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Read-only access to the configuration.
-pub trait ConfigReader: Send + Sync + private::Sealed {
+pub trait ConfigReader: Send + Sync {
     /// Get a zero-cost snapshot of the current configuration.
     ///
     /// Implementation contract: returns a Guard from `arc_swap::ArcSwap::load`.
