@@ -251,7 +251,7 @@ impl Dispatcher {
         };
 
         // Forward reconciliation: detects orphaned slots
-        use llamaforge_core::types::ports::SlotDispatchView;
+
         for &slot_id in processing_slots {
             if self.slot_dispatch_map.get_request_for_slot(server_id, &slot_id).is_none() {
                 let key = (*server_id, slot_id);
