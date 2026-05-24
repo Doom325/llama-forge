@@ -9,7 +9,7 @@ pub(crate) struct OpenAiMessage {
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct OpenAiChatRequest {
     pub model: String,
     pub messages: Vec<OpenAiMessage>,
@@ -79,6 +79,23 @@ pub(crate) fn parse_openai_request(
     }
     if request.messages.is_empty() {
         return Err(ApiError::InvalidBody("messages must contain at least one entry".to_string()));
+    }
+
+    if let Some(temp) = request.temperature {
+        if !(0.0..=2.0).contains(&temp) {
+            return Err(ApiError::InvalidBody(format!(
+                "temperature must be between 0.0 and 2.0, got {}",
+                temp
+            )));
+        }
+    }
+    if let Some(max) = request.max_tokens {
+        if max == 0 || max > 131072 {
+            return Err(ApiError::InvalidBody(format!(
+                "max_tokens must be between 1 and 131072, got {}",
+                max
+            )));
+        }
     }
 
     let mut messages = Vec::with_capacity(request.messages.len());
@@ -280,6 +297,44 @@ mod tests {
             matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("unsupported role")),
             "unknown role must surface as InvalidBody, got {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_openai_out_of_range_rejected() {
+        let mut req = OpenAiChatRequest {
+            model: "llama".to_string(),
+            messages: vec![OpenAiMessage { role: "user".to_string(), content: "foo".to_string() }],
+            max_tokens: Some(0),
+            temperature: None,
+            stream: false,
+            logit_bias: None,
+            tools: None,
+            tool_choice: None,
+            function_call: None,
+        };
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = Some(200000);
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = Some(100);
+        req.temperature = Some(-0.1);
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
+        );
+
+        req.temperature = Some(2.1);
+        let result = parse_openai_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
         );
     }
 }
