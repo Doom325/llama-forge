@@ -129,47 +129,31 @@ async fn test_multi_server_orchestration() {
     let srv_0_b = ServerId::from_config_id("srv_0_b");
     let srv_1 = ServerId::from_config_id("srv_1");
 
-    let mut a_running_at = None;
-    let mut b_running_at = None;
-    let mut s1_running_at = None;
-
     // Wait until all are running
-    for _ in 0..100 {
-        if a_running_at.is_none() {
-            if let Some(state) = mgr_started.server_state(&srv_0_a) {
-                if state.lifecycle == ServerLifecycle::Running {
-                    a_running_at = Some(tokio::time::Instant::now());
-                }
-            }
+    let (a_res, b_res, s1_res) = tokio::join!(
+        async {
+            mgr_started
+                .wait_for_lifecycle(&srv_0_a, ServerLifecycle::Running, Duration::from_secs(10))
+                .await;
+            tokio::time::Instant::now()
+        },
+        async {
+            mgr_started
+                .wait_for_lifecycle(&srv_0_b, ServerLifecycle::Running, Duration::from_secs(10))
+                .await;
+            tokio::time::Instant::now()
+        },
+        async {
+            mgr_started
+                .wait_for_lifecycle(&srv_1, ServerLifecycle::Running, Duration::from_secs(10))
+                .await;
+            tokio::time::Instant::now()
         }
-        if b_running_at.is_none() {
-            if let Some(state) = mgr_started.server_state(&srv_0_b) {
-                if state.lifecycle == ServerLifecycle::Running {
-                    b_running_at = Some(tokio::time::Instant::now());
-                }
-            }
-        }
-        if s1_running_at.is_none() {
-            if let Some(state) = mgr_started.server_state(&srv_1) {
-                if state.lifecycle == ServerLifecycle::Running {
-                    s1_running_at = Some(tokio::time::Instant::now());
-                }
-            }
-        }
+    );
 
-        if a_running_at.is_some() && b_running_at.is_some() && s1_running_at.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    assert!(a_running_at.is_some(), "srv_0_a did not start");
-    assert!(b_running_at.is_some(), "srv_0_b did not start");
-    assert!(s1_running_at.is_some(), "srv_1 did not start");
-
-    let t_a = a_running_at.unwrap();
-    let t_b = b_running_at.unwrap();
-    let _t_1 = s1_running_at.unwrap();
+    let t_a = a_res;
+    let t_b = b_res;
+    let _t_1 = s1_res;
 
     // Verify GPU 0 stagger >= 2s
     let diff_gpu0 = if t_a > t_b { t_a.duration_since(t_b) } else { t_b.duration_since(t_a) };

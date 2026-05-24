@@ -92,32 +92,18 @@ async fn test_degradation_e2e_restart() {
     let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
-    let mut is_running = false;
-    for _ in 0..100 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_running = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+        .await;
     assert!(is_running);
 
     // Warm up TPS window
     mgr_started.force_warm_tps_window_for_test(&srv_id, 30, 10.0);
 
     // Wait for restart (3 ticks * 10s = ~30s)
-    let mut restarted = false;
-    for _ in 0..400 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                restarted = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let restarted = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(40))
+        .await;
     assert!(restarted, "Server should have restarted due to degradation");
 
     mgr_started.shutdown_all().await;
@@ -153,16 +139,9 @@ async fn test_degradation_e2e_no_restart() {
     let srv_id = ServerId::from_config_id("srv_deg");
 
     // Wait for Running
-    let mut is_running = false;
-    for _ in 0..100 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    let is_running = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+        .await;
     assert!(is_running);
 
     // Warm up TPS window

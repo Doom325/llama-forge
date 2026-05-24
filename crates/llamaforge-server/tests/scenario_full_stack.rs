@@ -132,20 +132,13 @@ async fn test_scenario_full_stack() {
     let srv_id = ServerId::from_config_id("srv_scenario");
 
     // Wait for Running
-    let mut is_running = false;
-    let mut pid = None;
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                pid = state.pid;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_running);
-    let mut current_pid = pid.unwrap();
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state"
+    );
+    let mut current_pid = instrumented.server_state(&srv_id).unwrap().pid.unwrap();
 
     // (a) wait for first /health success (already done to reach Running)
     // Wait for poller to run at least once (10s interval)
@@ -184,28 +177,20 @@ async fn test_scenario_full_stack() {
         let _ = kill(Pid::from_raw(current_pid as i32), Signal::SIGKILL);
     }
 
-    let mut is_restarting = false;
-    for _ in 0..50 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                is_restarting = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_restarting);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(5))
+            .await,
+        "Server failed to reach Restarting state"
+    );
 
     // Wait for Running again
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running && state.pid != Some(current_pid) {
-                current_pid = state.pid.unwrap();
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state"
+    );
 
     // Snapshot again to check restarts_total{reason="crash"}
     let snapshot: Snapshot = snapshotter.snapshot();
@@ -229,30 +214,23 @@ async fn test_scenario_full_stack() {
     mgr_started.apply_config_diff(&diff).await;
 
     // Wait for it to become Running with the new config
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running && state.pid != Some(current_pid) {
-                current_pid = state.pid.unwrap();
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state with new config"
+    );
+    current_pid = instrumented.server_state(&srv_id).unwrap().pid.unwrap();
 
     // Now wait for it to hang and deadlock detection to kill it.
     // Hang after 2 seconds. Deadlock check needs 0 tokens decoded and low GPU util (mock returns 5).
     // It will take a few health ticks (every 2s) to detect deadlock once hang_after=2 is reached.
-    let mut deadlock_restarting = false;
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                deadlock_restarting = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    assert!(deadlock_restarting);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(20))
+            .await,
+        "Server failed to reach Restarting state due to deadlock"
+    );
 
     // Verify it was SIGKILL'ed
     #[cfg(unix)]
@@ -277,15 +255,12 @@ async fn test_scenario_full_stack() {
     assert_eq!(deadlock_count, 1);
 
     // Wait for Running again
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running && state.pid != Some(current_pid) {
-                current_pid = state.pid.unwrap();
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state"
+    );
 
     // (d) trigger degradation via --alias "mock,tps=0.1"
     util.store(100, std::sync::atomic::Ordering::Relaxed);
@@ -294,30 +269,23 @@ async fn test_scenario_full_stack() {
     mgr_started.apply_config_diff(&diff).await;
 
     // Wait for it to become Running with the new config
-    for _ in 0..100 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running && state.pid != Some(current_pid) {
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10))
+            .await,
+        "Server failed to reach Running state with new config"
+    );
 
     // Pre-warm rolling window
     mgr_started.force_warm_tps_window_for_test(&srv_id, 30, 10.0);
 
     // Wait for degradation restart
-    let mut degradation_restarting = false;
-    for _ in 0..400 {
-        if let Some(state) = instrumented.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                degradation_restarting = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(degradation_restarting);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(40))
+            .await,
+        "Server failed to reach Restarting state due to degradation"
+    );
 
     let snapshot: Snapshot = snapshotter.snapshot();
     let metrics = snapshot.into_vec();

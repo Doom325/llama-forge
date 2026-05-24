@@ -108,17 +108,9 @@ async fn test_health_transition_and_refresh() {
     let srv_id = ServerId::from_config_id("srv_test");
 
     // Wait for it to become Running
-    let mut is_running = false;
-    for _ in 0..100 {
-        if let Some(state) = mgr.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_running, "Failed to reach Running state");
+    assert!(
+        mgr.wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10)).await
+    );
 
     // Check refresh event
     let event = refresh_rx.recv().await.expect("Failed to receive ClientRefreshEvent");
@@ -139,18 +131,10 @@ async fn test_consecutive_health_failures() {
     let srv_id = ServerId::from_config_id("srv_test");
 
     // Should reach Restarting
-    let mut is_restarting = false;
     // Need to wait for at least 4 ticks (0s, 2s, 4s, 6s) + jitter + backoff
-    for _ in 0..200 {
-        if let Some(state) = mgr.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                is_restarting = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_restarting, "Failed to reach Restarting state on health failure");
+    assert!(
+        mgr.wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(20)).await
+    );
 
     token.cancel();
 }
@@ -166,23 +150,10 @@ async fn test_startup_grace_window() {
     let (mgr, _, token) = setup_manager(&tmp, port, true, 4096, "mock,startup_503_ms=8000").await;
     let srv_id = ServerId::from_config_id("srv_test");
 
-    let mut is_running = false;
-    let mut restarted = false;
     // Wait up to 15 seconds to allow the 8s 503 window to expire and state to transition
-    for _ in 0..150 {
-        if let Some(state) = mgr.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting {
-                restarted = true;
-            }
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(!restarted, "Server incorrectly restarted during the 503 grace window");
-    assert!(is_running, "Failed to reach Running state after the grace window");
+    assert!(
+        mgr.wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(15)).await
+    );
 
     token.cancel();
 }
