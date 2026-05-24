@@ -32,7 +32,7 @@ use super::InferenceEngine;
 use crate::dispatch::dispatcher::{CompletionParams, DispatchCandidate, Dispatcher};
 use llamaforge_core::routing::{Router, RoutingDecision};
 use llamaforge_core::types::traits::{
-    DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
+    AdmissionError, DispatchError, DispatchEvent, IncomingRequest, QueueSubmitter,
 };
 use llamaforge_core::types::{
     ChatCompletionChunk, ChatCompletionRequest, GenerationParams, ModelAlias, ModelTarget,
@@ -128,7 +128,19 @@ impl InferenceEngine for StreamingInferenceService {
             submitted_at: chrono::Utc::now(),
         };
 
-        let mut ticket = self.queue.submit(incoming).map_err(|_| DispatchError::Failed)?;
+        let mut ticket = self.queue.submit(incoming).map_err(|e| match e {
+            AdmissionError::NoServerForModel { model } => {
+                DispatchError::NoServerForModel { model: model.to_string() }
+            }
+            AdmissionError::QueueFull => DispatchError::QueueFull,
+            AdmissionError::RateLimited { retry_after_secs } => {
+                DispatchError::RateLimited { retry_after_secs }
+            }
+            AdmissionError::InvalidRequest { reason } => DispatchError::Internal { reason },
+            AdmissionError::Cancelled => {
+                DispatchError::Internal { reason: "Cancelled".to_string() }
+            }
+        })?;
 
         let prompt = render_prompt(&req.messages);
         // Always stream from the backend regardless of `req.stream`:

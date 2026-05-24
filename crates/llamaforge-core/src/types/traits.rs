@@ -47,8 +47,14 @@ pub trait ActiveRequestProvider: Send + Sync {
 
 #[derive(Debug, Error)]
 pub enum DispatchError {
-    #[error("Dispatch failed")]
-    Failed,
+    #[error("Queue full")]
+    QueueFull,
+    #[error("No server for model: {model}")]
+    NoServerForModel { model: String },
+    #[error("Rate limited, retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u32 },
+    #[error("Dispatch failed: {reason}")]
+    Internal { reason: String },
 }
 
 /// Reason for a request being dequeued.
