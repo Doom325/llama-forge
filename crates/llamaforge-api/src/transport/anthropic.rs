@@ -41,7 +41,13 @@ pub(crate) fn parse_anthropic_request(
     for m in request.messages {
         let role = match m.role.as_str() {
             "assistant" => Role::Assistant,
-            _ => Role::User,
+            "user" => Role::User,
+            unknown => {
+                return Err(ApiError::InvalidBody(format!(
+                    "unsupported role: '{}'; expected assistant or user",
+                    unknown
+                )))
+            }
         };
         messages.push(Message { role, content: m.content });
     }

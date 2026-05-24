@@ -86,7 +86,13 @@ pub(crate) fn parse_openai_request(
         let role = match m.role.as_str() {
             "system" => Role::System,
             "assistant" => Role::Assistant,
-            _ => Role::User,
+            "user" => Role::User,
+            unknown => {
+                return Err(ApiError::InvalidBody(format!(
+                    "unsupported role: '{}'; expected system, assistant, or user",
+                    unknown
+                )))
+            }
         };
         messages.push(Message { role, content: m.content });
     }
