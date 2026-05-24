@@ -8,12 +8,13 @@ pub(crate) struct AnthropicMessage {
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct AnthropicMessagesRequest {
     pub model: String,
     pub messages: Vec<AnthropicMessage>,
     pub system: Option<String>,
     pub max_tokens: u32,
+    pub temperature: Option<f32>,
     #[serde(default)]
     pub stream: bool,
     pub tools: Option<serde_json::Value>,
@@ -30,6 +31,22 @@ pub(crate) fn parse_anthropic_request(
 ) -> Result<ChatCompletionRequest, ApiError> {
     if request.messages.is_empty() {
         return Err(ApiError::InvalidBody("messages must contain at least one entry".to_string()));
+    }
+
+    if let Some(temp) = request.temperature {
+        if !(0.0..=2.0).contains(&temp) {
+            return Err(ApiError::InvalidBody(format!(
+                "temperature must be between 0.0 and 2.0, got {}",
+                temp
+            )));
+        }
+    }
+
+    if request.max_tokens == 0 || request.max_tokens > 131072 {
+        return Err(ApiError::InvalidBody(format!(
+            "max_tokens must be between 1 and 131072, got {}",
+            request.max_tokens
+        )));
     }
 
     let mut messages = Vec::with_capacity(request.messages.len() + 1);
@@ -56,7 +73,7 @@ pub(crate) fn parse_anthropic_request(
         model: request.model,
         messages,
         max_tokens: Some(request.max_tokens),
-        temperature: None,
+        temperature: request.temperature,
         stream: request.stream,
         logit_bias: None,
         tools: request.tools,
@@ -280,6 +297,7 @@ mod tests {
             messages: vec![],
             system: None,
             max_tokens: 100,
+            temperature: None,
             stream: false,
             tools: None,
             tool_choice: None,
@@ -302,6 +320,7 @@ mod tests {
             }],
             system: Some("You are a helpful assistant.".to_string()),
             max_tokens: 100,
+            temperature: None,
             stream: false,
             tools: None,
             tool_choice: None,
@@ -405,6 +424,7 @@ mod tests {
             }],
             system: None,
             max_tokens: 100,
+            temperature: None,
             stream: false,
             tools: None,
             tool_choice: None,
@@ -414,6 +434,46 @@ mod tests {
             matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("unsupported role")),
             "unknown role must surface as InvalidBody, got {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_anthropic_out_of_range_rejected() {
+        let mut req = AnthropicMessagesRequest {
+            model: "claude".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            system: None,
+            max_tokens: 0,
+            temperature: None,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+        };
+        let res = parse_anthropic_request(req.clone());
+        assert!(
+            matches!(res, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = 200000;
+        let res = parse_anthropic_request(req.clone());
+        assert!(
+            matches!(res, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = 100;
+        req.temperature = Some(-0.1);
+        let res = parse_anthropic_request(req.clone());
+        assert!(
+            matches!(res, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
+        );
+
+        req.temperature = Some(2.1);
+        let res = parse_anthropic_request(req);
+        assert!(
+            matches!(res, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
         );
     }
 }
