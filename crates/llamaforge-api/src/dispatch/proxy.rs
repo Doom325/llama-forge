@@ -125,7 +125,6 @@ pub async fn proxy_task(
                         e,
                         DispatchError::ConnectionFailed(_)
                             | DispatchError::BackendError { status: HttpStatus(503) }
-                            | DispatchError::Timeout
                     );
                     if should_retry {
                         tracing::debug!(error = %e, attempt = attempts, "dispatch.retry_scheduled");

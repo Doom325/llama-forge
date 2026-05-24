@@ -348,6 +348,52 @@ async fn test_6_16_connection_refused() {
 }
 
 #[tokio::test]
+async fn test_6_16b_connection_refused_recovers() {
+    let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
+    let err = DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "refused",
+    )));
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        // Provide ONE error. The retry should consume the error, and the next attempt will succeed.
+        error_on_connect: Mutex::new(vec![err]),
+        delay: None,
+        chunk_delay: None,
+    });
+
+    proxy_task(token, client, req, tx, Arc::new(MockSlotNotifier), audit_tx, cancel, map).await;
+
+    let chunk = rx.recv().await.unwrap();
+    assert!(chunk.is_ok());
+
+    let audit = audit_rx.recv().await.unwrap();
+    assert!(audit.success);
+}
+
+#[tokio::test]
+async fn test_6_16c_http_503_recovers() {
+    let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
+    let err =
+        DispatchError::BackendError { status: llamaforge_api::dispatch::error::HttpStatus(503) };
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        // Provide ONE error. The retry should consume the error, and the next attempt will succeed.
+        error_on_connect: Mutex::new(vec![err]),
+        delay: None,
+        chunk_delay: None,
+    });
+
+    proxy_task(token, client, req, tx, Arc::new(MockSlotNotifier), audit_tx, cancel, map).await;
+
+    let chunk = rx.recv().await.unwrap();
+    assert!(chunk.is_ok());
+
+    let audit = audit_rx.recv().await.unwrap();
+    assert!(audit.success);
+}
+
+#[tokio::test]
 async fn test_6_17_backend_http_500() {
     let (token, tx, mut rx, audit_tx, _audit_rx, cancel, map, req, _) = setup();
     let err =
