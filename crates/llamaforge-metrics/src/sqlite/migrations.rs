@@ -92,5 +92,12 @@ pub fn get_migrations() -> Migrations<'static> {
         ALTER TABLE managed_processes ADD COLUMN model_alias TEXT NOT NULL DEFAULT '';
         "#,
         ),
+        M::up(
+            r#"
+        ALTER TABLE request_metrics ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE audit_events ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE config_snapshots ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+        "#,
+        ),
     ])
 }
