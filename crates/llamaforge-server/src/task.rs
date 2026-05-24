@@ -124,7 +124,10 @@ pub async fn spawn_server_task(
             child = crate::process::ProcessHandle::Orphan(pid);
             if let Some(mut state) = mgr.servers.get_mut(&server_id) {
                 state.pid = Some(pid);
-                state.lifecycle = ServerLifecycle::Running;
+                match state.lifecycle.transition_to(ServerLifecycle::Running) {
+                    Ok(s) => state.lifecycle = s,
+                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+                }
                 state.first_health_ok_at = Some(std::time::Instant::now());
             }
         } else {
@@ -213,7 +216,10 @@ pub async fn spawn_server_task(
             if let Some(mut state) = mgr.servers.get_mut(&server_id) {
                 state.pid = Some(pid);
                 state.restart_count = restart_count;
-                state.lifecycle = ServerLifecycle::Starting;
+                match state.lifecycle.transition_to(ServerLifecycle::Starting) {
+                    Ok(s) => state.lifecycle = s,
+                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+                }
             }
         }
 
@@ -523,7 +529,10 @@ async fn monitor_loop(
                                     }
 
                                     if let Some(mut state2) = mgr.servers.get_mut(server_id) {
-                                        state2.lifecycle = ServerLifecycle::Running;
+                                        match state2.lifecycle.transition_to(ServerLifecycle::Running) {
+                                            Ok(s) => state2.lifecycle = s,
+                                            Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+                                        }
                                         state2.first_health_ok_at = Some(std::time::Instant::now());
                                     }
 
@@ -699,7 +708,10 @@ async fn monitor_loop(
 
 fn transition_to(mgr: &ServerManager, server_id: &ServerId, new_state: ServerLifecycle) {
     if let Some(mut state) = mgr.servers.get_mut(server_id) {
-        state.lifecycle = new_state;
+        match state.lifecycle.transition_to(new_state) {
+            Ok(s) => state.lifecycle = s,
+            Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+        }
     }
 }
 

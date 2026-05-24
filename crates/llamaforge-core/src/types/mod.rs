@@ -198,6 +198,34 @@ pub enum ServerLifecycle {
     Failed,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Illegal state transition from {from:?} to {to:?}")]
+pub struct IllegalTransition {
+    pub from: ServerLifecycle,
+    pub to: ServerLifecycle,
+}
+
+impl ServerLifecycle {
+    pub fn transition_to(self, target: ServerLifecycle) -> Result<ServerLifecycle, IllegalTransition> {
+        if self == target {
+            return Ok(target);
+        }
+        let allowed = match self {
+            Self::Stopped    => &[Self::Starting][..],
+            Self::Starting   => &[Self::Running, Self::Failed, Self::Stopped],
+            Self::Running    => &[Self::Draining, Self::Restarting, Self::Failed, Self::Stopped],
+            Self::Draining   => &[Self::Stopped, Self::Failed],
+            Self::Restarting => &[Self::Starting, Self::Failed, Self::Stopped],
+            Self::Failed     => &[Self::Starting, Self::Stopped],
+        };
+        if allowed.contains(&target) {
+            Ok(target)
+        } else {
+            Err(IllegalTransition { from: self, to: target })
+        }
+    }
+}
+
 impl ServerId {
     pub fn new(id: Uuid) -> Self {
         Self(id)
