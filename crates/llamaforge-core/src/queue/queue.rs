@@ -11,9 +11,9 @@ use tokio::sync::watch;
 /// The internal multi-tier priority queue.
 ///
 /// **Known Bottleneck (M27):** This `FlatPriorityQueue` is wrapped in a `std::sync::Mutex`
-/// within `DispatchQueue`. The `try_dispatch_scan` method performs an O(N) linear scan 
-/// over the queue under this lock. Under significant load with deep queues, this scan 
-/// will become a bottleneck. A future scaling improvement should partition this structure 
+/// within `DispatchQueue`. The `try_dispatch_scan` method performs an O(N) linear scan
+/// over the queue under this lock. Under significant load with deep queues, this scan
+/// will become a bottleneck. A future scaling improvement should partition this structure
 /// by `ModelAlias` to reduce the scan to O(per_model_depth).
 pub(crate) struct FlatPriorityQueue {
     queue: BTreeMap<Reverse<u32>, VecDeque<QueuedRequest>>,
