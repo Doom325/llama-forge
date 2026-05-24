@@ -23,6 +23,9 @@ async fn test_e2e_grpc_streaming() {
         stream: true,
         max_tokens: None,
         temperature: None,
+        logit_bias: std::collections::HashMap::new(),
+        tools: String::new(),
+        tool_choice: String::new(),
     });
     let mut stream = client.stream_inference(req).await.expect("stream_inference").into_inner();
 

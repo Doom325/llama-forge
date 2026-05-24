@@ -193,6 +193,9 @@ async fn test_vc3_3_grpc_streaming_lifecycle() {
             max_tokens: None,
             temperature: None,
             stream: true,
+            logit_bias: std::collections::HashMap::new(),
+            tools: String::new(),
+            tool_choice: String::new(),
         })
         .await
         .unwrap()
@@ -359,6 +362,9 @@ async fn test_vc3_6_auth_on_both_transports() {
         max_tokens: None,
         temperature: None,
         stream: true,
+        logit_bias: std::collections::HashMap::new(),
+        tools: String::new(),
+        tool_choice: String::new(),
     });
 
     let grpc_res = grpc_client.stream_inference(req).await;
@@ -670,6 +676,9 @@ async fn test_vc3_14_panic_recovery_grpc() {
         max_tokens: None,
         temperature: None,
         stream: true,
+        logit_bias: std::collections::HashMap::new(),
+        tools: String::new(),
+        tool_choice: String::new(),
     });
 
     let grpc_res = grpc_client.stream_inference(req).await;

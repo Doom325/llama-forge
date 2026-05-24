@@ -62,9 +62,17 @@ impl InferenceService for GrpcInferenceService {
             max_tokens: req.max_tokens,
             temperature: req.temperature,
             stream: req.stream,
-            logit_bias: None,
-            tools: None,
-            tool_choice: None,
+            logit_bias: if req.logit_bias.is_empty() {
+                None
+            } else {
+                Some(req.logit_bias.into_iter().collect())
+            },
+            tools: if req.tools.is_empty() { None } else { serde_json::from_str(&req.tools).ok() },
+            tool_choice: if req.tool_choice.is_empty() {
+                None
+            } else {
+                serde_json::from_str(&req.tool_choice).ok()
+            },
         };
 
         // Mirror the HTTP shim: validate the model is routable before
@@ -659,6 +667,9 @@ mod tests {
             max_tokens: None,
             temperature: None,
             stream: true,
+            logit_bias: std::collections::HashMap::new(),
+            tools: String::new(),
+            tool_choice: String::new(),
         });
 
         let mut stream = client.stream_inference(req).await.unwrap().into_inner();
