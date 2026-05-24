@@ -11,7 +11,7 @@ use llamaforge_core::config::{
 };
 use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::routing::RoutingDecision;
-use llamaforge_core::types::ports::{SlotDispatchView, SlotErasure, SlotError};
+use llamaforge_core::types::ports::{SlotErasure, SlotError};
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_metrics::MetricsIngest;

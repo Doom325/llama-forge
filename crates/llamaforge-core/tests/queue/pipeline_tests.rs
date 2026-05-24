@@ -4,7 +4,7 @@ use llamaforge_core::queue::pipeline::{run_scheduler, RequestPipeline};
 use llamaforge_core::queue::queue::DispatchQueue;
 use llamaforge_core::queue::types::{DispatchResult, IncomingRequest, TaskType};
 use llamaforge_core::routing::{CapacityChecker, RoutingDecision, ServerSelector};
-use llamaforge_core::types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
+use llamaforge_core::types::traits::{AdmissionAccounting, DequeueReason};
 use llamaforge_core::types::{
     ModelAlias, ModelTarget, RequestId, RequestorClass, RequestorId, ServerId,
 };
@@ -280,13 +280,6 @@ async fn test_scheduler_respects_shutdown() {
     assert!(matches!(res2, DispatchResult::ShuttingDown | DispatchResult::Dispatched(..)));
 }
 
-struct MockActiveRequestProvider(std::collections::HashMap<RequestorId, u32>);
-impl llamaforge_core::types::traits::ActiveRequestProvider for MockActiveRequestProvider {
-    fn active_requests(&self) -> std::collections::HashMap<RequestorId, u32> {
-        self.0.clone()
-    }
-}
-
 #[tokio::test]
 async fn test_reconciliation_corrects_leak() {
     let config = test_config();
@@ -312,9 +305,8 @@ async fn test_reconciliation_corrects_leak() {
     // Reconcile with 3 active
     let mut active = std::collections::HashMap::new();
     active.insert(requestor.clone(), 3);
-    let provider = Arc::new(MockActiveRequestProvider(active));
 
-    admission.reconcile_in_flight(&provider.active_requests());
+    admission.reconcile_in_flight(&active);
 
     // Verify correction
     assert_eq!(admission.requestor_usage(&requestor).1, 3);

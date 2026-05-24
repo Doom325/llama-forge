@@ -101,8 +101,7 @@ async fn test_boost_ceiling_enforcement() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, _rx) = mock_incoming();
     let id = req.id;
@@ -137,8 +136,7 @@ async fn test_timeout_eviction() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     let mut admitted = admission.admit(req).unwrap();
@@ -164,8 +162,7 @@ async fn test_client_disconnect_cleanup() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     let cancel_token = req.cancel_token.clone();
@@ -194,8 +191,7 @@ async fn test_boost_skip_if_same_priority() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req1, _rx1) = mock_incoming();
     let id1 = req1.id;
