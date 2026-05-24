@@ -143,7 +143,7 @@ pub trait SlotDispatcher: Send + Sync {
         &self,
         server_id: &ServerId,
         request: std::sync::Arc<dyn std::any::Any + Send + Sync>,
-    ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError>;
+    ) -> Result<(ResponseStream, Box<dyn std::any::Any + Send + Sync>), DispatchError>;
 }
 
 pub trait ServerSelector: Send + Sync {
