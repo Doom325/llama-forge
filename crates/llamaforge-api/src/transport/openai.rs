@@ -261,4 +261,25 @@ mod tests {
         assert!(formatted_stop[0].contains("\"id\":\"req_123\""));
         assert_eq!(formatted_stop[1], "[DONE]");
     }
+
+    #[test]
+    fn test_openai_unknown_role_rejected() {
+        let req = OpenAiChatRequest {
+            model: "llama".to_string(),
+            messages: vec![OpenAiMessage { role: "tool".to_string(), content: "foo".to_string() }],
+            max_tokens: None,
+            temperature: None,
+            stream: false,
+            logit_bias: None,
+            tools: None,
+            tool_choice: None,
+            function_call: None,
+        };
+        let result = parse_openai_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("unsupported role")),
+            "unknown role must surface as InvalidBody, got {:?}",
+            result
+        );
+    }
 }

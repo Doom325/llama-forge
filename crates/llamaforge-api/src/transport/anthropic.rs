@@ -394,4 +394,26 @@ mod tests {
         let res = format_anthropic_event("req_123", "claude", &token_chunk, &mut state);
         assert!(matches!(res, Err(AnthropicProtocolError::InvalidTransition { .. })));
     }
+
+    #[test]
+    fn test_anthropic_unknown_role_rejected() {
+        let req = AnthropicMessagesRequest {
+            model: "claude".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "tool".to_string(),
+                content: "foo".to_string(),
+            }],
+            system: None,
+            max_tokens: 100,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+        };
+        let result = parse_anthropic_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("unsupported role")),
+            "unknown role must surface as InvalidBody, got {:?}",
+            result
+        );
+    }
 }
