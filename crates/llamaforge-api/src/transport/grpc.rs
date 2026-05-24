@@ -650,15 +650,15 @@ mod tests {
         let url = format!("http://{}", bound);
         let mut client = InferenceServiceClient::connect(url).await.unwrap();
 
-        let payload = serde_json::json!({
-            "model": "test",
-            "messages": [{"role": "user", "content": "hi"}],
-            "stream": true
-        });
-
         let req = tonic::Request::new(InferenceRequest {
             model: "test".to_string(),
-            payload: payload.to_string(),
+            messages: vec![llamaforge_proto::inference::ChatMessage {
+                role: "user".to_string(),
+                content: "hi".to_string(),
+            }],
+            max_tokens: None,
+            temperature: None,
+            stream: true,
         });
 
         let mut stream = client.stream_inference(req).await.unwrap().into_inner();
