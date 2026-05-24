@@ -6,6 +6,11 @@
 
 use futures_util::StreamExt;
 use llamaforge_e2e::Harness;
+use std::time::Duration;
+
+/// Per-chunk read timeout; mirrors the guard added to
+/// `anthropic_streaming.rs` for the same reason (issue #191).
+const SSE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::test]
 async fn test_e2e_openai_chat_streaming() {
@@ -33,7 +38,14 @@ async fn test_e2e_openai_chat_streaming() {
 
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next = tokio::time::timeout(SSE_READ_TIMEOUT, stream.next())
+            .await
+            .unwrap_or_else(|_| panic!(
+                "SSE stream did not produce a chunk within {:?}; saw_done={saw_done}, saw_content={saw_content}",
+                SSE_READ_TIMEOUT,
+            ));
+        let Some(chunk) = next else { break };
         let bytes = chunk.expect("stream chunk");
         buffer.push_str(&String::from_utf8_lossy(&bytes));
 

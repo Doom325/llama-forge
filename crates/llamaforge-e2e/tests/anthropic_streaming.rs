@@ -6,6 +6,12 @@
 
 use futures_util::StreamExt;
 use llamaforge_e2e::Harness;
+use std::time::Duration;
+
+/// Per-chunk read timeout. Without this the test hangs indefinitely if the
+/// orchestrator's SSE writer fails to propagate stream close (issue #191).
+/// 30s is generous — under normal load chunks arrive in <1s.
+const SSE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[tokio::test]
 async fn test_e2e_anthropic_messages_streaming() {
@@ -30,7 +36,15 @@ async fn test_e2e_anthropic_messages_streaming() {
     let mut events: Vec<String> = Vec::new();
     let mut stream = res.bytes_stream();
     let mut buffer = String::new();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next =
+            tokio::time::timeout(SSE_READ_TIMEOUT, stream.next()).await.unwrap_or_else(|_| {
+                panic!(
+                    "SSE stream did not produce a chunk within {:?}; events so far: {:?}",
+                    SSE_READ_TIMEOUT, events,
+                )
+            });
+        let Some(chunk) = next else { break };
         let bytes = chunk.expect("stream chunk");
         buffer.push_str(&String::from_utf8_lossy(&bytes));
 
