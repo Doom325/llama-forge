@@ -298,12 +298,19 @@ async fn test_prometheus_endpoint_always_200() {
 }
 
 #[tokio::test]
-async fn test_streaming_no_timeout_layer() {
+async fn test_streaming_per_chunk_timeout_closes_stalled_upstream() {
+    // Regression guard for issue #191: when an upstream stall exceeds
+    // `queue_default_timeout_secs`, the streaming path must close the
+    // SSE body with a `type: "timeout"` event instead of holding the
+    // connection open indefinitely.
+    //
+    // Mock upstream sleeps 2s before emitting its first chunk; the
+    // configured per-chunk timeout is 1s — so the timeout must fire
+    // first and the chunk must never reach the client.
     let chunks = vec![Ok(ChatCompletionChunk::Token("Tok1".into()))];
     let ie = Arc::new(mocks::MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 2000 });
     let (rv, qs, _) = default_deps();
 
-    // config timeout is 1s, but sleep is 2s. The streaming request should complete
     let handles = setup_test_server(|c| c.global.queue_default_timeout_secs = 1, rv, qs, ie).await;
 
     let client = Client::new();
@@ -320,10 +327,14 @@ async fn test_streaming_no_timeout_layer() {
         .await
         .unwrap();
 
-    if res.status() != StatusCode::OK {
-        panic!("Status: {}, Body: {}", res.status(), res.text().await.unwrap());
-    }
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::OK, "SSE upgrade must succeed before timeout fires");
     let body_str = res.text().await.unwrap();
-    assert!(body_str.contains("Tok1"));
+    assert!(
+        !body_str.contains("Tok1"),
+        "stalled chunk must not have been forwarded; body was: {body_str}"
+    );
+    assert!(
+        body_str.contains("\"type\":\"timeout\""),
+        "expected per-chunk timeout error event in body; was: {body_str}"
+    );
 }
