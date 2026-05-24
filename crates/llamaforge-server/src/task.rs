@@ -129,7 +129,9 @@ pub async fn spawn_server_task(
                         state.lifecycle = s;
                         state.first_health_ok_at = Some(std::time::Instant::now());
                     }
-                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+                    Err(e) => {
+                        tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition")
+                    }
                 }
             }
         } else {
@@ -220,7 +222,9 @@ pub async fn spawn_server_task(
                 state.restart_count = restart_count;
                 match state.lifecycle.transition_to(ServerLifecycle::Starting) {
                     Ok(s) => state.lifecycle = s,
-                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+                    Err(e) => {
+                        tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition")
+                    }
                 }
             }
         }
@@ -714,7 +718,9 @@ fn transition_to(mgr: &ServerManager, server_id: &ServerId, new_state: ServerLif
     if let Some(mut state) = mgr.servers.get_mut(server_id) {
         match state.lifecycle.transition_to(new_state) {
             Ok(s) => state.lifecycle = s,
-            Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition"),
+            Err(e) => {
+                tracing::warn!(server.id = %server_id, error = %e, "Invalid state transition")
+            }
         }
     }
 }

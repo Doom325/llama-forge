@@ -206,17 +206,20 @@ pub struct IllegalTransition {
 }
 
 impl ServerLifecycle {
-    pub fn transition_to(self, target: ServerLifecycle) -> Result<ServerLifecycle, IllegalTransition> {
+    pub fn transition_to(
+        self,
+        target: ServerLifecycle,
+    ) -> Result<ServerLifecycle, IllegalTransition> {
         if self == target {
             return Ok(target);
         }
         let allowed = match self {
-            Self::Stopped    => &[Self::Starting][..],
-            Self::Starting   => &[Self::Running, Self::Failed, Self::Stopped],
-            Self::Running    => &[Self::Draining, Self::Restarting, Self::Failed, Self::Stopped],
-            Self::Draining   => &[Self::Stopped, Self::Failed],
+            Self::Stopped => &[Self::Starting][..],
+            Self::Starting => &[Self::Running, Self::Failed, Self::Stopped],
+            Self::Running => &[Self::Draining, Self::Restarting, Self::Failed, Self::Stopped],
+            Self::Draining => &[Self::Stopped, Self::Failed],
             Self::Restarting => &[Self::Starting, Self::Failed, Self::Stopped],
-            Self::Failed     => &[Self::Starting, Self::Stopped],
+            Self::Failed => &[Self::Starting, Self::Stopped],
         };
         if allowed.contains(&target) {
             Ok(target)
@@ -434,7 +437,13 @@ mod tests {
                 if valid_transitions.contains(&(state, target)) {
                     assert_eq!(res, Ok(target), "Expected {:?} -> {:?} to be valid", state, target);
                 } else {
-                    assert_eq!(res, Err(IllegalTransition { from: state, to: target }), "Expected {:?} -> {:?} to be invalid", state, target);
+                    assert_eq!(
+                        res,
+                        Err(IllegalTransition { from: state, to: target }),
+                        "Expected {:?} -> {:?} to be invalid",
+                        state,
+                        target
+                    );
                 }
             }
         }
