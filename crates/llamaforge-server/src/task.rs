@@ -604,32 +604,36 @@ async fn monitor_loop(
             // Slots tick
             _ = slots_interval.tick() => {
                 let url = format!("{}/slots", base_url);
-                if let Ok(resp) = client.get(&url).send().await {
-                    if let Ok(slots) = resp.json::<Vec<SlotState>>().await {
-                        if let Some(mut state) = mgr.servers.get_mut(server_id) {
-                            // Backfill resolved_ctx_size from n_ctx if the user set ctx_size=0
-                            if state.ctx_size == 0 {
-                                if let Some(first_slot) = slots.first() {
-                                    if let Some(n_ctx) = first_slot.n_ctx {
-                                        let inferred_total = n_ctx * state.parallel_slots;
-                                        if state.resolved_ctx_size != inferred_total {
-                                            tracing::info!(
-                                                server.id = %server_id,
-                                                inferred_ctx_size = inferred_total,
-                                                "Backfilled resolved_ctx_size from /slots"
-                                            );
-                                            state.resolved_ctx_size = inferred_total;
+                match client.get(&url).send().await {
+                    Ok(resp) => match resp.json::<Vec<SlotState>>().await {
+                        Ok(slots) => {
+                            if let Some(mut state) = mgr.servers.get_mut(server_id) {
+                                // Backfill resolved_ctx_size from n_ctx if the user set ctx_size=0
+                                if state.ctx_size == 0 {
+                                    if let Some(first_slot) = slots.first() {
+                                        if let Some(n_ctx) = first_slot.n_ctx {
+                                            let inferred_total = n_ctx * state.parallel_slots;
+                                            if state.resolved_ctx_size != inferred_total {
+                                                tracing::info!(
+                                                    server.id = %server_id,
+                                                    inferred_ctx_size = inferred_total,
+                                                    "Backfilled resolved_ctx_size from /slots"
+                                                );
+                                                state.resolved_ctx_size = inferred_total;
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            let old_slots = std::mem::replace(&mut state.slots, slots);
-                            for slot in old_slots {
-                                state.last_n_decoded.insert(slot.id, slot.n_decoded);
+                                let old_slots = std::mem::replace(&mut state.slots, slots);
+                                for slot in old_slots {
+                                    state.last_n_decoded.insert(slot.id, slot.n_decoded);
+                                }
                             }
                         }
-                    }
+                        Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Failed to parse /slots response"),
+                    },
+                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Failed to poll /slots endpoint"),
                 }
             }
 
@@ -647,72 +651,76 @@ async fn monitor_loop(
                 }
 
                 let url = format!("{}/metrics", base_url);
-                if let Ok(resp) = client.get(&url).send().await {
-                    if let Ok(body) = resp.text().await {
-                        // Extract llamacpp:n_decode_total
-                        let mut n_decode_total: Option<u64> = None;
-                        for line in body.lines() {
-                            if line.starts_with("llamacpp:n_decode_total ") {
-                                if let Some(val_str) = line.split_whitespace().nth(1) {
-                                    n_decode_total = val_str.parse().ok();
+                match client.get(&url).send().await {
+                    Ok(resp) => match resp.text().await {
+                        Ok(body) => {
+                            // Extract llamacpp:n_decode_total
+                            let mut n_decode_total: Option<u64> = None;
+                            for line in body.lines() {
+                                if line.starts_with("llamacpp:n_decode_total ") {
+                                    if let Some(val_str) = line.split_whitespace().nth(1) {
+                                        n_decode_total = val_str.parse().ok();
+                                    }
+                                    break;
                                 }
-                                break;
+                            }
+
+                            if let Some(total) = n_decode_total {
+                                let diff = total.saturating_sub(last_total_tokens_decoded);
+                                last_total_tokens_decoded = total;
+
+                                // It's a 10s interval
+                                let current_tps = (diff as f64 / 10.0).max(0.0);
+                                tps_window.record(current_tps);
+
+                                let mut slots = Vec::new();
+                                let mut resolved_ctx_size = 4096;
+                                if let Some(state) = mgr.servers.get(server_id) {
+                                    slots = state.slots.clone();
+                                    resolved_ctx_size = state.resolved_ctx_size;
+                                }
+
+                                let action = check_degradation(
+                                    current_tps,
+                                    tps_window.sample_count(),
+                                    tps_window.mean_lifetime(),
+                                    &slots,
+                                    resolved_ctx_size,
+                                    restart_on_degradation,
+                                    &mut consecutive_degraded_ticks,
+                                );
+
+                                match action {
+                                    DegradationAction::Restart => {
+                                        let mean_5min = tps_window.mean_5min().unwrap_or(0.0);
+                                        warn!(
+                                            server.id = %server_id,
+                                            server.performance_degraded = true,
+                                            current_tps = current_tps,
+                                            rolling_avg = mean_5min,
+                                            "Server performance significantly degraded, restarting."
+                                        );
+                                        transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                        info!(server.id = %server_id, server.restarted = true, reason = "degradation", "Server restarting");
+                                        return true;
+                                    }
+                                    DegradationAction::WarnOnly => {
+                                        let mean_5min = tps_window.mean_5min().unwrap_or(0.0);
+                                        warn!(
+                                            server.id = %server_id,
+                                            server.performance_degraded = true,
+                                            current_tps = current_tps,
+                                            rolling_avg = mean_5min,
+                                            "Server performance significantly degraded."
+                                        );
+                                    }
+                                    DegradationAction::None => {}
+                                }
                             }
                         }
-
-                        if let Some(total) = n_decode_total {
-                            let diff = total.saturating_sub(last_total_tokens_decoded);
-                            last_total_tokens_decoded = total;
-
-                            // It's a 10s interval
-                            let current_tps = (diff as f64 / 10.0).max(0.0);
-                            tps_window.record(current_tps);
-
-                            let mut slots = Vec::new();
-                            let mut resolved_ctx_size = 4096;
-                            if let Some(state) = mgr.servers.get(server_id) {
-                                slots = state.slots.clone();
-                                resolved_ctx_size = state.resolved_ctx_size;
-                            }
-
-                            let action = check_degradation(
-                                current_tps,
-                                tps_window.sample_count(),
-                                tps_window.mean_lifetime(),
-                                &slots,
-                                resolved_ctx_size,
-                                restart_on_degradation,
-                                &mut consecutive_degraded_ticks,
-                            );
-
-                            match action {
-                                DegradationAction::Restart => {
-                                    let mean_5min = tps_window.mean_5min().unwrap_or(0.0);
-                                    warn!(
-                                        server.id = %server_id,
-                                        server.performance_degraded = true,
-                                        current_tps = current_tps,
-                                        rolling_avg = mean_5min,
-                                        "Server performance significantly degraded, restarting."
-                                    );
-                                    transition_to(mgr, server_id, ServerLifecycle::Restarting);
-                                    info!(server.id = %server_id, server.restarted = true, reason = "degradation", "Server restarting");
-                                    return true;
-                                }
-                                DegradationAction::WarnOnly => {
-                                    let mean_5min = tps_window.mean_5min().unwrap_or(0.0);
-                                    warn!(
-                                        server.id = %server_id,
-                                        server.performance_degraded = true,
-                                        current_tps = current_tps,
-                                        rolling_avg = mean_5min,
-                                        "Server performance significantly degraded."
-                                    );
-                                }
-                                DegradationAction::None => {}
-                            }
-                        }
-                    }
+                        Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Failed to read /metrics body"),
+                    },
+                    Err(e) => tracing::warn!(server.id = %server_id, error = %e, "Failed to poll /metrics endpoint"),
                 }
             }
         }
