@@ -106,6 +106,14 @@ async fn test_degradation_e2e_restart() {
         .await;
     assert!(restarted, "Server should have restarted due to degradation");
 
+    // After observing Restarting, wait for Running again
+    let recovered = mgr_started
+        .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(20))
+        .await;
+    assert!(recovered, "Server should recover to Running after degradation restart");
+    let state = mgr_started.server_state(&srv_id).unwrap();
+    assert!(state.last_restart_at.is_some(), "Server should have a last_restart_at timestamp");
+
     mgr_started.shutdown_all().await;
 }
 
