@@ -7,11 +7,6 @@ use thiserror::Error;
 /// Port traits defining boundaries between components.
 ///
 /// See design doc Section 2.2 and 2.3.
-/// A token representing a dispatched request.
-pub trait DispatchToken: Send + Sync {
-    // Methods to be defined by Component 06.
-}
-
 /// A stream of bytes returned from a dispatched request.
 pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, DispatchError>> + Send>>;
 
@@ -25,7 +20,7 @@ pub trait SlotDispatcher: Send + Sync {
         server_id: &ServerId,
         // TODO: Prefer a typed payload instead of `Arc<dyn Any>` when payload types are strictly defined
         request: std::sync::Arc<dyn std::any::Any + Send + Sync>,
-    ) -> Result<(ResponseStream, Box<dyn DispatchToken>), DispatchError>;
+    ) -> Result<(ResponseStream, Box<dyn std::any::Any + Send + Sync>), DispatchError>;
 }
 
 /// Tracks in-flight request counts for admission control.
