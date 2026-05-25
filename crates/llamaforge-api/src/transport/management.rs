@@ -14,6 +14,17 @@ use std::sync::Arc;
 
 use super::error::ApiError;
 
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub(crate) struct ServerStatusResponse {
+    pub id: String,
+    pub model: String,
+    pub state: String,
+    pub slots_total: u32,
+    pub slots_busy: u32,
+}
+
 pub struct ManagementState<CW, RMS, SM> {
     pub server_control: Arc<dyn ServerControl>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
@@ -41,7 +52,19 @@ pub(crate) async fn list_servers<CW, RMS, SM>(
 ) -> Result<Response, ApiError> {
     let summaries =
         state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(Json(summaries).into_response())
+
+    let dtos: Vec<ServerStatusResponse> = summaries
+        .into_iter()
+        .map(|s| ServerStatusResponse {
+            id: s.id.to_string(),
+            model: s.alias.into_inner().to_string(),
+            state: format!("{:?}", s.state),
+            slots_total: s.slots_total,
+            slots_busy: s.slots_busy,
+        })
+        .collect();
+
+    Ok(Json(dtos).into_response())
 }
 
 pub(crate) async fn start_server<CW, RMS, SM>(
