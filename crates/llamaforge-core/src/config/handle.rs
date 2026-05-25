@@ -7,7 +7,7 @@ use crate::config::error::{ConfigLoadError, ConfigReloadError, WritebackError};
 use crate::config::source::ConfigSource;
 use crate::config::traits::{ConfigReader, ConfigWriter};
 use crate::config::types::{AppConfig, ConfigMutation};
-use arc_swap::{ArcSwap, Guard};
+use arc_swap::ArcSwap;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -93,16 +93,12 @@ impl ConfigHandle {
 impl crate::config::traits::private::Sealed for ConfigHandle {}
 
 impl ConfigReader for ConfigHandle {
-    fn snapshot(&self) -> Guard<Arc<AppConfig>> {
-        self.inner.load()
+    fn snapshot(&self) -> Arc<AppConfig> {
+        self.inner.load().clone()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>> {
         self.change_tx.subscribe()
-    }
-
-    fn arc_swap(&self) -> Arc<ArcSwap<AppConfig>> {
-        self.inner.clone()
     }
 }
 
@@ -275,7 +271,7 @@ mod tests {
         let duration = start.elapsed();
         assert!(duration.as_millis() <= 5, "snapshot should be very fast");
 
-        assert_eq!(**handle.snapshot(), config);
+        assert_eq!(*handle.snapshot(), config);
     }
 
     #[tokio::test]
@@ -302,7 +298,7 @@ mod tests {
         );
 
         // Verify snapshot updated
-        assert_eq!(**handle.snapshot(), new_config);
+        assert_eq!(*handle.snapshot(), new_config);
 
         // Verify broadcast received
         let received_diff = rx.recv().await.unwrap();
@@ -361,7 +357,7 @@ mod tests {
         ));
 
         // Verify snapshot unchanged
-        assert_eq!(**handle.snapshot(), AppConfig::default());
+        assert_eq!(*handle.snapshot(), AppConfig::default());
 
         // Verify NO broadcast received
         assert!(rx.try_recv().is_err());
@@ -385,7 +381,7 @@ mod tests {
             t.await.unwrap();
         }
 
-        assert_eq!(**handle.snapshot(), AppConfig::default());
+        assert_eq!(*handle.snapshot(), AppConfig::default());
     }
 
     #[tokio::test]
@@ -465,7 +461,7 @@ mod tests {
         assert!(matches!(err, WritebackError::ServerNotFound));
 
         let snap = handle.snapshot();
-        assert_eq!(**snap, config); // Unchanged
+        assert_eq!(*snap, config); // Unchanged
 
         assert!(rx.try_recv().is_err());
     }
