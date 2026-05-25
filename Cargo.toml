@@ -31,7 +31,6 @@ mock-llama = { path = "crates/mock-llama", version = "0.1.0-draft" }
 llamaforge-server = { path = "crates/llamaforge-server", version = "0.1.0-draft" }
 llamaforge-api = { path = "crates/llamaforge-api", version = "0.1.0-draft" }
 llamaforge = { path = "crates/llamaforge", version = "0.1.0-draft" }
-anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -68,6 +67,7 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 metrics-exporter-prometheus = "0.16"
 metrics-util = "0.18"
 opentelemetry = "0.27"
+opentelemetry_sdk = "0.27"
 bytes = "1"
 futures-core = "0.3"
 pin-project-lite = "0.2"

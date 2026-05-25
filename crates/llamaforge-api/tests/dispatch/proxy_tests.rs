@@ -87,7 +87,8 @@ fn setup() -> (
     let cancel = CancellationToken::new();
     let slot_map = Arc::new(SlotDispatchMap::new());
     let req = CompletionRequest {
-        prompt: "".to_string(),
+        request_id: RequestId::new(Uuid::now_v7()),
+        prompt: "test".to_string(),
         n_predict: None,
         temperature: 0.0,
         stream: true,
@@ -297,7 +298,8 @@ async fn test_6_15_slot_released_before_audit() {
     let cancel = CancellationToken::new();
     let slot_map = Arc::new(SlotDispatchMap::new());
     let req = CompletionRequest {
-        prompt: "".to_string(),
+        request_id: RequestId::new(Uuid::now_v7()),
+        prompt: "test".to_string(),
         n_predict: None,
         temperature: 0.0,
         stream: true,
