@@ -278,7 +278,8 @@ async fn test_vc3_3_cancellation_priority() {
         token,
         ctx.client,
         CompletionRequest {
-            prompt: req_id.to_string(),
+            request_id: RequestId::new(Uuid::now_v7()),
+            prompt: "test".to_string(),
             n_predict: None,
             temperature: 0.0,
             stream: true,

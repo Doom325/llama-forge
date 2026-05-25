@@ -1280,6 +1280,8 @@ dependencies = [
  "llamaforge-metrics",
  "llamaforge-server",
  "metrics",
+ "opentelemetry",
+ "opentelemetry_sdk",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1795,7 +1797,9 @@ dependencies = [
  "opentelemetry",
  "percent-encoding",
  "rand 0.8.6",
+ "serde_json",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

@@ -28,6 +28,8 @@ llamaforge-core = { workspace = true }
 llamaforge-metrics = { workspace = true }
 llamaforge-server = { workspace = true }
 llamaforge-api = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 metrics.workspace = true
 serde_json.workspace = true
 

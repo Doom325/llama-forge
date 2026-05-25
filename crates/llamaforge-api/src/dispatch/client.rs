@@ -130,12 +130,44 @@ impl BackendClient for ReqwestClientStore {
             "id_slot": payload.id_slot.map(|id| id.into_inner()),
         });
 
-        let request = info
-            .client
-            .post(&url)
-            .json(&body)
-            .build()
-            .map_err(|e| DispatchError::ConnectionFailed(Box::new(e)))?;
+        let mut request_builder = info.client.post(&url).json(&body);
+
+        request_builder = request_builder.header("x-request-id", payload.request_id.to_string());
+
+        {
+            use opentelemetry::global;
+            use opentelemetry::propagation::Injector;
+            use opentelemetry::trace::TraceContextExt;
+            use reqwest::header::{HeaderName, HeaderValue};
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+
+            let span = tracing::Span::current();
+            let ctx = span.context();
+            if ctx.span().span_context().is_valid() {
+                struct HashMapInjector<'a>(&'a mut std::collections::HashMap<String, String>);
+                impl<'a> Injector for HashMapInjector<'a> {
+                    fn set(&mut self, key: &str, value: String) {
+                        self.0.insert(key.to_string(), value);
+                    }
+                }
+
+                let mut headers = std::collections::HashMap::new();
+                global::get_text_map_propagator(|propagator| {
+                    propagator.inject_context(&ctx, &mut HashMapInjector(&mut headers));
+                });
+
+                for (k, v) in headers {
+                    if let Ok(name) = HeaderName::from_bytes(k.as_bytes()) {
+                        if let Ok(val) = HeaderValue::from_str(&v) {
+                            request_builder = request_builder.header(name, val);
+                        }
+                    }
+                }
+            }
+        }
+
+        let request =
+            request_builder.build().map_err(|e| DispatchError::ConnectionFailed(Box::new(e)))?;
 
         let response = info.client.execute(request).await.map_err(|e| {
             if e.is_timeout() {
