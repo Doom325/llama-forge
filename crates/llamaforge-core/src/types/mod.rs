@@ -547,6 +547,18 @@ pub struct Message {
     pub content: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ToolSpec(pub serde_json::Value);
+
+impl serde::Serialize for ToolSpec {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
 /// Domain type representing an incoming chat completion request.
 #[derive(Debug, Clone)]
 pub struct ChatCompletionRequest {
@@ -556,8 +568,8 @@ pub struct ChatCompletionRequest {
     pub temperature: Option<f32>,
     pub stream: bool,
     pub logit_bias: Option<std::collections::HashMap<i32, f64>>,
-    pub tools: Option<serde_json::Value>,
-    pub tool_choice: Option<serde_json::Value>,
+    pub tools: Option<ToolSpec>,
+    pub tool_choice: Option<ToolSpec>,
 }
 
 /// Domain type representing a chunk of a chat completion response.
