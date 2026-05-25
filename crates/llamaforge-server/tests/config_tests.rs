@@ -116,17 +116,9 @@ async fn test_apply_config_diff() {
     let srv_id = ServerId::from_config_id("srv_test");
 
     // Wait for Running
-    let mut is_running = false;
-    for _ in 0..50 {
-        if let Some(state) = mgr.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_running);
+    assert!(
+        mgr.wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10)).await
+    );
 
     // Test (a): Add a server
     let main_path = tmp.path().join("llamaforge.toml");
@@ -152,17 +144,9 @@ estimated_vram_mb = 100
     mgr.apply_config_diff(&diff).await;
 
     let srv_added = ServerId::from_config_id("srv_added");
-    let mut is_added_running = false;
-    for _ in 0..100 {
-        if let Some(state) = mgr.server_state(&srv_added) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_added_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_added_running, "Added server did not reach Running state");
+    assert!(
+        mgr.wait_for_lifecycle(&srv_added, ServerLifecycle::Running, Duration::from_secs(10)).await
+    );
 
     // Test (c): Apply diff with requires_restart=false (hot reloadable)
     // We will change alias for srv_added
@@ -189,17 +173,9 @@ estimated_vram_mb = 100
     mgr.apply_config_diff(&diff).await;
 
     // Wait for Srv_test to restart and become Running again
-    let mut is_srv_test_running = false;
-    for _ in 0..100 {
-        if let Some(state) = mgr.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                is_srv_test_running = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_srv_test_running, "Server did not restart and reach Running on new GPU");
+    assert!(
+        mgr.wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(10)).await
+    );
 
     // Test (b): Apply diff removing a server
     // Remove srv_added
@@ -228,15 +204,7 @@ restart_on_degradation = true
     let diff = mgr.config().reload().await.unwrap();
     mgr.apply_config_diff(&diff).await;
 
-    let mut is_added_removed = false;
-    for _ in 0..100 {
-        if mgr.server_state(&srv_added).is_none() {
-            is_added_removed = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_added_removed, "Removed server was not deleted from state");
+    assert!(mgr.server_state(&srv_added).is_none(), "Removed server was not deleted from state");
 
     // srv_test is untouched
     let state = mgr.server_state(&srv_id).unwrap();

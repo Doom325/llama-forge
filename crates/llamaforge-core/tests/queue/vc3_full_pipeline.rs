@@ -100,8 +100,7 @@ async fn test_vc3_1_request_lifecycle_tracking() {
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let scheduler_handle = tokio::spawn(run_scheduler(
         queue.clone(),
@@ -214,8 +213,7 @@ async fn test_vc3_4_timeout_eviction() {
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     // Simulate setting a low timeout
@@ -244,8 +242,7 @@ async fn test_vc3_5_client_disconnect_sweep() {
     let pipeline = Arc::new(RequestPipeline::new(admission.clone(), queue.clone(), health.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, rx) = mock_incoming();
     let token = req.cancel_token.clone();
@@ -291,8 +288,7 @@ async fn test_vc3_7_starvation_boost_applies() {
     let queue = Arc::new(DispatchQueue::new(config.clone(), queue_depth.clone()));
 
     let shutdown = CancellationToken::new();
-    let _tasks =
-        start_background_tasks(queue.clone(), admission.clone(), config, None, shutdown.clone());
+    let _tasks = start_background_tasks(queue.clone(), admission.clone(), config, shutdown.clone());
 
     let (req, _rx) = mock_incoming();
     let id = req.id;

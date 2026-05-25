@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 struct MockBackendClient {
     chunks: Mutex<Option<Vec<Result<Bytes, StreamError>>>>,
-    error_on_connect: Mutex<Option<DispatchError>>,
+    error_on_connect: Mutex<Vec<DispatchError>>,
     delay: Option<Duration>,
     chunk_delay: Option<Duration>,
 }
@@ -28,8 +28,16 @@ impl BackendClient for MockBackendClient {
         _server_id: &ServerId,
         _payload: CompletionRequest,
     ) -> Result<BackendResponseStream, DispatchError> {
-        if let Some(err) = self.error_on_connect.lock().unwrap().take() {
-            return Err(err);
+        let err = {
+            let mut errs = self.error_on_connect.lock().unwrap();
+            if !errs.is_empty() {
+                Some(errs.remove(0))
+            } else {
+                None
+            }
+        };
+        if let Some(e) = err {
+            return Err(e);
         }
         if let Some(d) = self.delay {
             tokio::time::sleep(d).await;
@@ -79,7 +87,8 @@ fn setup() -> (
     let cancel = CancellationToken::new();
     let slot_map = Arc::new(SlotDispatchMap::new());
     let req = CompletionRequest {
-        prompt: "".to_string(),
+        request_id: RequestId::new(Uuid::now_v7()),
+        prompt: "test".to_string(),
         n_predict: None,
         temperature: 0.0,
         stream: true,
@@ -99,7 +108,7 @@ async fn test_6_10_successful_streaming() {
             Ok(Bytes::from("data: {\"content\":\"chunk2\",\"stop\":false}\n\n")),
             Ok(Bytes::from("data: [DONE]\n\n")),
         ])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: None,
     });
@@ -126,7 +135,7 @@ async fn test_terminal_chunk_tokens_predicted() {
             Ok(Bytes::from("data: {\"content\":\"\",\"stop\":false}\n\n")), // Empty content chunk
             Ok(Bytes::from("data: {\"content\":\"\",\"stop\":true,\"tokens_predicted\":42}\n\n")), // Terminal chunk
         ])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: None,
     });
@@ -151,7 +160,7 @@ async fn test_6_11_cancellation_before_first_chunk() {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from(
             "data: {\"content\":\"slow\",\"stop\":false}\n\n",
         ))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: Some(Duration::from_millis(50)),
         chunk_delay: None,
     });
@@ -178,7 +187,7 @@ async fn test_6_12_cancellation_mid_stream() {
             Ok(Bytes::from("data: {\"content\":\"1\",\"stop\":false}\n\n")),
             Ok(Bytes::from("data: {\"content\":\"2\",\"stop\":false}\n\n")),
         ])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: Some(Duration::from_millis(50)),
     });
@@ -213,7 +222,7 @@ async fn test_6_13_backend_disconnect() {
             Ok(Bytes::from("data: {\"content\":\"1\",\"stop\":false}\n\n")),
             Err(StreamError::Cancelled), // Simulate disconnect
         ])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: None,
     });
@@ -235,7 +244,7 @@ async fn test_6_14_backpressure_timeout() {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from(
             "data: {\"content\":\"1\",\"stop\":false}\n\n",
         ))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: None,
     });
@@ -289,7 +298,8 @@ async fn test_6_15_slot_released_before_audit() {
     let cancel = CancellationToken::new();
     let slot_map = Arc::new(SlotDispatchMap::new());
     let req = CompletionRequest {
-        prompt: "".to_string(),
+        request_id: RequestId::new(Uuid::now_v7()),
+        prompt: "test".to_string(),
         n_predict: None,
         temperature: 0.0,
         stream: true,
@@ -299,7 +309,7 @@ async fn test_6_15_slot_released_before_audit() {
 
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: None,
         chunk_delay: None,
     });
@@ -315,13 +325,17 @@ async fn test_6_15_slot_released_before_audit() {
 #[tokio::test]
 async fn test_6_16_connection_refused() {
     let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
-    let err = DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
+    let err1 = DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "refused",
+    )));
+    let err2 = DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
         std::io::ErrorKind::ConnectionRefused,
         "refused",
     )));
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![])),
-        error_on_connect: Mutex::new(Some(err)),
+        error_on_connect: Mutex::new(vec![err1, err2]),
         delay: None,
         chunk_delay: None,
     });
@@ -336,13 +350,59 @@ async fn test_6_16_connection_refused() {
 }
 
 #[tokio::test]
+async fn test_6_16b_connection_refused_recovers() {
+    let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
+    let err = DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
+        std::io::ErrorKind::ConnectionRefused,
+        "refused",
+    )));
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        // Provide ONE error. The retry should consume the error, and the next attempt will succeed.
+        error_on_connect: Mutex::new(vec![err]),
+        delay: None,
+        chunk_delay: None,
+    });
+
+    proxy_task(token, client, req, tx, Arc::new(MockSlotNotifier), audit_tx, cancel, map).await;
+
+    let chunk = rx.recv().await.unwrap();
+    assert!(chunk.is_ok());
+
+    let audit = audit_rx.recv().await.unwrap();
+    assert!(audit.success);
+}
+
+#[tokio::test]
+async fn test_6_16c_http_503_recovers() {
+    let (token, tx, mut rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
+    let err =
+        DispatchError::BackendError { status: llamaforge_api::dispatch::error::HttpStatus(503) };
+    let client = Arc::new(MockBackendClient {
+        chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
+        // Provide ONE error. The retry should consume the error, and the next attempt will succeed.
+        error_on_connect: Mutex::new(vec![err]),
+        delay: None,
+        chunk_delay: None,
+    });
+
+    proxy_task(token, client, req, tx, Arc::new(MockSlotNotifier), audit_tx, cancel, map).await;
+
+    let chunk = rx.recv().await.unwrap();
+    assert!(chunk.is_ok());
+
+    let audit = audit_rx.recv().await.unwrap();
+    assert!(audit.success);
+}
+
+#[tokio::test]
 async fn test_6_17_backend_http_500() {
     let (token, tx, mut rx, audit_tx, _audit_rx, cancel, map, req, _) = setup();
     let err =
         DispatchError::BackendError { status: llamaforge_api::dispatch::error::HttpStatus(500) };
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![])),
-        error_on_connect: Mutex::new(Some(err)),
+        error_on_connect: Mutex::new(vec![err]),
         delay: None,
         chunk_delay: None,
     });
@@ -358,7 +418,7 @@ async fn test_6_18_ttft_metric() {
     let (token, tx, _rx, audit_tx, mut audit_rx, cancel, map, req, _) = setup();
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: Some(Duration::from_millis(50)),
         chunk_delay: None,
     });
@@ -433,7 +493,7 @@ fn create_dispatcher(client: Arc<dyn BackendClient>) -> Dispatcher {
 async fn test_6_19_graceful_shutdown() {
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: Some(Duration::from_millis(50)),
         chunk_delay: None,
     });
@@ -463,7 +523,7 @@ async fn test_6_19_graceful_shutdown() {
 async fn test_6_20_drain_server() {
     let client = Arc::new(MockBackendClient {
         chunks: Mutex::new(Some(vec![Ok(Bytes::from("data: [DONE]\n\n"))])),
-        error_on_connect: Mutex::new(None),
+        error_on_connect: Mutex::new(vec![]),
         delay: Some(Duration::from_millis(100)),
         chunk_delay: None,
     });

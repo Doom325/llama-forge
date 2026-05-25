@@ -2,7 +2,6 @@
 //!
 //! See design doc Section 2.4
 
-use llamaforge_core::types::ports::SlotDispatchView;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -96,14 +95,12 @@ impl SlotDispatchMap {
     }
 }
 
-/// The implementation of the public interface consumed by `llamaforge-server-mgr`.
-///
-/// **Split API Rationale:**
-/// Inherent methods (`insert`, `remove`, etc.) are intended for use only within
-/// `llamaforge-dispatch`. Trait methods are the designated cross-crate boundary.
-/// Callers must `use llamaforge_core::types::ports::SlotDispatchView;` to access these methods.
-impl SlotDispatchView for SlotDispatchMap {
-    fn get_request_for_slot(&self, server_id: &ServerId, slot_id: &SlotId) -> Option<RequestId> {
+impl SlotDispatchMap {
+    pub fn get_request_for_slot(
+        &self,
+        server_id: &ServerId,
+        slot_id: &SlotId,
+    ) -> Option<RequestId> {
         let guard = self.inner.lock().unwrap_or_else(|p| {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
@@ -112,13 +109,13 @@ impl SlotDispatchView for SlotDispatchMap {
         guard.by_slot.get(&(*server_id, *slot_id)).copied()
     }
 
-    fn has_unresolved(&self, server_id: &ServerId) -> bool {
+    pub fn has_unresolved(&self, server_id: &ServerId) -> bool {
         let guard = self.inner.lock().unwrap_or_else(|p| {
             warn!("SlotDispatchMap mutex poisoned");
             p.into_inner()
         });
 
-        guard.by_request.values().any(|(srv, _, _)| srv == server_id)
+        guard.by_request.values().any(|(s, _, _)| s == server_id)
     }
 }
 

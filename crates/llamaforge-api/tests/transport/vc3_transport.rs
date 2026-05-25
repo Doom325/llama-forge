@@ -472,7 +472,16 @@ async fn test_vc3_10_management_api_round_trip() {
     #[async_trait::async_trait]
     impl ServerControl for MockServerControlImpl {
         async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
-            Ok(vec![])
+            Ok(vec![ServerSummary {
+                id: ServerId::from_config_id("test_srv"),
+                alias: llamaforge_core::types::ModelAlias::new("test_model".into()),
+                state: llamaforge_core::types::ServerLifecycle::Running,
+                port: 8080,
+                slots_total: 4,
+                slots_busy: 1,
+                started_at: None,
+                last_restart_at: None,
+            }])
         }
         async fn start_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
@@ -491,6 +500,18 @@ async fn test_vc3_10_management_api_round_trip() {
     // List servers
     let res = client.get(http_url(&handles, "/api/servers")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    let json: serde_json::Value = res.json().await.unwrap();
+    let servers = json.as_array().expect("response should be an array");
+    assert_eq!(servers.len(), 1);
+    let srv = &servers[0];
+
+    assert!(srv.get("id").is_some(), "missing id");
+    assert!(srv.get("model").is_some(), "missing model");
+    assert!(srv.get("state").is_some(), "missing state");
+    assert!(srv.get("slots_total").is_some(), "missing slots_total");
+    assert!(srv.get("slots_busy").is_some(), "missing slots_busy");
+    assert!(srv.get("port").is_none(), "port should not be exposed in DTO");
 
     // Start server
     let res = client

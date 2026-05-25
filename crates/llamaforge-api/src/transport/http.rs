@@ -667,14 +667,25 @@ pub(crate) async fn list_openai_models<CW, RMS, SM>(
 }
 
 /// `GET /v1/servers` — operator status surface aliased on top of
-/// `/api/servers`. The payload is the existing `Vec<ServerSummary>`
-/// from the `ServerControl` port, unchanged.
+/// `/api/servers`. The payload is mapped to `ServerStatusResponse`.
 pub(crate) async fn list_v1_servers<CW, RMS, SM>(
     State(state): State<HttpAppState<CW, RMS, SM>>,
 ) -> Result<axum::response::Response, ApiError> {
     let summaries =
         state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(axum::Json(summaries).into_response())
+
+    let dtos: Vec<super::management::ServerStatusResponse> = summaries
+        .into_iter()
+        .map(|s| super::management::ServerStatusResponse {
+            id: s.id.to_string(),
+            model: s.alias.into_inner().to_string(),
+            state: format!("{:?}", s.state),
+            slots_total: s.slots_total,
+            slots_busy: s.slots_busy,
+        })
+        .collect();
+
+    Ok(axum::Json(dtos).into_response())
 }
 
 pub(crate) async fn prometheus_export<CW, RMS, SM>(

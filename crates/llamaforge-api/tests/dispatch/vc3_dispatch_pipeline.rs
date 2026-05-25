@@ -11,7 +11,7 @@ use llamaforge_core::config::{
 };
 use llamaforge_core::routing::types::ServerStateView;
 use llamaforge_core::routing::RoutingDecision;
-use llamaforge_core::types::ports::{SlotDispatchView, SlotErasure, SlotError};
+use llamaforge_core::types::ports::{SlotErasure, SlotError};
 use llamaforge_core::types::traits::SlotNotifier;
 use llamaforge_core::types::{RequestId, ServerId, SlotId};
 use llamaforge_metrics::MetricsIngest;
@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 struct MockBackendClient {
     responses: std::sync::Mutex<
-        std::collections::HashMap<RequestId, Result<BackendResponseStream, DispatchError>>,
+        std::collections::HashMap<RequestId, Vec<Result<BackendResponseStream, DispatchError>>>,
     >,
 }
 
@@ -33,7 +33,7 @@ impl MockBackendClient {
     }
 
     fn add_response(&self, req_id: RequestId, res: Result<BackendResponseStream, DispatchError>) {
-        self.responses.lock().unwrap().insert(req_id, res);
+        self.responses.lock().unwrap().entry(req_id).or_default().push(res);
     }
 }
 
@@ -47,8 +47,10 @@ impl BackendClient for MockBackendClient {
         let mut responses = self.responses.lock().unwrap();
         if let Ok(uuid) = Uuid::parse_str(&p.prompt) {
             let req_id = RequestId::new(uuid);
-            if let Some(res) = responses.remove(&req_id) {
-                return res;
+            if let Some(vec) = responses.get_mut(&req_id) {
+                if !vec.is_empty() {
+                    return vec.remove(0);
+                }
             }
         }
 
@@ -276,7 +278,8 @@ async fn test_vc3_3_cancellation_priority() {
         token,
         ctx.client,
         CompletionRequest {
-            prompt: req_id.to_string(),
+            request_id: RequestId::new(Uuid::now_v7()),
+            prompt: "test".to_string(),
             n_predict: None,
             temperature: 0.0,
             stream: true,
@@ -345,6 +348,13 @@ async fn test_vc3_6_connection_pool_poisoning_recovery() {
     let req_id1 = RequestId::new(Uuid::now_v7());
     let req_id2 = RequestId::new(Uuid::now_v7());
 
+    ctx.client.add_response(
+        req_id1,
+        Err(DispatchError::ConnectionFailed(Box::new(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            "reset",
+        )))),
+    );
     ctx.client.add_response(
         req_id1,
         Err(DispatchError::ConnectionFailed(Box::new(std::io::Error::new(

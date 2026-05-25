@@ -27,6 +27,7 @@ use tracing::{info, warn};
 /// See design doc Section 2.5.
 #[derive(Debug, Clone)]
 pub struct CompletionRequest {
+    pub request_id: RequestId,
     pub prompt: String,
     pub n_predict: Option<u32>,
     pub temperature: f32,
@@ -127,6 +128,7 @@ impl Dispatcher {
 
         // Step 3: Build `CompletionRequest`
         let request = CompletionRequest {
+            request_id: candidate.request_id,
             prompt: candidate.prompt,
             n_predict: candidate.params.n_predict,
             temperature: candidate.params.temperature,
@@ -251,7 +253,7 @@ impl Dispatcher {
         };
 
         // Forward reconciliation: detects orphaned slots
-        use llamaforge_core::types::ports::SlotDispatchView;
+
         for &slot_id in processing_slots {
             if self.slot_dispatch_map.get_request_for_slot(server_id, &slot_id).is_none() {
                 let key = (*server_id, slot_id);

@@ -38,17 +38,16 @@ pub trait SlotNotifier: Send + Sync {
     fn notify_slot_available(&self);
 }
 
-/// Provides the true count of active (dispatched) requests per requestor.
-///
-/// Used for periodic reconciliation sweeps. See design doc Section 3.10.
-pub trait ActiveRequestProvider: Send + Sync {
-    fn active_requests(&self) -> std::collections::HashMap<RequestorId, u32>;
-}
-
 #[derive(Debug, Error)]
 pub enum DispatchError {
-    #[error("Dispatch failed")]
-    Failed,
+    #[error("Queue full")]
+    QueueFull,
+    #[error("No server for model: {model}")]
+    NoServerForModel { model: String },
+    #[error("Rate limited, retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u32 },
+    #[error("Dispatch failed: {reason}")]
+    Internal { reason: String },
 }
 
 /// Reason for a request being dequeued.

@@ -33,6 +33,7 @@ pub struct ServerManager {
     pub(crate) metrics_store: Arc<llamaforge_metrics::InstrumentedMetricsStore>,
     pub(crate) shutdown_token: CancellationToken,
     pub(crate) client_refresh_tx: broadcast::Sender<ClientRefreshEvent>,
+    pub(crate) lifecycle_tx: broadcast::Sender<(ServerId, ServerLifecycle)>,
     pub(crate) pending_dispatches: Arc<DashMap<ServerId, AtomicU64>>,
 
     pub(crate) warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
@@ -50,6 +51,7 @@ impl ServerManager {
         shutdown_token: CancellationToken,
     ) -> Self {
         let (client_refresh_tx, _) = broadcast::channel(32);
+        let (lifecycle_tx, _) = broadcast::channel(128);
         Self {
             servers: Arc::new(DashMap::new()),
             vram_ledger: Arc::new(parking_lot::Mutex::new(HashMap::new())),
@@ -59,6 +61,7 @@ impl ServerManager {
             metrics_store,
             shutdown_token,
             client_refresh_tx,
+            lifecycle_tx,
             pending_dispatches: Arc::new(DashMap::new()),
             warned_overflow: Arc::new(DashMap::new()),
             gpu_semaphores: Arc::new(DashMap::new()),
@@ -153,29 +156,42 @@ impl ServerManager {
 
         // Removed servers
         for server_id in diff.servers_removed() {
+            let mut rx = self.lifecycle_tx.subscribe();
             self.stop_server(server_id).await;
-            loop {
-                let state = self.servers.get(server_id).map(|s| s.lifecycle);
-                if state == Some(ServerLifecycle::Stopped) || state.is_none() {
-                    self.servers.remove(server_id);
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let state = self.servers.get(server_id).map(|s| s.lifecycle);
+            if state != Some(ServerLifecycle::Stopped) && state.is_some() {
+                let _ = tokio::time::timeout(Duration::from_secs(30), async {
+                    while let Ok((id, state)) = rx.recv().await {
+                        if id == *server_id && state == ServerLifecycle::Stopped {
+                            break;
+                        }
+                    }
+                }).await.map_err(|_| {
+                    tracing::warn!(server.id = %server_id, "apply_config_diff.timeout_waiting_for_stop");
+                });
             }
+            self.servers.remove(server_id);
         }
 
         // Changed servers
         for (server_id, srv_diff) in diff.servers_changed() {
             if srv_diff.requires_restart() {
+                let mut rx = self.lifecycle_tx.subscribe();
                 self.stop_server(server_id).await;
-                loop {
-                    let state = self.servers.get(server_id).map(|s| s.lifecycle);
-                    if state == Some(ServerLifecycle::Stopped) || state.is_none() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
 
+                let state = self.servers.get(server_id).map(|s| s.lifecycle);
+                if state != Some(ServerLifecycle::Stopped) && state.is_some() {
+                    let _ = tokio::time::timeout(Duration::from_secs(30), async {
+                        while let Ok((id, state)) = rx.recv().await {
+                            if id == *server_id && state == ServerLifecycle::Stopped {
+                                break;
+                            }
+                        }
+                    }).await.map_err(|_| {
+                        tracing::warn!(server.id = %server_id, "apply_config_diff.timeout_waiting_for_stop");
+                    });
+                }
                 if let Some(server_config) = app_config.servers.get(server_id) {
                     let srv = server_id.clone();
                     let cfg = server_config.clone();
@@ -466,9 +482,14 @@ impl ServerManager {
 
     // --- Task 3.5: subscribe_client_refresh ---
 
-    /// Subscribes to client refresh events.
+    /// Returns a receiver for client refresh events.
     pub fn subscribe_client_refresh(&self) -> broadcast::Receiver<ClientRefreshEvent> {
         self.client_refresh_tx.subscribe()
+    }
+
+    /// Returns a receiver for server lifecycle changes.
+    pub fn subscribe_lifecycle(&self) -> broadcast::Receiver<(ServerId, ServerLifecycle)> {
+        self.lifecycle_tx.subscribe()
     }
 
     #[cfg(any(test, feature = "test-utils"))]
@@ -485,6 +506,33 @@ impl ServerManager {
         if let Some(mut state) = self.servers.get_mut(id) {
             state.test_warm_tps_samples = Some((samples, baseline));
         }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub async fn wait_for_lifecycle(
+        &self,
+        id: &ServerId,
+        target: ServerLifecycle,
+        deadline: Duration,
+    ) -> bool {
+        let mut rx = self.subscribe_lifecycle();
+
+        if let Some(state) = self.server_state(id) {
+            if state.lifecycle == target {
+                return true;
+            }
+        }
+
+        tokio::time::timeout(deadline, async {
+            while let Ok((event_id, state)) = rx.recv().await {
+                if event_id == *id && state == target {
+                    return;
+                }
+            }
+        })
+        .await
+        .is_ok()
     }
 }
 

@@ -2,7 +2,7 @@ use crate::config::{ConfigHandle, ConfigReader};
 use crate::queue::admission::AdmissionController;
 use crate::queue::queue::DispatchQueue;
 use crate::queue::types::DispatchResult;
-use crate::types::traits::{ActiveRequestProvider, AdmissionAccounting, DequeueReason};
+use crate::types::traits::{AdmissionAccounting, DequeueReason};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -13,7 +13,6 @@ pub fn start_background_tasks(
     queue: Arc<DispatchQueue>,
     admission: Arc<AdmissionController>,
     config: Arc<ConfigHandle>,
-    active_provider: Option<Arc<dyn ActiveRequestProvider>>,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinSet<()> {
     let q1 = queue.clone();
@@ -33,36 +32,7 @@ pub fn start_background_tasks(
         maintenance_sweep_loop(q2, a2, s2).await;
     });
 
-    if let Some(provider) = active_provider {
-        let s3 = shutdown.clone();
-        tasks.spawn(async move {
-            reconciliation_sweep_loop(admission, provider, s3).await;
-        });
-    }
     tasks
-}
-
-async fn reconciliation_sweep_loop(
-    admission: Arc<AdmissionController>,
-    provider: Arc<dyn ActiveRequestProvider>,
-    shutdown: CancellationToken,
-) {
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
-    // Skip immediate first tick
-    interval.tick().await;
-
-    loop {
-        tokio::select! {
-            _ = shutdown.cancelled() => {
-                info!("Reconciliation sweep loop exiting due to shutdown");
-                break;
-            }
-            _ = interval.tick() => {
-                let active_set = provider.active_requests();
-                admission.reconcile_in_flight(&active_set);
-            }
-        }
-    }
 }
 
 async fn starvation_boost_loop(

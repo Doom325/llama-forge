@@ -308,20 +308,26 @@ async fn wait_for_running_server(
     sm: &llamaforge_server::ServerManager,
     deadline: Duration,
 ) -> anyhow::Result<()> {
-    let start = tokio::time::Instant::now();
-    loop {
-        if start.elapsed() > deadline {
-            anyhow::bail!("timeout waiting for any server to reach Running lifecycle");
-        }
-        let any_running = sm
-            .all_servers()
-            .iter()
-            .any(|(_, s)| matches!(s.lifecycle, llamaforge_server::ServerLifecycle::Running));
-        if any_running {
-            return Ok(());
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+    let mut rx = sm.subscribe_lifecycle();
+
+    let any_running = sm
+        .all_servers()
+        .iter()
+        .any(|(_, s)| matches!(s.lifecycle, llamaforge_server::ServerLifecycle::Running));
+    if any_running {
+        return Ok(());
     }
+
+    tokio::time::timeout(deadline, async {
+        while let Ok((_, state)) = rx.recv().await {
+            if matches!(state, llamaforge_server::ServerLifecycle::Running) {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("lifecycle channel closed")
+    })
+    .await
+    .unwrap_or_else(|_| anyhow::bail!("timeout waiting for any server to reach Running lifecycle"))
 }
 
 /// Wait for an HTTP probe to return 200 OK or timeout.

@@ -87,18 +87,13 @@ async fn test_process_lifecycle_external_kill() {
 
     let srv_id = ServerId::from_config_id("srv_test");
 
-    let mut pid = None;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                pid = state.pid;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    let pid = pid.unwrap();
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(5))
+            .await
+    );
+    let state = mgr_started.server_state(&srv_id).unwrap();
+    let pid = state.pid.unwrap();
 
     // Kill it
     #[cfg(unix)]
@@ -109,19 +104,11 @@ async fn test_process_lifecycle_external_kill() {
     }
 
     // Wait for restart
-    let mut is_restarted = false;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Restarting
-                || (state.lifecycle == ServerLifecycle::Running && state.pid != Some(pid))
-            {
-                is_restarted = true;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    assert!(is_restarted);
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Restarting, Duration::from_secs(5))
+            .await
+    );
 
     token.cancel();
 }
@@ -156,18 +143,13 @@ async fn test_process_lifecycle_shutdown() {
 
     let srv_id = ServerId::from_config_id("srv_test");
 
-    let mut pid = None;
-    for _ in 0..50 {
-        if let Some(state) = mgr_started.server_state(&srv_id) {
-            if state.lifecycle == ServerLifecycle::Running {
-                pid = state.pid;
-                break;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    let pid = pid.unwrap();
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(&srv_id, ServerLifecycle::Running, Duration::from_secs(5))
+            .await
+    );
+    let state = mgr_started.server_state(&srv_id).unwrap();
+    let pid = state.pid.unwrap();
 
     mgr_started.shutdown_all().await;
 
@@ -370,8 +352,16 @@ estimated_vram_mb = 100
     let mgr = Arc::new(manager);
     let mgr_started = mgr.clone().start().await.unwrap();
 
-    // Give it a moment to process orphans
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Give it a moment to process orphans by waiting for srv_a to reach Running
+    assert!(
+        mgr_started
+            .wait_for_lifecycle(
+                &ServerId::from_config_id("srv_a"),
+                ServerLifecycle::Running,
+                Duration::from_secs(5),
+            )
+            .await
+    );
 
     // A should be running with pid_a
     let state_a = mgr_started.server_state(&ServerId::from_config_id("srv_a")).unwrap();

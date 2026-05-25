@@ -9,7 +9,7 @@ pub(crate) struct OpenAiMessage {
     pub content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub(crate) struct OpenAiChatRequest {
     pub model: String,
     pub messages: Vec<OpenAiMessage>,
@@ -21,8 +21,8 @@ pub(crate) struct OpenAiChatRequest {
     pub stream: bool,
     #[serde(default, deserialize_with = "deserialize_logit_bias")]
     pub logit_bias: Option<HashMap<i32, f64>>,
-    pub tools: Option<serde_json::Value>,
-    pub tool_choice: Option<serde_json::Value>,
+    pub tools: Option<llamaforge_core::types::ToolSpec>,
+    pub tool_choice: Option<llamaforge_core::types::ToolSpec>,
     pub function_call: Option<serde_json::Value>,
 }
 
@@ -81,12 +81,35 @@ pub(crate) fn parse_openai_request(
         return Err(ApiError::InvalidBody("messages must contain at least one entry".to_string()));
     }
 
+    if let Some(temp) = request.temperature {
+        if !(0.0..=2.0).contains(&temp) {
+            return Err(ApiError::InvalidBody(format!(
+                "temperature must be between 0.0 and 2.0, got {}",
+                temp
+            )));
+        }
+    }
+    if let Some(max) = request.max_tokens {
+        if max == 0 || max > 131072 {
+            return Err(ApiError::InvalidBody(format!(
+                "max_tokens must be between 1 and 131072, got {}",
+                max
+            )));
+        }
+    }
+
     let mut messages = Vec::with_capacity(request.messages.len());
     for m in request.messages {
         let role = match m.role.as_str() {
             "system" => Role::System,
             "assistant" => Role::Assistant,
-            _ => Role::User,
+            "user" => Role::User,
+            unknown => {
+                return Err(ApiError::InvalidBody(format!(
+                    "unsupported role: '{}'; expected system, assistant, or user",
+                    unknown
+                )))
+            }
         };
         messages.push(Message { role, content: m.content });
     }
@@ -254,5 +277,64 @@ mod tests {
         assert!(formatted_stop[0].contains("\"finish_reason\":\"stop\""));
         assert!(formatted_stop[0].contains("\"id\":\"req_123\""));
         assert_eq!(formatted_stop[1], "[DONE]");
+    }
+
+    #[test]
+    fn test_openai_unknown_role_rejected() {
+        let req = OpenAiChatRequest {
+            model: "llama".to_string(),
+            messages: vec![OpenAiMessage { role: "tool".to_string(), content: "foo".to_string() }],
+            max_tokens: None,
+            temperature: None,
+            stream: false,
+            logit_bias: None,
+            tools: None,
+            tool_choice: None,
+            function_call: None,
+        };
+        let result = parse_openai_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("unsupported role")),
+            "unknown role must surface as InvalidBody, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_openai_out_of_range_rejected() {
+        let mut req = OpenAiChatRequest {
+            model: "llama".to_string(),
+            messages: vec![OpenAiMessage { role: "user".to_string(), content: "foo".to_string() }],
+            max_tokens: Some(0),
+            temperature: None,
+            stream: false,
+            logit_bias: None,
+            tools: None,
+            tool_choice: None,
+            function_call: None,
+        };
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = Some(200000);
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("max_tokens must be between 1 and 131072"))
+        );
+
+        req.max_tokens = Some(100);
+        req.temperature = Some(-0.1);
+        let result = parse_openai_request(req.clone());
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
+        );
+
+        req.temperature = Some(2.1);
+        let result = parse_openai_request(req);
+        assert!(
+            matches!(result, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
+        );
     }
 }

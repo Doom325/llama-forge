@@ -1,7 +1,6 @@
 //! Thread-local cached reader for hot paths.
 //!
 //! See design doc Section 2.4.
-use crate::config::traits::ConfigReader;
 use crate::config::types::AppConfig;
 use arc_swap::cache::Cache;
 use arc_swap::ArcSwap;
@@ -14,9 +13,9 @@ pub struct CachedConfigReader {
 }
 
 impl CachedConfigReader {
-    /// Create a new CachedConfigReader from any ConfigReader.
-    pub fn new(reader: &dyn ConfigReader) -> Self {
-        Self { cache: Cache::new(reader.arc_swap()) }
+    /// Create a new CachedConfigReader from a concrete ArcSwap.
+    pub fn new(arc_swap: Arc<ArcSwap<AppConfig>>) -> Self {
+        Self { cache: Cache::new(arc_swap) }
     }
     /// Load the configuration from the local cache.
     /// Performs an atomic load only if the underlying ArcSwap has advanced.
@@ -37,7 +36,7 @@ mod tests {
         let source = Arc::new(InMemoryConfigSource::new(config.clone()));
         let handle = ConfigHandle::load(source).unwrap();
 
-        let mut cached_reader = CachedConfigReader::new(&handle);
+        let mut cached_reader = CachedConfigReader::new(handle.arc_swap());
 
         let ptr1 = Arc::as_ptr(cached_reader.load());
         let ptr2 = Arc::as_ptr(cached_reader.load());

@@ -5,22 +5,16 @@
 use crate::config::diff::ConfigDiff;
 use crate::config::error::{ConfigReloadError, WritebackError};
 use crate::config::types::{AppConfig, ConfigMutation};
-use arc_swap::Guard;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Read-only access to the configuration.
-pub trait ConfigReader: Send + Sync + private::Sealed {
+pub trait ConfigReader: Send + Sync {
     /// Get a zero-cost snapshot of the current configuration.
-    ///
-    /// Implementation contract: returns a Guard from `arc_swap::ArcSwap::load`.
-    fn snapshot(&self) -> Guard<Arc<AppConfig>>;
+    fn snapshot(&self) -> Arc<AppConfig>;
 
     /// Subscribe to configuration changes.
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>>;
-
-    /// Access the underlying ArcSwap for cached readers.
-    fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>>;
 }
 
 /// Write access for reloading or mutating configuration.
