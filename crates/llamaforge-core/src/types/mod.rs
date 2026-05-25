@@ -548,7 +548,7 @@ pub struct Message {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct ToolSpec(pub serde_json::Value);
+pub struct ToolSpec(serde_json::Value);
 
 impl serde::Serialize for ToolSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
