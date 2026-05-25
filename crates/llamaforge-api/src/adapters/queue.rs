@@ -39,6 +39,18 @@ impl QueueSubmitter for QueueSubmitterAdapter {
         let requestor_id = req.requestor_id.clone();
         let request_id = req.request_id;
 
+        let trace_context = {
+            use opentelemetry::trace::TraceContextExt;
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            let span = tracing::Span::current();
+            let ctx = span.context();
+            if ctx.span().span_context().is_valid() {
+                Some(ctx)
+            } else {
+                None
+            }
+        };
+
         let q_req = llamaforge_core::queue::types::IncomingRequest {
             id: request_id,
             payload: Arc::new(()), // Transport doesn't pass a payload to queue; dispatch takes it directly later
@@ -51,7 +63,7 @@ impl QueueSubmitter for QueueSubmitterAdapter {
             explicit_override: None,
             response_tx,
             cancel_token: cancel_token.clone(),
-            trace_context: None,
+            trace_context,
         };
 
         match self.pipeline.submit(q_req) {
