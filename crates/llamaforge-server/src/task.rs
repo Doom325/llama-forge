@@ -143,9 +143,14 @@ pub async fn spawn_server_task(
                     .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(1)));
                 entry.value().clone()
             };
-            // INVARIANT: The Arc<Semaphore> is owned by the DashMap which has the same lifetime as ServerManager.
-            // We only insert and acquire, never close the semaphore.
-            permit = Some(gpu_semaphore.acquire_owned().await.expect("Semaphore closed"));
+            permit = match gpu_semaphore.acquire_owned().await {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    tracing::error!(server.id = %server_id, "GPU semaphore unexpectedly closed");
+                    transition_to(&mgr, &server_id, ServerLifecycle::Failed);
+                    break;
+                }
+            };
 
             if let Err(e) = mgr.pre_spawn_vram_check(&server_id, &config, &gpu_id, &meta_ref) {
                 error!(server.id = %server_id, "Insufficient VRAM: {}", e);
