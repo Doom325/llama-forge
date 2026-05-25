@@ -340,7 +340,7 @@ ctx_size = 2048
     let err = instrumented.reload().await.unwrap_err();
     assert!(matches!(err, ConfigReloadError::LoadError(ConfigLoadError::ParseError { .. })));
 
-    assert_eq!(**instrumented.snapshot(), *old_snap);
+    assert_eq!(*instrumented.snapshot(), *old_snap);
 }
 
 #[tokio::test]
@@ -543,7 +543,7 @@ ctx_size = 2048
 
     let instrumented =
         setup_stack(main_path.clone(), PathBuf::new(), dir.path().to_path_buf()).unwrap();
-    let mut cached = CachedConfigReader::new(&instrumented);
+    let mut cached = CachedConfigReader::new(instrumented.arc_swap());
 
     for _ in 0..100 {
         let _ = instrumented.reload().await.unwrap();

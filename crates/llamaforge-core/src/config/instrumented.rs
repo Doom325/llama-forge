@@ -7,7 +7,6 @@ use crate::config::error::{ConfigReloadError, WritebackError};
 use crate::config::handle::ConfigHandle;
 use crate::config::traits::{ConfigReader, ConfigWriter};
 use crate::config::types::{AppConfig, ConfigMutation};
-use arc_swap::Guard;
 use metrics::{counter, describe_counter, describe_histogram, histogram};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -41,22 +40,21 @@ impl InstrumentedConfigHandle {
 
         Self { inner }
     }
+    pub fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>> {
+        self.inner.arc_swap()
+    }
 }
 
 impl crate::config::traits::private::Sealed for InstrumentedConfigHandle {}
 
 impl ConfigReader for InstrumentedConfigHandle {
     // Hot path: zero instrumentation overhead.
-    fn snapshot(&self) -> Guard<Arc<AppConfig>> {
+    fn snapshot(&self) -> Arc<AppConfig> {
         self.inner.snapshot()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<Arc<ConfigDiff>> {
         self.inner.subscribe()
-    }
-
-    fn arc_swap(&self) -> Arc<arc_swap::ArcSwap<AppConfig>> {
-        self.inner.arc_swap()
     }
 }
 
@@ -194,7 +192,7 @@ mod tests {
         let handle = ConfigHandle::load(source).unwrap();
         let instrumented = InstrumentedConfigHandle::new(handle);
 
-        assert_eq!(**instrumented.snapshot(), config);
+        assert_eq!(*instrumented.snapshot(), config);
 
         let diff = instrumented.reload().await.unwrap();
         assert!(diff.changes.is_empty());
