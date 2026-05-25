@@ -17,8 +17,8 @@ pub(crate) struct AnthropicMessagesRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub stream: bool,
-    pub tools: Option<serde_json::Value>,
-    pub tool_choice: Option<serde_json::Value>,
+    pub tools: Option<llamaforge_core::types::ToolSpec>,
+    pub tool_choice: Option<llamaforge_core::types::ToolSpec>,
 }
 
 /// Parses an Anthropic messages request into the internal domain type.

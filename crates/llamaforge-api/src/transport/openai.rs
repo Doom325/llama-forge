@@ -21,8 +21,8 @@ pub(crate) struct OpenAiChatRequest {
     pub stream: bool,
     #[serde(default, deserialize_with = "deserialize_logit_bias")]
     pub logit_bias: Option<HashMap<i32, f64>>,
-    pub tools: Option<serde_json::Value>,
-    pub tool_choice: Option<serde_json::Value>,
+    pub tools: Option<llamaforge_core::types::ToolSpec>,
+    pub tool_choice: Option<llamaforge_core::types::ToolSpec>,
     pub function_call: Option<serde_json::Value>,
 }
 
