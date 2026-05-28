@@ -611,6 +611,12 @@ mod tests {
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
+        fn cluster_state(&self) -> u8 {
+            1
+        }
+        fn is_gateway_initialized(&self) -> bool {
+            true
+        }
     }
 
     struct MockQueueSubmitter;

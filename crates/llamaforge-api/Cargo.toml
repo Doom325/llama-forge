@@ -93,6 +93,10 @@ name = "api_transport_vc3"
 path = "tests/transport/vc3_transport.rs"
 
 [[test]]
+name = "api_transport_readiness_tests"
+path = "tests/transport/readiness_tests.rs"
+
+[[test]]
 name = "api_dispatch_design_doc_tests"
 path = "tests/dispatch/design_doc_tests.rs"
 

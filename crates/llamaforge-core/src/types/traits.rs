@@ -195,6 +195,12 @@ pub trait ServerControl: Send + Sync {
     async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError>;
     async fn start_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
     async fn stop_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
+    
+    /// Returns the current cluster state (0=Unknown, 1=Healthy, 2=Degraded, 3=Failed).
+    fn cluster_state(&self) -> u8;
+    
+    /// Returns true if the gateway has completed initial startup.
+    fn is_gateway_initialized(&self) -> bool;
 }
 
 /// Open trait. RouteValidator

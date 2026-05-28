@@ -39,6 +39,11 @@ pub struct ServerManager {
     pub(crate) warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
     pub(crate) gpu_semaphores: Arc<DashMap<GpuId, Arc<tokio::sync::Semaphore>>>,
     pub(crate) tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
+
+    /// Fleet readiness state: 0=Unknown, 1=Healthy, 2=Degraded, 3=Failed
+    pub(crate) cluster_state: Arc<std::sync::atomic::AtomicU8>,
+    /// Indicates if the initial startup sequence has completed
+    pub(crate) gateway_initialized: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ServerManager {
@@ -66,7 +71,49 @@ impl ServerManager {
             warned_overflow: Arc::new(DashMap::new()),
             gpu_semaphores: Arc::new(DashMap::new()),
             tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
+            cluster_state: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            gateway_initialized: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Returns the current cluster state (0=Unknown, 1=Healthy, 2=Degraded, 3=Failed).
+    pub fn cluster_state(&self) -> u8 {
+        self.cluster_state.load(Ordering::Relaxed)
+    }
+
+    /// Returns true if the gateway has completed initial startup.
+    pub fn is_gateway_initialized(&self) -> bool {
+        self.gateway_initialized.load(Ordering::Relaxed)
+    }
+
+    /// Recalculates the fleet state and updates `cluster_state`.
+    /// Called whenever a server transitions state.
+    pub(crate) fn recalculate_cluster_state(&self) {
+        let mut active = 0;
+        let mut starting = 0;
+        let mut failed = 0;
+        let total = self.servers.len();
+
+        for entry in self.servers.iter() {
+            match entry.value().lifecycle {
+                ServerLifecycle::Running => active += 1,
+                ServerLifecycle::Starting | ServerLifecycle::Restarting | ServerLifecycle::Draining => starting += 1,
+                ServerLifecycle::Failed | ServerLifecycle::Stopped => failed += 1,
+                _ => starting += 1, // Treat unknown future states as non-terminal for now
+            }
+        }
+
+        let new_state = if total == 0 {
+            1 // Empty cluster is "healthy"
+        } else if active == 0 && starting == 0 && failed > 0 {
+            2 // All failed (circuit breaker tripped)
+        } else if active > 0 {
+            1 // Some running
+        } else {
+            0 // Some starting, none running yet
+        };
+
+        self.cluster_state.store(new_state, Ordering::Release);
     }
 
     // --- Task 4.1: Implementation of start() ---
@@ -145,6 +192,10 @@ impl ServerManager {
                 crate::task::spawn_server_task(mgr, srv, cfg, orphan_pid).await;
             });
         }
+
+        // Gateway initialization is complete once all initial server tasks are spawned.
+        self.recalculate_cluster_state();
+        self.gateway_initialized.store(true, Ordering::Release);
 
         Ok(self)
     }

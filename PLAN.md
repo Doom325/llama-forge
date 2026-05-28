@@ -13,9 +13,12 @@ This plan addresses the [E2E] bugs filed during testing, as tracked on GitHub.
 
 ## Phase 2 — Service Health & Readiness (PR-2)
 **Goal:** Implement missing health/readiness endpoints (#227, #234).
-- [ ] **2.1** Fix #227: Register `grpc.health.v1.Health` service.
-- [ ] **2.2** Fix #234: Implement `/ready` and `/ready/inference` endpoints.
-- [ ] **2.3** Open PR-2.
+- [ ] **2.1** Fix #227: Add `tonic-health` dependency and register `grpc.health.v1.Health` service in `grpc.rs`.
+- [ ] **2.2** Fix #234: Add `cluster_state` and `gateway_initialized` `AtomicU8` tracking to server manager state.
+- [ ] **2.3** Fix #234: Implement `/ready` (with circuit breaker) and `/ready/inference` endpoints in `http.rs`.
+- [ ] **2.4** Wire gRPC health reporter to reflect the orchestrator and fleet status.
+- [ ] **2.5** Add unit and integration tests for new endpoints.
+- [ ] **2.6** Open PR-2 and hand off to ReviewerAgent.
 
 ## Phase 3 — Metrics & Observability (PR-3)
 **Goal:** Fix metrics accumulation and missing fields (#232, #230).

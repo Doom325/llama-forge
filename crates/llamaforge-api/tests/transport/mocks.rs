@@ -10,7 +10,9 @@ use llamaforge_core::types::{
     ChatCompletionChunk, RequestId, ServerId, StreamError,
 };
 
-pub struct MockEngine {
+#[allow(dead_code)]
+pub struct MockEngine
+ {
     pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
     pub sleep_ms: u64,
 }
@@ -41,6 +43,7 @@ impl InferenceEngine for MockEngine {
     }
 }
 
+#[allow(dead_code)]
 pub struct MockRouteValidator;
 impl RouteValidator for MockRouteValidator {
     fn validate_routable(
@@ -52,6 +55,7 @@ impl RouteValidator for MockRouteValidator {
     }
 }
 
+#[allow(dead_code)]
 pub struct MockMetricsExporter;
 impl MetricsExporter for MockMetricsExporter {
     fn gather_text(&self) -> String {
@@ -59,6 +63,7 @@ impl MetricsExporter for MockMetricsExporter {
     }
 }
 
+#[allow(dead_code)]
 pub struct MockServerControl;
 #[async_trait::async_trait]
 impl ServerControl for MockServerControl {
@@ -71,8 +76,15 @@ impl ServerControl for MockServerControl {
     async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
         Ok(())
     }
+    fn cluster_state(&self) -> u8 {
+        1
+    }
+    fn is_gateway_initialized(&self) -> bool {
+        true
+    }
 }
 
+#[allow(dead_code)]
 pub struct MockQueueSubmitter;
 impl QueueSubmitter for MockQueueSubmitter {
     fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {

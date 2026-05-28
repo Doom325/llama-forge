@@ -59,6 +59,14 @@ impl ServerControl for ServerControlAdapter {
             Err(e) => Err(ServerError::SpawnFailed { reason: e.to_string() }),
         }
     }
+
+    fn cluster_state(&self) -> u8 {
+        self.manager.cluster_state()
+    }
+
+    fn is_gateway_initialized(&self) -> bool {
+        self.manager.is_gateway_initialized()
+    }
 }
 
 #[cfg(test)]

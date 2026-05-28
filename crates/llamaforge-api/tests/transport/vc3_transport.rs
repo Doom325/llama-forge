@@ -489,6 +489,12 @@ async fn test_vc3_10_management_api_round_trip() {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
+        fn cluster_state(&self) -> u8 {
+            1
+        }
+        fn is_gateway_initialized(&self) -> bool {
+            true
+        }
     }
 
     let sc = Arc::new(MockServerControlImpl);

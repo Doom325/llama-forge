@@ -642,6 +642,41 @@ pub(crate) async fn health_check() -> axum::response::Response {
     axum::Json(serde_json::json!({"status": "ok"})).into_response()
 }
 
+pub(crate) async fn ready_handler<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
+) -> axum::response::Response
+where
+    CW: ConfigWriter + Send + Sync + 'static,
+{
+    let initialized = state.server_control.is_gateway_initialized();
+    let cluster = state.server_control.cluster_state();
+
+    if !initialized {
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "starting" }))).into_response();
+    }
+
+    if cluster == 2 { // all_failed
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "cluster_failed" }))).into_response();
+    }
+
+    axum::Json(serde_json::json!({ "status": "ok" })).into_response()
+}
+
+pub(crate) async fn ready_inference_handler<CW, RMS, SM>(
+    State(state): State<HttpAppState<CW, RMS, SM>>,
+) -> axum::response::Response
+where
+    CW: ConfigWriter + Send + Sync + 'static,
+{
+    let cluster = state.server_control.cluster_state();
+    
+    if cluster == 1 { // some_running
+        axum::Json(serde_json::json!({ "status": "ok" })).into_response()
+    } else {
+        (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "not_ready" }))).into_response()
+    }
+}
+
 /// `GET /v1/models` — OpenAI-compatible model discovery. Emits the
 /// list envelope `{"object":"list","data":[...]}` over the distinct
 /// server aliases in the config snapshot. Servers without an alias
@@ -739,6 +774,12 @@ where
         // operator status surface. Same payload as `/api/servers`.
         .route("/v1/servers", get(list_v1_servers::<CW, RMS, SM>))
         .route("/health", get(health_check))
+        .route("/healthz", get(health_check))
+        .route("/livez", get(health_check))
+        .route("/ready", get(ready_handler::<CW, RMS, SM>))
+        .route("/readyz", get(ready_handler::<CW, RMS, SM>))
+        .route("/api/ready", get(ready_handler::<CW, RMS, SM>))
+        .route("/ready/inference", get(ready_inference_handler::<CW, RMS, SM>))
         .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
         .with_state(state.clone());
 
@@ -867,6 +908,12 @@ mod tests {
             _id: &ServerId,
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
+        }
+        fn cluster_state(&self) -> u8 {
+            1
+        }
+        fn is_gateway_initialized(&self) -> bool {
+            true
         }
     }
 
