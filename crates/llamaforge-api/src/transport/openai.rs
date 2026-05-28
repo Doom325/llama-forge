@@ -133,11 +133,19 @@ pub(crate) fn parse_openai_request(
 /// adds the framing itself. Stop chunks expand to two events: the
 /// terminal completion chunk and the OpenAI-canonical `[DONE]`
 /// sentinel.
-pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> Vec<String> {
+pub(crate) fn format_openai_chunk(
+    id: &str,
+    model: &str,
+    chunk: &ChatCompletionChunk,
+) -> Vec<String> {
+    let now = chrono::Utc::now().timestamp();
     match chunk {
         ChatCompletionChunk::QueueUpdate { position } => {
             let update = serde_json::json!({
                 "id": id,
+                "object": "chat.completion.chunk",
+                "created": now,
+                "model": model,
                 "choices": [{
                     "delta": {},
                     "index": 0
@@ -152,6 +160,9 @@ pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> Vec<
         ChatCompletionChunk::Token(token) => {
             let token_json = serde_json::json!({
                 "id": id,
+                "object": "chat.completion.chunk",
+                "created": now,
+                "model": model,
                 "choices": [{
                     "delta": { "content": token },
                     "index": 0
@@ -162,6 +173,9 @@ pub(crate) fn format_openai_chunk(id: &str, chunk: &ChatCompletionChunk) -> Vec<
         ChatCompletionChunk::Stop { finish_reason, output_tokens, prompt_tokens } => {
             let stop_json = serde_json::json!({
                 "id": id,
+                "object": "chat.completion.chunk",
+                "created": now,
+                "model": model,
                 "choices": [{
                     "delta": {},
                     "index": 0,
@@ -253,29 +267,37 @@ mod tests {
 
     #[test]
     fn test_openai_chunk_formatting() {
+        let model = "test-model";
         let queued = ChatCompletionChunk::QueueUpdate { position: 3 };
-        let formatted_queued = format_openai_chunk("req_123", &queued);
+        let formatted_queued = format_openai_chunk("req_123", model, &queued);
         assert_eq!(formatted_queued.len(), 1);
         assert!(
             formatted_queued[0].contains("\"llamaforge\":{\"position\":3,\"status\":\"queued\"}")
         );
         assert!(formatted_queued[0].contains("\"id\":\"req_123\""));
+        assert!(formatted_queued[0].contains("\"object\":\"chat.completion.chunk\""));
+        assert!(formatted_queued[0].contains("\"model\":\"test-model\""));
+        assert!(formatted_queued[0].contains("\"created\":"));
 
         let token = ChatCompletionChunk::Token("Hello".to_string());
-        let formatted_token = format_openai_chunk("req_123", &token);
+        let formatted_token = format_openai_chunk("req_123", model, &token);
         assert_eq!(formatted_token.len(), 1);
         assert!(formatted_token[0].contains("\"content\":\"Hello\""));
         assert!(formatted_token[0].contains("\"id\":\"req_123\""));
+        assert!(formatted_token[0].contains("\"object\":\"chat.completion.chunk\""));
+        assert!(formatted_token[0].contains("\"model\":\"test-model\""));
 
         let stop = ChatCompletionChunk::Stop {
             finish_reason: "stop".to_string(),
-            output_tokens: 0,
-            prompt_tokens: 0,
+            output_tokens: 10,
+            prompt_tokens: 5,
         };
-        let formatted_stop = format_openai_chunk("req_123", &stop);
+        let formatted_stop = format_openai_chunk("req_123", model, &stop);
         assert_eq!(formatted_stop.len(), 2);
         assert!(formatted_stop[0].contains("\"finish_reason\":\"stop\""));
         assert!(formatted_stop[0].contains("\"id\":\"req_123\""));
+        assert!(formatted_stop[0].contains("\"object\":\"chat.completion.chunk\""));
+        assert!(formatted_stop[0].contains("\"model\":\"test-model\""));
         assert_eq!(formatted_stop[1], "[DONE]");
     }
 

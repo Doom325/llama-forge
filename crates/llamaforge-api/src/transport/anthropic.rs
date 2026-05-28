@@ -260,7 +260,11 @@ pub(crate) fn format_anthropic_event(
                 data: serde_json::json!({
                     "type": "message_delta",
                     "delta": {
-                        "stop_reason": finish_reason,
+                        "stop_reason": match finish_reason.as_str() {
+                            "stop" => "end_turn",
+                            "length" => "max_tokens",
+                            other => other,
+                        },
                         "stop_sequence": null
                     },
                     "usage": {
@@ -370,7 +374,7 @@ mod tests {
         assert_eq!(events2[0].event_type, "content_block_delta");
 
         let stop_chunk = ChatCompletionChunk::Stop {
-            finish_reason: "end_turn".to_string(),
+            finish_reason: "stop".to_string(),
             output_tokens: 0,
             prompt_tokens: 0,
         };
@@ -380,6 +384,11 @@ mod tests {
         assert_eq!(events_stop[0].event_type, "content_block_stop");
         assert_eq!(events_stop[1].event_type, "message_delta");
         assert_eq!(events_stop[2].event_type, "message_stop");
+
+        // Verify "stop" -> "end_turn"
+        let delta = events_stop.iter().find(|e| e.event_type == "message_delta").unwrap();
+        let payload: serde_json::Value = serde_json::from_str(&delta.data).unwrap();
+        assert_eq!(payload["delta"]["stop_reason"], "end_turn");
     }
 
     #[test]
@@ -387,7 +396,7 @@ mod tests {
         let mut state = AnthropicState::new();
         state.phase = AnthropicStreamPhase::ContentBlock;
         let stop_chunk = ChatCompletionChunk::Stop {
-            finish_reason: "end_turn".to_string(),
+            finish_reason: "length".to_string(),
             output_tokens: 17,
             prompt_tokens: 0,
         };
@@ -396,6 +405,8 @@ mod tests {
         let delta = events.iter().find(|e| e.event_type == "message_delta").expect("message_delta");
         let payload: serde_json::Value = serde_json::from_str(&delta.data).unwrap();
         assert_eq!(payload["usage"]["output_tokens"].as_u64(), Some(17));
+        // Verify "length" -> "max_tokens"
+        assert_eq!(payload["delta"]["stop_reason"], "max_tokens");
     }
 
     #[test]

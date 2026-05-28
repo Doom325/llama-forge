@@ -46,6 +46,16 @@ struct LlamaResponse {
     tokens_processed: Option<u32>,
     #[serde(default)]
     tokens_predicted: Option<u32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    stopped_eos: bool,
+    #[serde(default)]
+    #[allow(dead_code)]
+    stopped_word: bool,
+    #[serde(default)]
+    stopped_limit: bool,
+    #[serde(default)]
+    truncated: bool,
 }
 
 /// Record for the audit log.
@@ -267,7 +277,15 @@ pub async fn proxy_task(
                                     stop: parsed.stop,
                                     tokens_predicted: if parsed.stop { tokens_predicted } else { 1 },
                                     prompt_tokens: if parsed.stop { prompt_tokens } else { 0 },
-                                    finish_reason: None,
+                                    finish_reason: if parsed.stop {
+                                        if parsed.stopped_limit || parsed.truncated {
+                                            Some("length".to_string())
+                                        } else {
+                                            Some("stop".to_string())
+                                        }
+                                    } else {
+                                        None
+                                    },
                                 });
                             }
                         }

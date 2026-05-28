@@ -173,7 +173,7 @@ where
         })?;
 
     let mut response_stream =
-        state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
+        state.inference_engine.chat_completion(req).await.map_err(ApiError::from)?;
 
     let req_id_str = format!("chatcmpl-{}", request_id.as_uuid());
 
@@ -210,7 +210,7 @@ where
                     }
                     Ok(None) => break,
                     Ok(Some(Ok(chunk))) => {
-                        for data in format_openai_chunk(&req_id_str_for_stream, &chunk) {
+                        for data in format_openai_chunk(&req_id_str_for_stream, &model_echo, &chunk) {
                             yield Ok(Event::default().data(data));
                         }
                     }
@@ -398,6 +398,7 @@ pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
     axum::extract::Extension(request_id): axum::extract::Extension<
         llamaforge_core::types::RequestId,
     >,
+    axum::extract::ConnectInfo(remote_addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     headers: axum::http::HeaderMap,
     req_bytes: axum::body::Bytes,
 ) -> Result<axum::response::Response, ApiError>
@@ -413,7 +414,16 @@ where
     let anthropic_version =
         headers.get("anthropic-version").and_then(|v| v.to_str().ok()).map(str::to_string);
     if anthropic_version.is_none() {
-        tracing::warn!(api = "anthropic", "api.missing_anthropic_version_header");
+        tracing::warn!(
+            target: "api",
+            event = "api.missing_anthropic_version_header",
+            request_id = %request_id,
+            remote_addr = %remote_addr,
+            user_agent = ?headers.get(axum::http::header::USER_AGENT),
+            "Anthropic /v1/messages request missing or malformed anthropic-version header; admitted permissively (v1.0 behavior). Strict-reject is planned for v1.1."
+        );
+        metrics::counter!("llamaforge_api_missing_anthropic_version_total", "shim" => "anthropic")
+            .increment(1);
     }
     let inject_version = |mut resp: axum::response::Response| -> axum::response::Response {
         if let Some(ref v) = anthropic_version {
@@ -460,7 +470,7 @@ where
         })?;
 
     let mut response_stream =
-        state.inference_engine.chat_completion(req).await.map_err(|_| ApiError::BackendError)?;
+        state.inference_engine.chat_completion(req).await.map_err(ApiError::from)?;
 
     let req_id_str = format!("msg_{}", request_id.as_uuid());
 
@@ -735,13 +745,13 @@ where
     inference_router
         .merge(management_router)
         .layer(axum::middleware::from_fn(metrics_middleware))
-        .layer(axum::middleware::from_fn(request_id_middleware))
-        .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
+        .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(axum::middleware::from_fn_with_state(
             state.large_body_limit.clone(),
             large_body_limit_middleware,
         ))
-        .layer(RequestBodyLimitLayer::new(max_body_bytes))
+        .layer(axum::middleware::from_fn(request_id_middleware))
+        .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
         .layer(super::middleware::build_cors_layer(state.config_reader.clone()))
         .layer(CatchPanicLayer::new())
 }
@@ -1103,7 +1113,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_anthropic_missing_version_header_admitted() {
+        let chunks = vec![Ok(ChatCompletionChunk::Stop {
+            finish_reason: "end_turn".to_string(),
+            output_tokens: 10,
+            prompt_tokens: 5,
+        })];
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("content-type", "application/json")
+            // Missing anthropic-version header
+            .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 12345))))
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        // Anthropic response should NOT have the header if it was missing in request
+        assert!(res.headers().get("anthropic-version").is_none());
+    }
+
+    #[tokio::test]
     async fn test_queue_full_returns_429_with_retry_after() {
+
         struct MockRouteValidatorRejects;
         impl RouteValidator for MockRouteValidatorRejects {
             fn validate_routable(
@@ -1170,5 +1213,65 @@ mod tests {
         // Throughput is 10.0, depth is 100 -> 100 / 10 = 10s
         let retry_after = res.headers().get("retry-after").unwrap();
         assert_eq!(retry_after, "10");
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_rate_limited_returns_429() {
+        // Issue #231 reproduction: When chat_completion returns
+        // DispatchError::RateLimited, the transport must map it to
+        // 429 QueueFull, not 502 BackendError.
+        struct MockEngineRateLimited;
+        #[async_trait::async_trait]
+        impl InferenceEngine for MockEngineRateLimited {
+            async fn chat_completion(
+                &self,
+                _req: llamaforge_core::types::ChatCompletionRequest,
+            ) -> Result<
+                Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
+                llamaforge_core::types::traits::DispatchError,
+            > {
+                Err(llamaforge_core::types::traits::DispatchError::RateLimited {
+                    retry_after_secs: 42,
+                })
+            }
+        }
+
+        let mut config = AppConfig::default();
+        config.global.queue_default_timeout_secs = 1;
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidator),
+            inference_engine: Arc::new(MockEngineRateLimited),
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+        };
+
+        let app = build_router(state);
+
+        let body = serde_json::json!({
+            "model": "test",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": false
+        });
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        // This assertion should FAIL currently (it will be 502)
+        assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(res.headers().get("retry-after").unwrap(), "42");
     }
 }

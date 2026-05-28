@@ -75,6 +75,25 @@ impl From<llamaforge_core::types::traits::AdmissionError> for ApiError {
     }
 }
 
+impl From<llamaforge_core::types::traits::DispatchError> for ApiError {
+    fn from(err: llamaforge_core::types::traits::DispatchError) -> Self {
+        match err {
+            llamaforge_core::types::traits::DispatchError::QueueFull => {
+                ApiError::QueueFull { retry_after_secs: QUEUE_FULL_FALLBACK_RETRY_SECS }
+            }
+            llamaforge_core::types::traits::DispatchError::RateLimited { retry_after_secs } => {
+                ApiError::QueueFull { retry_after_secs }
+            }
+            llamaforge_core::types::traits::DispatchError::NoServerForModel { .. } => {
+                ApiError::ModelNotFound
+            }
+            llamaforge_core::types::traits::DispatchError::Internal { reason } => {
+                ApiError::Internal(reason)
+            }
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, error_code, message) = match &self {
