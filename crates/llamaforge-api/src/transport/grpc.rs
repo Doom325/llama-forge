@@ -86,11 +86,8 @@ impl InferenceService for GrpcInferenceService {
             .validate_routable(&incoming.model_target, &incoming.capabilities)
             .map_err(map_admission_error)?;
 
-        let mut response_stream = self
-            .inference_engine
-            .chat_completion(chat_req)
-            .await
-            .map_err(map_dispatch_error)?;
+        let mut response_stream =
+            self.inference_engine.chat_completion(chat_req).await.map_err(map_dispatch_error)?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
@@ -128,7 +125,10 @@ fn map_admission_error(err: llamaforge_core::types::traits::AdmissionError) -> S
                 _ => None,
             };
             if let Some(secs) = retry_after {
-                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                if let Ok(hv) = secs
+                    .to_string()
+                    .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+                {
                     status.metadata_mut().insert("retry-after", hv);
                 }
             }
@@ -153,7 +153,10 @@ fn map_dispatch_error(err: llamaforge_core::types::traits::DispatchError) -> Sta
                 _ => None,
             };
             if let Some(secs) = retry_after {
-                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                if let Ok(hv) = secs
+                    .to_string()
+                    .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+                {
                     status.metadata_mut().insert("retry-after", hv);
                 }
             }
@@ -410,11 +413,10 @@ where
     .max_encoding_message_size(max_message_size);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
-    health_reporter.clone().set_serving::<InferenceServiceServer<GrpcInferenceService>>().await;
-    health_reporter
-        .clone()
-        .set_serving::<ManagementServiceServer<GrpcManagementService<CW>>>()
-        .await;
+    health_reporter.set_serving::<InferenceServiceServer<GrpcInferenceService>>().await;
+    health_reporter.set_serving::<ManagementServiceServer<GrpcManagementService<CW>>>().await;
+    // Set the overall health (empty string service name) to SERVING.
+    health_reporter.set_service_status("", tonic_health::ServingStatus::Serving).await;
 
     let auth_interceptor = AuthInterceptor { config_reader: state.config_reader.clone() };
 
@@ -611,6 +613,19 @@ mod tests {
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
+        }
+    }
+
+    struct MockGatewayLifecycle;
+    impl llamaforge_core::types::traits::GatewayLifecycle for MockGatewayLifecycle {
+        fn is_gateway_initialized(&self) -> bool {
+            true
+        }
     }
 
     struct MockQueueSubmitter;
@@ -673,6 +688,7 @@ mod tests {
             inference_engine: Arc::new(MockEngine { chunks: std::sync::Mutex::new(chunks) }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -739,6 +755,7 @@ mod tests {
             inference_engine: Arc::new(MockEngine { chunks: std::sync::Mutex::new(vec![]) }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -767,6 +784,27 @@ mod tests {
         assert_eq!(
             response.status,
             tonic_health::pb::health_check_response::ServingStatus::Serving as i32
+        );
+
+        // F1 / #227: the overall-server key (empty service name) must
+        // also report SERVING — that's the form `grpcurl healthcheck
+        // localhost:50051` and most service-mesh probes use when they
+        // don't know a specific service name.
+        let mut client2 = tonic_health::pb::health_client::HealthClient::new(
+            tonic::transport::Channel::from_static(Box::leak(
+                format!("http://{}", bound).into_boxed_str(),
+            ))
+            .connect()
+            .await
+            .unwrap(),
+        );
+        let request =
+            tonic::Request::new(tonic_health::pb::HealthCheckRequest { service: String::new() });
+        let response = client2.check(request).await.unwrap().into_inner();
+        assert_eq!(
+            response.status,
+            tonic_health::pb::health_check_response::ServingStatus::Serving as i32,
+            "overall-server health (empty service name) must be SERVING"
         );
 
         let _ = tx.send(());

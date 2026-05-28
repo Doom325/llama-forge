@@ -223,7 +223,10 @@ estimated_vram_mb = 100
         // the returned `OrchestratorHandle` so the test owns the
         // lifecycle.
         let shutdown = CancellationToken::new();
-        let (deps, bg) = llamaforge::build(handle.clone(), shutdown.clone()).await?;
+        let gateway_initialized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (deps, bg) =
+            llamaforge::build(handle.clone(), shutdown.clone(), gateway_initialized.clone())
+                .await?;
         let llamaforge::BackgroundTasks { scheduler, server_manager } = bg;
 
         server_manager
@@ -253,6 +256,11 @@ estimated_vram_mb = 100
         let transport = llamaforge_api::transport::start_servers(deps)
             .await
             .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;
+
+        // Flip the gateway-initialized flag only AFTER the HTTP/gRPC
+        // listeners are successfully bound. Matches the production
+        // ordering in `llamaforge::serve::run` per `design.md:4353`.
+        gateway_initialized.store(true, std::sync::atomic::Ordering::Release);
 
         let http_addr = transport.http_addr;
         let grpc_addr = transport.grpc_addr;

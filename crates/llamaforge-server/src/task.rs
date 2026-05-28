@@ -744,6 +744,7 @@ fn transition_to(mgr: &ServerManager, server_id: &ServerId, new_state: ServerLif
             }
         }
     }
+    mgr.recalculate_cluster_state();
 }
 
 #[cfg(test)]

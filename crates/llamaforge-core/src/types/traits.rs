@@ -190,11 +190,36 @@ pub enum MetricsError {
 }
 
 /// Open trait. ServerControl
+///
+/// Concerns: fleet operations (list/start/stop) plus the
+/// fleet-derived readiness state. **Does not** carry gateway
+/// lifecycle — that's the composition root's concern, exposed via
+/// [`GatewayLifecycle`].
 #[async_trait::async_trait]
 pub trait ServerControl: Send + Sync {
     async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError>;
     async fn start_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
     async fn stop_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
+
+    /// Returns the current cluster status (state + failed-server count).
+    /// Implementations must be lock-free per `design.md:4353` — the
+    /// `/ready` probe runs every 5–10 s and must not block.
+    fn cluster_status(&self) -> crate::types::ClusterStatus;
+}
+
+/// Open trait. GatewayLifecycle
+///
+/// Reports whether the gateway has finished bootstrapping (HTTP and
+/// gRPC listeners bound, queue ready, SQLite WAL confirmed). Lives at
+/// the composition root, not on the server-manager — answering "has
+/// startup completed?" is not a fleet-supervision concern.
+///
+/// See `design.md:4353` for the `gateway_initialized` atomic that
+/// backs the production implementation.
+pub trait GatewayLifecycle: Send + Sync {
+    /// Returns `true` after the gateway has fully initialized
+    /// (listeners bound, queue ready). Must be lock-free.
+    fn is_gateway_initialized(&self) -> bool;
 }
 
 /// Open trait. RouteValidator

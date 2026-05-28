@@ -21,7 +21,9 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
     );
 
     let shutdown_token = CancellationToken::new();
-    let (deps, bg) = build::build(config.clone(), shutdown_token.clone()).await?;
+    let gateway_initialized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (deps, bg) =
+        build::build(config.clone(), shutdown_token.clone(), gateway_initialized.clone()).await?;
 
     // Start the server-manager's lifecycle tasks (spawns child llama-server
     // processes per the config). Errors are propagated; the binary refuses
@@ -43,6 +45,10 @@ pub async fn run(config: Arc<ConfigHandle>) -> anyhow::Result<()> {
     let handles = llamaforge_api::transport::start_servers(deps)
         .await
         .map_err(|e| anyhow::anyhow!("transport start_servers: {}", e))?;
+
+    // Flip the initialization flag only AFTER the HTTP/gRPC listeners
+    // are successfully bound.
+    gateway_initialized.store(true, std::sync::atomic::Ordering::Release);
 
     tracing::info!("lifecycle.startup.ready");
 

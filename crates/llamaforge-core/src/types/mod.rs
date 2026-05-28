@@ -198,6 +198,51 @@ pub enum ServerLifecycle {
     Failed,
 }
 
+/// The aggregated state of the server fleet.
+///
+/// See `design.md` §17 (LlamaForge Self-Health Endpoints, line 4353): the
+/// readiness derivation reads this as an `AtomicU8` so the `/ready`
+/// handler stays lock-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum ClusterState {
+    /// Initial state, or some servers are still starting. Empty fleets
+    /// map here so `/ready` permits queuing during scale-up.
+    SomeStarting = 0,
+    /// At least one server is Running.
+    SomeRunning = 1,
+    /// All configured servers have permanently failed. Trips the
+    /// circuit breaker on `/ready`.
+    AllFailed = 2,
+}
+
+impl ClusterState {
+    /// Re-derive a `ClusterState` from its `repr(u8)` value. Used when
+    /// loading the atomic that backs the readiness derivation. Unknown
+    /// values round-trip back to `SomeStarting` — the conservative
+    /// "let traffic queue" default if the atomic is ever observed in a
+    /// torn state (which it cannot in practice; this is just a typed
+    /// fallback so the API is total).
+    pub fn from_repr(v: u8) -> Self {
+        match v {
+            0 => Self::SomeStarting,
+            1 => Self::SomeRunning,
+            2 => Self::AllFailed,
+            _ => Self::SomeStarting,
+        }
+    }
+}
+
+/// Aggregated status of the server fleet — a derived view that the
+/// `/ready` and `/ready/inference` handlers consume. `failed_servers` is
+/// only meaningful when `state == AllFailed`, where it populates the
+/// `{"failed_servers": N}` field of the 503 body per `design.md:4353`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClusterStatus {
+    pub state: ClusterState,
+    pub failed_servers: u32,
+}
+
 #[derive(Debug, thiserror::Error, PartialEq)]
 #[error("Illegal state transition from {from:?} to {to:?}")]
 pub struct IllegalTransition {

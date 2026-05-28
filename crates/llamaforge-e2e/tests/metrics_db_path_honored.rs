@@ -33,7 +33,8 @@ metrics_db_path = "{explicit}"
     let handle = Arc::new(llamaforge_core::config::ConfigHandle::load(source)?);
 
     let shutdown = CancellationToken::new();
-    let (deps, bg) = llamaforge::build(handle, shutdown.clone()).await?;
+    let gateway_initialized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (deps, bg) = llamaforge::build(handle, shutdown.clone(), gateway_initialized).await?;
 
     // building should have created the metrics DB
     assert!(explicit_db_path.exists(), "metrics DB was not created at explicit path");

@@ -2,7 +2,7 @@
 //! See design doc Section 3.1.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,6 +39,17 @@ pub struct ServerManager {
     pub(crate) warned_overflow: Arc<DashMap<ServerId, AtomicBool>>,
     pub(crate) gpu_semaphores: Arc<DashMap<GpuId, Arc<tokio::sync::Semaphore>>>,
     pub(crate) tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
+
+    /// Fleet readiness state, encoded as `ClusterState::repr`. Read
+    /// with `Ordering::Acquire`, written with `Ordering::Release` per
+    /// `design.md:4353` so `/ready` stays lock-free.
+    pub(crate) cluster_state: Arc<AtomicU8>,
+    /// Number of servers currently in the `Failed` bucket. Surfaces in
+    /// the `/ready` 503 `failed_servers` field. Read/written alongside
+    /// `cluster_state`; not strictly ordered against it because the
+    /// count is informational — the gating decision uses `cluster_state`
+    /// alone.
+    pub(crate) failed_servers: Arc<AtomicU32>,
 }
 
 impl ServerManager {
@@ -66,7 +77,73 @@ impl ServerManager {
             warned_overflow: Arc::new(DashMap::new()),
             gpu_semaphores: Arc::new(DashMap::new()),
             tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
+            cluster_state: Arc::new(AtomicU8::new(crate::types::ClusterState::SomeStarting as u8)),
+            failed_servers: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// Returns the current cluster status. Two `Ordering::Acquire`
+    /// atomic loads, lock-free per `design.md:4353`.
+    pub fn cluster_status(&self) -> crate::types::ClusterStatus {
+        let state =
+            crate::types::ClusterState::from_repr(self.cluster_state.load(Ordering::Acquire));
+        let failed_servers = self.failed_servers.load(Ordering::Acquire);
+        crate::types::ClusterStatus { state, failed_servers }
+    }
+
+    /// Recalculates the fleet state and updates the readiness atomics.
+    /// Called whenever a server transitions state.
+    ///
+    /// Bucketing:
+    /// - `Running` → active (drives `SomeRunning`).
+    /// - `Starting` / `Restarting` / `Draining` → starting.
+    /// - `Failed` → failed (drives the circuit breaker once nothing
+    ///   else is active or starting).
+    /// - `Stopped` is **not** counted as `failed`: it is the
+    ///   deliberate operator state reached via `POST /api/servers/{id}/stop`.
+    ///   Counting it would trip the circuit breaker on an
+    ///   operator-stopped fleet — see `design.md:4353` which scopes
+    ///   `AllFailed` to "ALL configured servers have permanently failed".
+    /// - Empty cluster maps to `SomeStarting` so `/ready` permits queuing
+    ///   during 0-to-1 scale-up.
+    pub(crate) fn recalculate_cluster_state(&self) {
+        use crate::types::{ClusterState, ServerLifecycle};
+
+        let mut active = 0u32;
+        let mut starting = 0u32;
+        let mut failed = 0u32;
+
+        for entry in self.servers.iter() {
+            match entry.value().lifecycle {
+                ServerLifecycle::Running => active += 1,
+                ServerLifecycle::Starting
+                | ServerLifecycle::Restarting
+                | ServerLifecycle::Draining => starting += 1,
+                ServerLifecycle::Failed => failed += 1,
+                ServerLifecycle::Stopped => {}
+                // `ServerLifecycle` is `#[non_exhaustive]`; treat any
+                // future variant conservatively as "starting" so a
+                // new state can't accidentally trip the breaker.
+                _ => starting += 1,
+            }
+        }
+
+        let new_state = if active > 0 {
+            ClusterState::SomeRunning
+        } else if starting > 0 {
+            ClusterState::SomeStarting
+        } else if failed > 0 {
+            ClusterState::AllFailed
+        } else {
+            // Empty fleet or all Stopped — keep traffic queueable.
+            ClusterState::SomeStarting
+        };
+
+        // `failed` first, then `cluster_state` with Release: a reader
+        // that observes `AllFailed` is guaranteed to see the matching
+        // `failed_servers` value used to populate the 503 body.
+        self.failed_servers.store(failed, Ordering::Release);
+        self.cluster_state.store(new_state as u8, Ordering::Release);
     }
 
     // --- Task 4.1: Implementation of start() ---
@@ -145,6 +222,9 @@ impl ServerManager {
                 crate::task::spawn_server_task(mgr, srv, cfg, orphan_pid).await;
             });
         }
+
+        // Fleet state should be recalculated now that tasks are spawned.
+        self.recalculate_cluster_state();
 
         Ok(self)
     }
@@ -500,6 +580,21 @@ impl ServerManager {
         }
     }
 
+    /// Test helper: insert a synthetic server in a given lifecycle
+    /// state without running the spawn task, then refresh the
+    /// readiness atomics. Lets integration tests drive
+    /// `/ready` / `/ready/inference` through the production
+    /// `recalculate_cluster_state` path.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[doc(hidden)]
+    pub fn insert_synthetic_server_for_test(&self, id: ServerId, lifecycle: ServerLifecycle) {
+        let cfg = llamaforge_core::config::ServerConfig::default();
+        let mut state = crate::state::ServerState::new_starting(id, &cfg, None);
+        state.lifecycle = lifecycle;
+        self.servers.insert(id, state);
+        self.recalculate_cluster_state();
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     #[doc(hidden)]
     pub fn force_warm_tps_window_for_test(&self, id: &ServerId, samples: usize, baseline: f64) {
@@ -706,5 +801,91 @@ mod tests {
         manager.servers.get_mut(&srv_id).unwrap().cumulative_requests = threshold - 1;
         manager.increment_requests(&srv_id); // should warn
         assert_eq!(manager.cumulative_requests(&srv_id), threshold);
+    }
+
+    #[tokio::test]
+    async fn test_recalculate_cluster_state() {
+        use crate::types::{ClusterState, ServerLifecycle};
+
+        let telemetry = Arc::new(MockTelemetry { free_vram: 0, is_unavailable: true });
+        let _tmp_db = tempfile::TempDir::new().unwrap();
+        let config = get_test_config(&_tmp_db);
+        let db_path = _tmp_db.path().join("metrics3.db");
+        let pipeline = llamaforge_metrics::create_metrics_pipeline(
+            &llamaforge_metrics::MetricsConfig { db_path, ..Default::default() },
+            config.clone(),
+        )
+        .unwrap();
+        let metrics = pipeline.store;
+        let ingest = pipeline.ingest;
+        let token = CancellationToken::new();
+
+        let manager = ServerManager::new(telemetry, config, ingest, metrics, token);
+
+        // 1. Initial state: SomeStarting (even if empty, design.md:4354)
+        manager.recalculate_cluster_state();
+        let status = manager.cluster_status();
+        assert_eq!(status.state, ClusterState::SomeStarting);
+        assert_eq!(status.failed_servers, 0);
+
+        // 2. One server starting: SomeStarting
+        let s1 = ServerId::from_config_id("s1");
+        let s1_cfg = llamaforge_core::config::ServerConfig::default();
+        manager.servers.insert(s1, crate::state::ServerState::new_starting(s1, &s1_cfg, None));
+        manager.recalculate_cluster_state();
+        assert_eq!(manager.cluster_status().state, ClusterState::SomeStarting);
+
+        // 3. One running: SomeRunning
+        manager.servers.get_mut(&s1).unwrap().lifecycle = ServerLifecycle::Running;
+        manager.recalculate_cluster_state();
+        assert_eq!(manager.cluster_status().state, ClusterState::SomeRunning);
+
+        // 4. One running, one failed: SomeRunning
+        let s2 = ServerId::from_config_id("s2");
+        let s2_cfg = llamaforge_core::config::ServerConfig::default();
+        let mut s2_state = crate::state::ServerState::new_starting(s2, &s2_cfg, None);
+        s2_state.lifecycle = ServerLifecycle::Failed;
+        manager.servers.insert(s2, s2_state);
+        manager.recalculate_cluster_state();
+        let status = manager.cluster_status();
+        assert_eq!(status.state, ClusterState::SomeRunning);
+        assert_eq!(status.failed_servers, 1);
+
+        // 5. All failed: AllFailed
+        manager.servers.get_mut(&s1).unwrap().lifecycle = ServerLifecycle::Failed;
+        manager.recalculate_cluster_state();
+        let status = manager.cluster_status();
+        assert_eq!(status.state, ClusterState::AllFailed);
+        assert_eq!(status.failed_servers, 2);
+
+        // 6. One stopped, one failed: AllFailed (stopped doesn't count as starting or running)
+        manager.servers.get_mut(&s1).unwrap().lifecycle = ServerLifecycle::Stopped;
+        manager.recalculate_cluster_state();
+        let status = manager.cluster_status();
+        assert_eq!(status.state, ClusterState::AllFailed);
+        assert_eq!(status.failed_servers, 1);
+
+        // 7. One stopped, one starting: SomeStarting
+        manager.servers.get_mut(&s2).unwrap().lifecycle = ServerLifecycle::Starting;
+        manager.recalculate_cluster_state();
+        assert_eq!(manager.cluster_status().state, ClusterState::SomeStarting);
+
+        // 8. ALL stopped: must NOT trip the circuit breaker. `Stopped`
+        //    is the deliberate operator state — `design.md:4353`
+        //    reserves `AllFailed` for "ALL configured servers have
+        //    permanently failed", not "operator deliberately stopped
+        //    every backend". If this bucketed to `AllFailed`, an
+        //    operator stopping the fleet would cause kubelet to evict
+        //    the pod.
+        manager.servers.get_mut(&s1).unwrap().lifecycle = ServerLifecycle::Stopped;
+        manager.servers.get_mut(&s2).unwrap().lifecycle = ServerLifecycle::Stopped;
+        manager.recalculate_cluster_state();
+        let status = manager.cluster_status();
+        assert_eq!(
+            status.state,
+            ClusterState::SomeStarting,
+            "all-Stopped must not trip the breaker"
+        );
+        assert_eq!(status.failed_servers, 0);
     }
 }

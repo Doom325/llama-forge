@@ -286,6 +286,12 @@ mod tests {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
+        }
     }
 
     struct MockQueueSubmitter;
