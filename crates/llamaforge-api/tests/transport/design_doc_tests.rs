@@ -39,6 +39,7 @@ async fn setup_test_server(
         inference_engine,
         metrics_exporter: Arc::new(mocks::MockMetricsExporter),
         server_control: Arc::new(mocks::MockServerControl),
+        gateway_lifecycle: Arc::new(mocks::MockGatewayLifecycle),
         queue_submitter,
         config_writer: handle,
         request_metrics_store: Arc::new(InMemoryStore::default()),

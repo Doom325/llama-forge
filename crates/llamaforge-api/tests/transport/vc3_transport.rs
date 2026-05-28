@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use llamaforge_core::types::{
     traits::{
-        AdmissionError, IncomingRequest, QueueError, QueueSnapshot, QueueSubmitter, QueueTicket,
-        RouteValidator, ServerControl, ServerError, ServerSummary,
+        AdmissionError, GatewayLifecycle, IncomingRequest, QueueError, QueueSnapshot,
+        QueueSubmitter, QueueTicket, RouteValidator, ServerControl, ServerError, ServerSummary,
     },
     ChatCompletionChunk, ServerId, StreamError,
 };
@@ -43,6 +43,7 @@ async fn setup_test_server(
         inference_engine,
         metrics_exporter: Arc::new(mocks::MockMetricsExporter),
         server_control,
+        gateway_lifecycle: Arc::new(mocks::MockGatewayLifecycle) as Arc<dyn GatewayLifecycle>,
         queue_submitter,
         config_writer: handle.clone(),
         request_metrics_store: Arc::new(InMemoryStore::default()),
@@ -489,11 +490,11 @@ async fn test_vc3_10_management_api_round_trip() {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
-        fn cluster_state(&self) -> u8 {
-            1
-        }
-        fn is_gateway_initialized(&self) -> bool {
-            true
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
         }
     }
 

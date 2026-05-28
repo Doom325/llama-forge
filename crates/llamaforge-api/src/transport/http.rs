@@ -7,7 +7,7 @@ use axum::{
 use futures_util::stream::StreamExt;
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
 use llamaforge_core::types::traits::{
-    MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
+    GatewayLifecycle, MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,6 +32,7 @@ pub struct HttpAppState<CW, RMS, SM> {
     pub inference_engine: Arc<dyn InferenceEngine>,
     pub metrics_exporter: Arc<dyn MetricsExporter>,
     pub server_control: Arc<dyn ServerControl>,
+    pub gateway_lifecycle: Arc<dyn GatewayLifecycle>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
     pub config_writer: Arc<CW>,
     pub request_metrics_store: Arc<RMS>,
@@ -47,6 +48,7 @@ impl<CW, RMS, SM> Clone for HttpAppState<CW, RMS, SM> {
             inference_engine: self.inference_engine.clone(),
             metrics_exporter: self.metrics_exporter.clone(),
             server_control: self.server_control.clone(),
+            gateway_lifecycle: self.gateway_lifecycle.clone(),
             queue_submitter: self.queue_submitter.clone(),
             config_writer: self.config_writer.clone(),
             request_metrics_store: self.request_metrics_store.clone(),
@@ -648,15 +650,29 @@ pub(crate) async fn ready_handler<CW, RMS, SM>(
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    let initialized = state.server_control.is_gateway_initialized();
-    let cluster = state.server_control.cluster_state();
+    // Per `design.md:4353`: two `Ordering::Acquire` atomic reads — one
+    // from the composition-root-owned gateway flag, one from the
+    // server-manager's fleet status. No locks on this path.
+    let initialized = state.gateway_lifecycle.is_gateway_initialized();
+    let status = state.server_control.cluster_status();
 
     if !initialized {
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "starting" }))).into_response();
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({ "status": "starting" })),
+        )
+            .into_response();
     }
 
-    if cluster == 2 { // all_failed
-        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "cluster_failed" }))).into_response();
+    if status.state == llamaforge_core::types::ClusterState::AllFailed {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "status": "cluster_failed",
+                "failed_servers": status.failed_servers
+            })),
+        )
+            .into_response();
     }
 
     axum::Json(serde_json::json!({ "status": "ok" })).into_response()
@@ -668,12 +684,16 @@ pub(crate) async fn ready_inference_handler<CW, RMS, SM>(
 where
     CW: ConfigWriter + Send + Sync + 'static,
 {
-    let cluster = state.server_control.cluster_state();
-    
-    if cluster == 1 { // some_running
+    let status = state.server_control.cluster_status();
+
+    if status.state == llamaforge_core::types::ClusterState::SomeRunning {
         axum::Json(serde_json::json!({ "status": "ok" })).into_response()
     } else {
-        (axum::http::StatusCode::SERVICE_UNAVAILABLE, axum::Json(serde_json::json!({ "status": "not_ready" }))).into_response()
+        (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({ "status": "not_ready" })),
+        )
+            .into_response()
     }
 }
 
@@ -774,11 +794,7 @@ where
         // operator status surface. Same payload as `/api/servers`.
         .route("/v1/servers", get(list_v1_servers::<CW, RMS, SM>))
         .route("/health", get(health_check))
-        .route("/healthz", get(health_check))
-        .route("/livez", get(health_check))
         .route("/ready", get(ready_handler::<CW, RMS, SM>))
-        .route("/readyz", get(ready_handler::<CW, RMS, SM>))
-        .route("/api/ready", get(ready_handler::<CW, RMS, SM>))
         .route("/ready/inference", get(ready_inference_handler::<CW, RMS, SM>))
         .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
         .with_state(state.clone());
@@ -909,9 +925,16 @@ mod tests {
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
-        fn cluster_state(&self) -> u8 {
-            1
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
         }
+    }
+
+    struct MockGatewayLifecycle;
+    impl GatewayLifecycle for MockGatewayLifecycle {
         fn is_gateway_initialized(&self) -> bool {
             true
         }
@@ -951,6 +974,7 @@ mod tests {
             inference_engine: Arc::new(engine),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -1163,9 +1187,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_anthropic_missing_version_header_admitted() {
-        use metrics_exporter_prometheus::PrometheusBuilder;
-        use ax_extract::{State, Extension, ConnectInfo};
+        use ax_extract::{ConnectInfo, Extension, State};
         use axum::extract as ax_extract;
+        use metrics_exporter_prometheus::PrometheusBuilder;
 
         let mut config = AppConfig::default();
         config.global.queue_default_timeout_secs = 1;
@@ -1186,6 +1210,7 @@ mod tests {
             inference_engine: engine,
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -1200,10 +1225,7 @@ mod tests {
         });
         let body_bytes_stream = Body::from(serde_json::to_string(&body_json).unwrap());
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let body_bytes = rt.block_on(axum::body::to_bytes(body_bytes_stream, 1024)).unwrap();
 
@@ -1226,7 +1248,8 @@ mod tests {
                 ConnectInfo(remote_addr),
                 headers,
                 body_bytes,
-            ).await
+            )
+            .await
         });
 
         let res = res.unwrap();
@@ -1240,7 +1263,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_queue_full_returns_429_with_retry_after() {
-
         struct MockRouteValidatorRejects;
         impl RouteValidator for MockRouteValidatorRejects {
             fn validate_routable(
@@ -1280,6 +1302,7 @@ mod tests {
             }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitterFull),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -1328,6 +1351,7 @@ mod tests {
             }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
@@ -1347,10 +1371,7 @@ mod tests {
 
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            res.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+        assert_eq!(res.headers().get("content-type").unwrap(), "application/json");
         assert!(res.headers().contains_key("x-request-id"));
 
         let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
@@ -1372,7 +1393,13 @@ mod tests {
                 &self,
                 _req: llamaforge_core::types::ChatCompletionRequest,
             ) -> Result<
-                Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
+                Pin<
+                    Box<
+                        dyn Stream<Item = Result<ChatCompletionChunk, StreamError>>
+                            + Send
+                            + 'static,
+                    >,
+                >,
                 llamaforge_core::types::traits::DispatchError,
             > {
                 Err(llamaforge_core::types::traits::DispatchError::RateLimited {
@@ -1393,6 +1420,7 @@ mod tests {
             inference_engine: Arc::new(MockEngineRateLimited),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),

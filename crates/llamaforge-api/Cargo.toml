@@ -76,6 +76,8 @@ proptest = { workspace = true }
 serial_test.workspace = true
 llamaforge-core = { workspace = true, features = ["test-utils"] }
 llamaforge-metrics = { workspace = true, features = ["test-utils", "test-fixtures"] }
+llamaforge-server = { workspace = true, features = ["test-utils"] }
+parking_lot.workspace = true
 
 # Integration test targets. The three predecessor crates each had tests
 # at the top level of tests/; after the merge they live under

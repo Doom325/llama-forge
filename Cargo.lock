@@ -1312,6 +1312,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "opentelemetry",
+ "parking_lot",
  "pin-project-lite",
  "proptest",
  "reqwest",

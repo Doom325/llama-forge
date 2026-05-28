@@ -286,11 +286,11 @@ mod tests {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
-        fn cluster_state(&self) -> u8 {
-            1
-        }
-        fn is_gateway_initialized(&self) -> bool {
-            true
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
         }
     }
 

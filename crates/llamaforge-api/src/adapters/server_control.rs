@@ -1,5 +1,6 @@
-use llamaforge_core::types::traits::{ServerControl, ServerError, ServerSummary};
+use llamaforge_core::types::traits::{GatewayLifecycle, ServerControl, ServerError, ServerSummary};
 use llamaforge_server::ServerManager;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub struct ServerControlAdapter {
@@ -60,12 +61,29 @@ impl ServerControl for ServerControlAdapter {
         }
     }
 
-    fn cluster_state(&self) -> u8 {
-        self.manager.cluster_state()
+    fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+        self.manager.cluster_status()
     }
+}
 
+/// Production [`GatewayLifecycle`] adapter: a thin wrapper around the
+/// composition-root-owned `AtomicBool`. The flag is flipped to `true`
+/// in `serve.rs` only after `transport::start_servers` returns, so
+/// `/ready` cannot report `gateway_initialized` until the HTTP and
+/// gRPC listeners are actually bound (`design.md:4353`).
+pub struct AtomicGatewayLifecycle {
+    initialized: Arc<AtomicBool>,
+}
+
+impl AtomicGatewayLifecycle {
+    pub fn new(initialized: Arc<AtomicBool>) -> Self {
+        Self { initialized }
+    }
+}
+
+impl GatewayLifecycle for AtomicGatewayLifecycle {
     fn is_gateway_initialized(&self) -> bool {
-        self.manager.is_gateway_initialized()
+        self.initialized.load(Ordering::Acquire)
     }
 }
 
@@ -158,5 +176,14 @@ mod tests {
 
         let stop_res = adapter.stop_server(&not_found_id).await;
         assert!(matches!(stop_res, Err(ServerError::NotFound { .. })));
+    }
+
+    #[test]
+    fn test_atomic_gateway_lifecycle() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let lc = AtomicGatewayLifecycle::new(flag.clone());
+        assert!(!lc.is_gateway_initialized());
+        flag.store(true, Ordering::Release);
+        assert!(lc.is_gateway_initialized());
     }
 }

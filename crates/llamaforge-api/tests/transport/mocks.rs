@@ -4,15 +4,19 @@ use std::pin::Pin;
 use llamaforge_api::transport::InferenceEngine;
 use llamaforge_core::types::{
     traits::{
-        AdmissionError, IncomingRequest, MetricsExporter, QueueError, QueueSnapshot,
-        QueueSubmitter, QueueTicket, RouteValidator, ServerControl, ServerError, ServerSummary,
+        AdmissionError, GatewayLifecycle, IncomingRequest, MetricsExporter, QueueError,
+        QueueSnapshot, QueueSubmitter, QueueTicket, RouteValidator, ServerControl, ServerError,
+        ServerSummary,
     },
     ChatCompletionChunk, RequestId, ServerId, StreamError,
 };
 
+// `#[path = "mocks.rs"]`-included from multiple integration-test
+// binaries (`readiness_tests`, `vc3_transport`, …). Each binary uses
+// only a subset of these mocks; the `dead_code` lints would otherwise
+// fire per-target. The marker is local, not architectural.
 #[allow(dead_code)]
-pub struct MockEngine
- {
+pub struct MockEngine {
     pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
     pub sleep_ms: u64,
 }
@@ -76,9 +80,17 @@ impl ServerControl for MockServerControl {
     async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
         Ok(())
     }
-    fn cluster_state(&self) -> u8 {
-        1
+    fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+        llamaforge_core::types::ClusterStatus {
+            state: llamaforge_core::types::ClusterState::SomeRunning,
+            failed_servers: 0,
+        }
     }
+}
+
+#[allow(dead_code)]
+pub struct MockGatewayLifecycle;
+impl GatewayLifecycle for MockGatewayLifecycle {
     fn is_gateway_initialized(&self) -> bool {
         true
     }

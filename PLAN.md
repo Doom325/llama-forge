@@ -13,18 +13,26 @@ This plan addresses the [E2E] bugs filed during testing, as tracked on GitHub.
 
 ## Phase 2 — Service Health & Readiness (PR-2)
 **Goal:** Implement missing health/readiness endpoints (#227, #234).
-- [ ] **2.1** Fix #227: Add `tonic-health` dependency and register `grpc.health.v1.Health` service in `grpc.rs`.
-- [ ] **2.2** Fix #234: Add `cluster_state` and `gateway_initialized` `AtomicU8` tracking to server manager state.
-- [ ] **2.3** Fix #234: Implement `/ready` (with circuit breaker) and `/ready/inference` endpoints in `http.rs`.
-- [ ] **2.4** Wire gRPC health reporter to reflect the orchestrator and fleet status.
-- [ ] **2.5** Add unit and integration tests for new endpoints.
-- [ ] **2.6** Open PR-2 and hand off to ReviewerAgent.
+- [x] **2.1** Fix #227: Add `tonic-health` dependency and register `grpc.health.v1.Health` service in `grpc.rs`.
+- [x] **2.2** Fix #234: Add `cluster_state` and `gateway_initialized` `AtomicU8` tracking to server manager state.
+- [x] **2.3** Fix #234: Implement `/ready` (with circuit breaker) and `/ready/inference` endpoints in `http.rs`.
+- [x] **2.4** Wire gRPC health reporter to reflect the orchestrator and fleet status.
+- [x] **2.5** Add unit and integration tests for new endpoints.
+- [x] **2.6** Open PR-2 and hand off to ReviewerAgent.
 
 ## Phase 3 — Metrics & Observability (PR-3)
 **Goal:** Fix metrics accumulation and missing fields (#232, #230).
 - [ ] **3.1** Fix #232: Ensure Prometheus `*_total` counters accumulate correctly.
 - [ ] **3.2** Fix #230: Populate `dispatched_at` and `slot_id` in metrics rows.
 - [ ] **3.3** Open PR-3.
+
+> Phase 3 in-progress notes (preserved on stash `phase-3-metrics-wip-gemini`):
+> reproduced #232 with an E2E test; moved Prometheus recorder install to the
+> top of the composition root; added missing `describe_counter!` calls;
+> swapped `.absolute()` → `.increment()` in `MetricsFacadeRecorder`.
+> Open blocker: counters still don't accumulate while histograms do — the
+> `DebuggingRecorder` reproduces the same stuck-at-1 behavior unless the
+> counter handle is kept alive.
 
 ## Phase 4 — Lifecycle & Server Stability (PR-4)
 **Goal:** Fix state transition bugs and OOM handling (#233, #222, #219).

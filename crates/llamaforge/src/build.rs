@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use llamaforge_api::adapters::metrics_exporter::MetricsExporterAdapter;
 use llamaforge_api::adapters::queue::QueueSubmitterAdapter;
-use llamaforge_api::adapters::server_control::ServerControlAdapter;
+use llamaforge_api::adapters::server_control::{AtomicGatewayLifecycle, ServerControlAdapter};
 use llamaforge_api::dispatch::client::ReqwestClientStore;
 use llamaforge_api::dispatch::dispatcher::Dispatcher;
 use llamaforge_api::dispatch::slot_map::SlotDispatchMap;
@@ -58,6 +58,7 @@ pub struct BackgroundTasks {
 pub async fn build(
     config: Arc<ConfigHandle>,
     shutdown_token: CancellationToken,
+    gateway_initialized: Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<(
     TransportDeps<ConfigHandle, InstrumentedMetricsStore, InstrumentedMetricsStore>,
     BackgroundTasks,
@@ -195,6 +196,11 @@ pub async fn build(
     // 9) Adapters that satisfy transport's port traits.
     let queue_submitter = Arc::new(QueueSubmitterAdapter::new(pipeline.clone()));
     let server_control = Arc::new(ServerControlAdapter::new(server_manager.clone()));
+    // GatewayLifecycle: owned at the composition root, not on the
+    // server-manager. The atomic is flipped from `serve.rs` after the
+    // HTTP / gRPC listeners are bound, satisfying `design.md:4353`'s
+    // ordering requirement for `gateway_initialized`.
+    let gateway_lifecycle = Arc::new(AtomicGatewayLifecycle::new(gateway_initialized.clone()));
 
     // 10) The keystone — wires queue/router/dispatcher/metrics.
     let inference_engine = Arc::new(StreamingInferenceService::new(
@@ -208,6 +214,7 @@ pub async fn build(
         config_reader: config.clone() as Arc<dyn ConfigReader>,
         config_writer: config.clone(),
         server_control,
+        gateway_lifecycle,
         queue_submitter,
         metrics_exporter,
         request_metrics_store: metrics_store.clone(),

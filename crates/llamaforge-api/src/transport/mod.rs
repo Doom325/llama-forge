@@ -18,7 +18,7 @@ pub use error::{AnthropicProtocolError, ApiError, TransportError};
 pub use grpc::start_grpc_server;
 pub use http::{start_http_server, HttpAppState};
 pub use llamaforge_core::types::traits::{
-    MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
+    GatewayLifecycle, MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
 pub use middleware::LargeBodyConcurrencyLimit;
 
@@ -50,6 +50,7 @@ where
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_writer: Arc<CW>,
     pub server_control: Arc<dyn ServerControl>,
+    pub gateway_lifecycle: Arc<dyn GatewayLifecycle>,
     pub queue_submitter: Arc<dyn QueueSubmitter>,
     pub metrics_exporter: Arc<dyn MetricsExporter>,
     pub request_metrics_store: Arc<RMS>,
@@ -117,6 +118,7 @@ where
         inference_engine: deps.inference_engine.clone(),
         metrics_exporter: deps.metrics_exporter.clone(),
         server_control: deps.server_control.clone(),
+        gateway_lifecycle: deps.gateway_lifecycle.clone(),
         queue_submitter: deps.queue_submitter.clone(),
         config_writer: deps.config_writer.clone(),
         request_metrics_store: deps.request_metrics_store.clone(),
@@ -256,9 +258,16 @@ mod tests {
         ) -> Result<(), ServerError> {
             Ok(())
         }
-        fn cluster_state(&self) -> u8 {
-            1
+        fn cluster_status(&self) -> llamaforge_core::types::ClusterStatus {
+            llamaforge_core::types::ClusterStatus {
+                state: llamaforge_core::types::ClusterState::SomeRunning,
+                failed_servers: 0,
+            }
         }
+    }
+
+    struct MockGatewayLifecycle;
+    impl GatewayLifecycle for MockGatewayLifecycle {
         fn is_gateway_initialized(&self) -> bool {
             true
         }
@@ -304,6 +313,7 @@ mod tests {
             inference_engine: Arc::new(MockEngine { sleep_ms }),
             metrics_exporter: Arc::new(MockMetricsExporter),
             server_control: Arc::new(MockServerControl),
+            gateway_lifecycle: Arc::new(MockGatewayLifecycle),
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: store.clone(),
             store_maintenance: store,
