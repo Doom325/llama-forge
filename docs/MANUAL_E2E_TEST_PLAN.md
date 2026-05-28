@@ -3,7 +3,7 @@
 **Target build:** `v0.1.0-draft` (workspace at `crates/`)
 **Primary environment (run first):** Framework Desktop — AMD **Strix Halo** APU (Ryzen AI Max+, Radeon 8060S / gfx1151), 128 GB unified RAM, **Linux (Fedora / Bazzite, x86_64)**, `llama.cpp` built with the **Vulkan** backend.
 **Secondary environment (run second):** macOS (Apple Silicon, Metal).
-**Author/owner:** _______________  **Run date:** _______________  **Build SHA:** _______________
+**Author/owner:** Sumanth Gottipati  **Run date:** 2026-05-26 – 2026-05-28  **Build SHA:** 73641a4
 
 This is a manual, operator-driven E2E test runbook. It walks the system from a cold install all the way through every major and minor use case: CLI, configuration, process supervision, the OpenAI + Anthropic HTTP shims, the canonical gRPC core, the management API, routing/scheduling, observability, security, hot-reload, and failure/chaos behavior. Each test has a stable **Test ID**, preconditions, exact commands, and a code-grounded **expected outcome**.
 
@@ -415,29 +415,42 @@ Treat these as **expected** — verifying them confirms intended behavior, and t
 
 ---
 
+## 18a. Plan-revision notes (from the 2026-05-27/28 run)
+
+Issues found **in this plan itself** (not product defects) — fix before the next run:
+
+1. **Phase A / Phase B overlap.** Several Configuration & validation checks duplicate Installation & CLI checks (noted live at CFG-02: "why are these duplicate tasks"). Consolidate the overlapping CLI-vs-config validation cases so each behavior is exercised once.
+2. **RT-03 is mis-scoped for v1.0.** It expects prompt-prefix KV-cache affinity to influence routing, but `05_SMART_ROUTING.md` lists that as **Tier 2, deferred to v1.1** (`w_affinity × 0.0` in v1). Two identical-prefix requests landing on different instances is *correct* for this build. Re-label RT-03 as a v1.1 test (or assert the v1 behavior: affinity does not influence routing).
+3. **RT-05/06/07 priority tests aren't client-API-exercisable in v1.0.** Priority keys off `requestor`/`task_type`, but neither the HTTP shim nor the gRPC `InferenceRequest` carries those fields — every request collapses to `anonymous`/`default`. Mark these as queue-internal/unit-test scope, or add the note that only RT-07's *off-case* (preemption disabled by default) is observable end-to-end.
+4. **LIF-06's expectation contradicts `design.md:4353`.** It expects fail-closed (process exits non-zero) on a single bad server, but partial-fleet startup is **intentional** — the gateway stays up while any server is `Running`; the design's bad-fleet mechanism is the `/ready` all-failed circuit breaker (which is itself unimplemented, see #234). Fail-closed only applies to port-bind failure (`design.md:325`) and empty/unparseable config (`design.md:1226`). Rewrite LIF-06 to assert: (a) partial fleet → gateway up + failed server reflected; (b) all-failed → `/ready` 503 (once #234 lands).
+5. **CHA-09 (backend 5xx → 502) has no harness.** `mock-llama` has no completion-error/5xx mode and a real `llama-server` won't reliably emit a 5xx. Either add a 5xx-injection knob to `mock-llama` or move CHA-09 to the error-translation unit tests.
+6. **`tee`-based log capture loses shutdown logs on Ctrl-C.** Ctrl-C signals the whole foreground pipeline, killing `tee` before the orchestrator's graceful-shutdown lines are written (CHA-06). For log-observation tests, prefer `kill -INT/-TERM <pid>` against the orchestrator PID (leaves `tee` alive) or redirect to a file instead of piping.
+
+---
+
 ## 19. Sign-off summary
 
-| Phase | Area | Tests | Pass | Fail | Blocked | Notes |
-|-------|------|-------|------|------|---------|-------|
-| BLD | Build & artifacts | 4 | | | | |
-| A | Installation & CLI | 13 | | | | |
-| B | Configuration & validation | 12 | | | | |
-| C | Launch & lifecycle | 8 | | | | |
-| D | OpenAI HTTP API | 11 | | | | |
-| E | Anthropic HTTP API | 5 | | | | |
-| F | gRPC core | 8 | | | | |
-| G | Management API | 13 | | | | |
-| H | Routing & scheduling | 7 | | | | |
-| I | Observability | 7 | | | | |
-| J | Security & auth | 7 | | | | |
-| K | Failure & chaos | 9 | | | | |
-| L | Config hot-reload | 6 | | | | |
-| M | Teardown & maintenance | 4 | | | | |
-| **Total** | | **114** | | | | |
+| Phase | Area | Tests | Pass | Fail | N/A | Notes |
+|-------|------|-------|------|------|-----|-------|
+| BLD | Build & artifacts | 4 | 3 | 1 | 0 | BLD-04 flaky anthropic streaming test (#218) |
+| A | Installation & CLI | 13 | 13 | 0 | 0 | |
+| B | Configuration & validation | 12 | 12 | 0 | 0 | |
+| C | Launch & lifecycle | 8 | 6 | 1 | 1 | LIF-06 Fail (#234, + plan defect); LIF-07 N/A |
+| D | OpenAI HTTP API | 11 | 10 | 1 | 0 | OAI-09 413 returns plain text, not canonical JSON |
+| E | Anthropic HTTP API | 5 | 5 | 0 | 0 | |
+| F | gRPC core | 8 | 6 | 2 | 0 | GRP-03 health svc not registered (#227); GRP-08 saturation → Internal not RESOURCE_EXHAUSTED (#231) |
+| G | Management API | 13 | 12 | 1 | 0 | MGT-06 cancel-during-prompt (#229) |
+| H | Routing & scheduling | 7 | 3 | 1 | 3 | RT-04 Fail (#231); RT-03/05/06 N/A (Tier-2 / no v1 priority API) |
+| I | Observability | 7 | 6 | 1 | 0 | OBS-02 counters don't accumulate (#232) |
+| J | Security & auth | 7 | 7 | 0 | 0 | |
+| K | Failure & chaos | 9 | 8 | 0 | 1 | CHA-09 N/A (no mock 5xx-on-completion mode) |
+| L | Config hot-reload | 6 | 6 | 0 | 0 | |
+| M | Teardown & maintenance | 4 | 4 | 0 | 0 | |
+| **Total** | | **114** | **101** | **8** | **5** | GitHub issues #218–#234 filed across the run (incl. feature requests); RCA comment added to open #148 (scheduler wedge under saturation) |
 
-**Overall verdict:** ☐ Ship  ☐ Ship with caveats  ☐ Hold
+**Overall verdict:** ☐ Ship  ☑ Ship with caveats  ☐ Hold — _no P0 crashers in the happy path; the open Fails are error-mapping/observability/lifecycle-edge issues (see issues). #148 scheduler-wedge-under-saturation and #232 counter non-accumulation are the most operationally significant._
 
-**Tester signature:** _______________  **Date:** _______________
+**Tester signature:** _Sumanth Gottipati (with Claude as test companion)_  **Date:** _2026-05-28_
 
 ---
 
