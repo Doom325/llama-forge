@@ -90,7 +90,7 @@ impl InferenceService for GrpcInferenceService {
             .inference_engine
             .chat_completion(chat_req)
             .await
-            .map_err(|e| tonic::Status::internal(e.to_string()))?;
+            .map_err(map_dispatch_error)?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
@@ -121,9 +121,45 @@ fn map_admission_error(err: llamaforge_core::types::traits::AdmissionError) -> S
         Ae::NoServerForModel { ref model } => {
             Status::not_found(format!("model not found: {}", model))
         }
-        Ae::QueueFull | Ae::RateLimited { .. } => Status::resource_exhausted("queue is full"),
+        Ae::QueueFull | Ae::RateLimited { .. } => {
+            let mut status = Status::resource_exhausted("queue is full");
+            let retry_after = match err {
+                Ae::RateLimited { retry_after_secs } => Some(retry_after_secs),
+                _ => None,
+            };
+            if let Some(secs) = retry_after {
+                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                    status.metadata_mut().insert("retry-after", hv);
+                }
+            }
+            status
+        }
         Ae::InvalidRequest { reason } => Status::invalid_argument(reason),
         Ae::Cancelled => Status::cancelled("request cancelled during admission"),
+    }
+}
+
+/// Map a domain `DispatchError` to a gRPC `Status`.
+fn map_dispatch_error(err: llamaforge_core::types::traits::DispatchError) -> Status {
+    use llamaforge_core::types::traits::DispatchError as De;
+    match err {
+        De::NoServerForModel { ref model } => {
+            Status::not_found(format!("model not found: {}", model))
+        }
+        De::QueueFull | De::RateLimited { .. } => {
+            let mut status = Status::resource_exhausted("queue is full");
+            let retry_after = match err {
+                De::RateLimited { retry_after_secs } => Some(retry_after_secs),
+                _ => None,
+            };
+            if let Some(secs) = retry_after {
+                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                    status.metadata_mut().insert("retry-after", hv);
+                }
+            }
+            status
+        }
+        De::Internal { reason } => Status::internal(reason),
     }
 }
 
@@ -735,5 +771,22 @@ mod tests {
 
         let _ = tx.send(());
         let _ = server_task.await;
+    }
+
+    #[test]
+    fn test_grpc_rate_limited_mapping() {
+        use llamaforge_core::types::traits::{AdmissionError, DispatchError};
+
+        // Case 1: DispatchError::RateLimited
+        let de = DispatchError::RateLimited { retry_after_secs: 123 };
+        let status = map_dispatch_error(de);
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(status.metadata().get("retry-after").unwrap(), "123");
+
+        // Case 2: AdmissionError::RateLimited
+        let ae = AdmissionError::RateLimited { retry_after_secs: 456 };
+        let status = map_admission_error(ae);
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(status.metadata().get("retry-after").unwrap(), "456");
     }
 }
