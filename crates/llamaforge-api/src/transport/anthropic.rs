@@ -263,7 +263,15 @@ pub(crate) fn format_anthropic_event(
                         "stop_reason": match finish_reason.as_str() {
                             "stop" => "end_turn",
                             "length" => "max_tokens",
-                            other => other,
+                            "stop_sequence" => "stop_sequence",
+                            "tool_calls" | "tool_use" => "tool_use",
+                            other => {
+                                tracing::warn!(
+                                    reason = %other,
+                                    "anthropic.unknown_finish_reason — defaulting to end_turn"
+                                );
+                                "end_turn"
+                            }
                         },
                         "stop_sequence": null
                     },

@@ -772,4 +772,21 @@ mod tests {
         let _ = tx.send(());
         let _ = server_task.await;
     }
+
+    #[test]
+    fn test_grpc_rate_limited_mapping() {
+        use llamaforge_core::types::traits::{AdmissionError, DispatchError};
+
+        // Case 1: DispatchError::RateLimited
+        let de = DispatchError::RateLimited { retry_after_secs: 123 };
+        let status = map_dispatch_error(de);
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(status.metadata().get("retry-after").unwrap(), "123");
+
+        // Case 2: AdmissionError::RateLimited
+        let ae = AdmissionError::RateLimited { retry_after_secs: 456 };
+        let status = map_admission_error(ae);
+        assert_eq!(status.code(), tonic::Code::ResourceExhausted);
+        assert_eq!(status.metadata().get("retry-after").unwrap(), "456");
+    }
 }

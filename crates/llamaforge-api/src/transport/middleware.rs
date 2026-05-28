@@ -164,7 +164,11 @@ pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Respo
             }));
             let mut new_res = body.into_response();
             *new_res.status_mut() = axum::http::StatusCode::PAYLOAD_TOO_LARGE;
-            *new_res.headers_mut() = response.headers().clone();
+            for (k, v) in response.headers() {
+                if k != axum::http::header::CONTENT_TYPE && k != axum::http::header::CONTENT_LENGTH {
+                    new_res.headers_mut().insert(k, v.clone());
+                }
+            }
             response = new_res;
         } else {
             let status = response.status();

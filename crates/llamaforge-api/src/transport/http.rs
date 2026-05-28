@@ -176,6 +176,7 @@ where
         state.inference_engine.chat_completion(req).await.map_err(ApiError::from)?;
 
     let req_id_str = format!("chatcmpl-{}", request_id.as_uuid());
+    let created_at = chrono::Utc::now().timestamp();
 
     if stream {
         let qs = state.queue_submitter.clone();
@@ -210,7 +211,7 @@ where
                     }
                     Ok(None) => break,
                     Ok(Some(Ok(chunk))) => {
-                        for data in format_openai_chunk(&req_id_str_for_stream, &model_echo, &chunk) {
+                        for data in format_openai_chunk(&req_id_str_for_stream, &model_echo, created_at, &chunk) {
                             yield Ok(Event::default().data(data));
                         }
                     }
@@ -315,7 +316,6 @@ where
             return Err(ApiError::ServiceUnavailable { retry_after_secs: 1 });
         }
         let finish_reason = finish_reason.unwrap_or_else(|| "stop".to_string());
-        let created_at = chrono::Utc::now().timestamp();
 
         Ok(axum::Json(serde_json::json!({
             "id": req_id_str,
@@ -797,6 +797,7 @@ mod tests {
     use std::pin::Pin;
     use std::sync::Arc;
     use tower::ServiceExt;
+    use uuid::Uuid;
 
     // A mock InferenceEngine to inject into the app state
     struct MockEngine {
@@ -1112,36 +1113,82 @@ mod tests {
         assert!(body_str.contains("Stream error"));
     }
 
-    #[tokio::test]
-    async fn test_anthropic_missing_version_header_admitted() {
+    #[test]
+    #[serial_test::serial]
+    fn test_anthropic_missing_version_header_admitted() {
+        use metrics_exporter_prometheus::PrometheusBuilder;
+        use ax_extract::{State, Extension, ConnectInfo};
+        use axum::extract as ax_extract;
+
+        let mut config = AppConfig::default();
+        config.global.queue_default_timeout_secs = 1;
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
         let chunks = vec![Ok(ChatCompletionChunk::Stop {
-            finish_reason: "end_turn".to_string(),
+            finish_reason: "stop".to_string(),
             output_tokens: 10,
             prompt_tokens: 5,
         })];
-        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
-        let app = build_test_router(engine);
+        let engine = Arc::new(MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 });
 
-        let body = serde_json::json!({
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidator),
+            inference_engine: engine,
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+        };
+
+        let body_json = serde_json::json!({
             "model": "test",
             "max_tokens": 16,
             "messages": [{"role": "user", "content": "hi"}],
             "stream": false
         });
+        let body_bytes_stream = Body::from(serde_json::to_string(&body_json).unwrap());
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/v1/messages")
-            .header("content-type", "application/json")
-            // Missing anthropic-version header
-            .extension(axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 12345))))
-            .body(Body::from(serde_json::to_string(&body).unwrap()))
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
             .unwrap();
 
-        let res = app.oneshot(req).await.unwrap();
+        let body_bytes = rt.block_on(axum::body::to_bytes(body_bytes_stream, 1024)).unwrap();
+
+        let request_id = RequestId::new(Uuid::now_v7());
+        let remote_addr: std::net::SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let headers = axum::http::HeaderMap::new();
+
+        // Setup global metrics recorder (once per process)
+        let builder = PrometheusBuilder::new();
+        // install_recorder can fail if already installed, which is fine for serial tests
+        let metrics_handle = match builder.install_recorder() {
+            Ok(h) => h,
+            Err(_) => PrometheusBuilder::new().build_recorder().handle(),
+        };
+
+        let res = rt.block_on(async {
+            anthropic_messages_handler(
+                State(state),
+                Extension(request_id),
+                ConnectInfo(remote_addr),
+                headers,
+                body_bytes,
+            ).await
+        });
+
+        let res = res.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        // Anthropic response should NOT have the header if it was missing in request
-        assert!(res.headers().get("anthropic-version").is_none());
+
+        // Verify metric
+        let rendered = metrics_handle.render();
+        assert!(rendered.contains("llamaforge_api_missing_anthropic_version_total"));
+        assert!(rendered.contains("shim=\"anthropic\""));
     }
 
     #[tokio::test]
@@ -1213,6 +1260,57 @@ mod tests {
         // Throughput is 10.0, depth is 100 -> 100 / 10 = 10s
         let retry_after = res.headers().get("retry-after").unwrap();
         assert_eq!(retry_after, "10");
+    }
+
+    #[tokio::test]
+    async fn test_integration_413_payload_too_large_format() {
+        // Issue #225 finding: ensure build_router layers trigger
+        // canonical JSON for 413s.
+        let mut config = AppConfig::default();
+        config.gateway.max_request_body_bytes = 100; // Small limit
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidator),
+            inference_engine: Arc::new(MockEngine {
+                chunks: std::sync::Mutex::new(vec![]),
+                sleep_ms: 0,
+            }),
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
+        };
+
+        let app = build_router(state);
+
+        let body_str = "x".repeat(101);
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/chat/completions")
+            .header("content-type", "application/json")
+            .header("content-length", "101")
+            .body(Body::from(body_str))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        assert!(res.headers().contains_key("x-request-id"));
+
+        let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(json["error"], "request_body_too_large");
+        assert!(json["request_id"].is_string());
     }
 
     #[tokio::test]

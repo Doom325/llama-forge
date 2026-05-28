@@ -4,12 +4,12 @@ This plan addresses the [E2E] bugs filed during testing, as tracked on GitHub.
 
 ## Phase 1 — Transport & API Mis-mappings (PR-1)
 **Goal:** Fix critical error mapping bugs and shim inconsistencies (#231, #226, #223, #224, #225).
-- [ ] **1.1** Fix #231: Map `DispatchError::RateLimited` to `ApiError::QueueFull` in HTTP handlers and `RESOURCE_EXHAUSTED` in gRPC.
-- [ ] **1.2** Fix #226: Emit WARN log for missing `anthropic-version` header in Anthropic shim.
-- [ ] **1.3** Fix #223: Include `"object":"chat.completion.chunk"` in OpenAI streaming chunks.
-- [ ] **1.4** Fix #224: Correct `finish_reason` mapping (e.g., 'length' vs 'stop').
-- [ ] **1.5** Fix #225: Ensure 413 Payload Too Large uses canonical JSON envelope and has request-id.
-- [ ] **1.6** Open PR-1.
+- [x] **1.1** Fix #231: Map `DispatchError::RateLimited` to `ApiError::QueueFull` in HTTP handlers and `RESOURCE_EXHAUSTED` in gRPC.
+- [x] **1.2** Fix #226: Emit WARN log for missing `anthropic-version` header in Anthropic shim.
+- [x] **1.3** Fix #223: Include `"object":"chat.completion.chunk"` in OpenAI streaming chunks.
+- [x] **1.4** Fix #224: Correct `finish_reason` mapping (e.g., 'length' vs 'stop').
+- [x] **1.5** Fix #225: Ensure 413 Payload Too Large uses canonical JSON envelope and has request-id.
+- [x] **1.6** Open PR-1.
 
 ## Phase 2 — Service Health & Readiness (PR-2)
 **Goal:** Implement missing health/readiness endpoints (#227, #234).

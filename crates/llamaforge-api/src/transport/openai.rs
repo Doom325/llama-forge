@@ -136,15 +136,15 @@ pub(crate) fn parse_openai_request(
 pub(crate) fn format_openai_chunk(
     id: &str,
     model: &str,
+    created: i64,
     chunk: &ChatCompletionChunk,
 ) -> Vec<String> {
-    let now = chrono::Utc::now().timestamp();
     match chunk {
         ChatCompletionChunk::QueueUpdate { position } => {
             let update = serde_json::json!({
                 "id": id,
                 "object": "chat.completion.chunk",
-                "created": now,
+                "created": created,
                 "model": model,
                 "choices": [{
                     "delta": {},
@@ -161,7 +161,7 @@ pub(crate) fn format_openai_chunk(
             let token_json = serde_json::json!({
                 "id": id,
                 "object": "chat.completion.chunk",
-                "created": now,
+                "created": created,
                 "model": model,
                 "choices": [{
                     "delta": { "content": token },
@@ -174,7 +174,7 @@ pub(crate) fn format_openai_chunk(
             let stop_json = serde_json::json!({
                 "id": id,
                 "object": "chat.completion.chunk",
-                "created": now,
+                "created": created,
                 "model": model,
                 "choices": [{
                     "delta": {},
@@ -268,8 +268,9 @@ mod tests {
     #[test]
     fn test_openai_chunk_formatting() {
         let model = "test-model";
+        let created = 123456789;
         let queued = ChatCompletionChunk::QueueUpdate { position: 3 };
-        let formatted_queued = format_openai_chunk("req_123", model, &queued);
+        let formatted_queued = format_openai_chunk("req_123", model, created, &queued);
         assert_eq!(formatted_queued.len(), 1);
         assert!(
             formatted_queued[0].contains("\"llamaforge\":{\"position\":3,\"status\":\"queued\"}")
@@ -277,27 +278,29 @@ mod tests {
         assert!(formatted_queued[0].contains("\"id\":\"req_123\""));
         assert!(formatted_queued[0].contains("\"object\":\"chat.completion.chunk\""));
         assert!(formatted_queued[0].contains("\"model\":\"test-model\""));
-        assert!(formatted_queued[0].contains("\"created\":"));
+        assert!(formatted_queued[0].contains("\"created\":123456789"));
 
         let token = ChatCompletionChunk::Token("Hello".to_string());
-        let formatted_token = format_openai_chunk("req_123", model, &token);
+        let formatted_token = format_openai_chunk("req_123", model, created, &token);
         assert_eq!(formatted_token.len(), 1);
         assert!(formatted_token[0].contains("\"content\":\"Hello\""));
         assert!(formatted_token[0].contains("\"id\":\"req_123\""));
         assert!(formatted_token[0].contains("\"object\":\"chat.completion.chunk\""));
         assert!(formatted_token[0].contains("\"model\":\"test-model\""));
+        assert!(formatted_token[0].contains("\"created\":123456789"));
 
         let stop = ChatCompletionChunk::Stop {
             finish_reason: "stop".to_string(),
             output_tokens: 10,
             prompt_tokens: 5,
         };
-        let formatted_stop = format_openai_chunk("req_123", model, &stop);
+        let formatted_stop = format_openai_chunk("req_123", model, created, &stop);
         assert_eq!(formatted_stop.len(), 2);
         assert!(formatted_stop[0].contains("\"finish_reason\":\"stop\""));
         assert!(formatted_stop[0].contains("\"id\":\"req_123\""));
         assert!(formatted_stop[0].contains("\"object\":\"chat.completion.chunk\""));
         assert!(formatted_stop[0].contains("\"model\":\"test-model\""));
+        assert!(formatted_stop[0].contains("\"created\":123456789"));
         assert_eq!(formatted_stop[1], "[DONE]");
     }
 

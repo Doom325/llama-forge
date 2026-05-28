@@ -392,3 +392,104 @@ fn cleanup(
         "Dispatch completed"
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_finish_reason_mapping() {
+        // Natural stop (stopped_eos: true)
+        let res_stop = LlamaResponse {
+            content: "done".into(),
+            stop: true,
+            tokens_evaluated: None,
+            prompt_n: None,
+            tokens_processed: None,
+            tokens_predicted: Some(10),
+            stopped_eos: true,
+            stopped_word: false,
+            stopped_limit: false,
+            truncated: false,
+        };
+
+        let chunk = ParsedChunk {
+            text: res_stop.content.clone(),
+            stop: res_stop.stop,
+            tokens_predicted: res_stop.tokens_predicted.unwrap(),
+            prompt_tokens: 0,
+            finish_reason: if res_stop.stop {
+                if res_stop.stopped_limit || res_stop.truncated {
+                    Some("length".to_string())
+                } else {
+                    Some("stop".to_string())
+                }
+            } else {
+                None
+            },
+        };
+        assert_eq!(chunk.finish_reason.as_deref(), Some("stop"));
+
+        // Limit reached (stopped_limit: true)
+        let res_limit = LlamaResponse {
+            content: "cut off".into(),
+            stop: true,
+            tokens_evaluated: None,
+            prompt_n: None,
+            tokens_processed: None,
+            tokens_predicted: Some(10),
+            stopped_eos: false,
+            stopped_word: false,
+            stopped_limit: true,
+            truncated: false,
+        };
+
+        let chunk = ParsedChunk {
+            text: res_limit.content.clone(),
+            stop: res_limit.stop,
+            tokens_predicted: res_limit.tokens_predicted.unwrap(),
+            prompt_tokens: 0,
+            finish_reason: if res_limit.stop {
+                if res_limit.stopped_limit || res_limit.truncated {
+                    Some("length".to_string())
+                } else {
+                    Some("stop".to_string())
+                }
+            } else {
+                None
+            },
+        };
+        assert_eq!(chunk.finish_reason.as_deref(), Some("length"));
+
+        // Truncated (truncated: true)
+        let res_truncated = LlamaResponse {
+            content: "too long".into(),
+            stop: true,
+            tokens_evaluated: None,
+            prompt_n: None,
+            tokens_processed: None,
+            tokens_predicted: Some(10),
+            stopped_eos: false,
+            stopped_word: false,
+            stopped_limit: false,
+            truncated: true,
+        };
+
+        let chunk = ParsedChunk {
+            text: res_truncated.content.clone(),
+            stop: res_truncated.stop,
+            tokens_predicted: res_truncated.tokens_predicted.unwrap(),
+            prompt_tokens: 0,
+            finish_reason: if res_truncated.stop {
+                if res_truncated.stopped_limit || res_truncated.truncated {
+                    Some("length".to_string())
+                } else {
+                    Some("stop".to_string())
+                }
+            } else {
+                None
+            },
+        };
+        assert_eq!(chunk.finish_reason.as_deref(), Some("length"));
+    }
+}
