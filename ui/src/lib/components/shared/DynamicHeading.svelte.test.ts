@@ -1,6 +1,6 @@
 import { render } from '@testing-library/svelte';
 import { describe, it, expect } from 'vitest';
-import DynamicHeadingWrapper from './DynamicHeadingWrapper.svelte';
+import DynamicHeadingWrapper from '../testing/DynamicHeadingWrapper.svelte';
 
 describe('DynamicHeading', () => {
 	it('renders h1 when level is 1', () => {
