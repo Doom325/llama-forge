@@ -28,12 +28,25 @@
 </div>
 
 <style>
-	:global(#app) {
-		display: contents; /* Ensure the injected content doesn't break the parent grid */
+	.app-shell {
+		grid-template-columns: var(--sidebar-width, 240px) 1fr;
+		grid-template-rows: var(--header-height, 56px) 1fr;
 	}
 
-	.app-shell {
-		display: contents;
+	.app-shell.collapsed {
+		grid-template-columns: var(--sidebar-collapsed-width, 64px) 1fr;
+	}
+
+	@media (max-width: 768px) {
+		.app-shell {
+			grid-template-columns: var(--sidebar-collapsed-width, 64px) 1fr;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.app-shell {
+			grid-template-columns: 1fr;
+		}
 	}
 
 	:global(.app-shell > aside) {
@@ -51,17 +64,7 @@
 		grid-row: 2;
 	}
 
-	@media (max-width: 768px) {
-		:global(#app) {
-			grid-template-columns: var(--sidebar-collapsed-width, 64px) 1fr !important;
-		}
-	}
-
 	@media (max-width: 640px) {
-		:global(#app) {
-			grid-template-columns: 1fr !important;
-		}
-
 		:global(.app-shell > header),
 		:global(.app-shell > main) {
 			grid-column: 1;
