@@ -5,19 +5,19 @@
 **Estimated Duration:** 14–17 working days (single engineer) / 9–11 days (two engineers, PR3/PR4 and PR8/PR9 parallelizable)  
 **Design Document:** `FRONTEND_ARCHITECTURE.md` (4th-pass CLEAN PASS — 0 findings across 28 rules)  
 **Branch Prefix:** `ui/`  
-**Integration Branch:** `frontend/` (long-lived feature branch off `main`)  
+**Integration Branch:** `frontend` (long-lived feature branch off `main`)  
 **Final Target:** `main` (single merge after all PRs pass end-to-end testing)  
 **Upstream Dependency:** Rust backend must serve `/api/*` endpoints and `GET /api/events` (SSE). `build.rs` must support `rust-embed` for static asset embedding.  
 **Visual Design Reference:** `design_reference/v1/` — Claude Design prototypes (HTML). Open in any browser to see the visual target for each screen.  
 **Agent Model:** Coder agent (Gemini or any LLM agent) implements; Reviewer agent (Claude) reviews PRs against this plan, `FRONTEND_ARCHITECTURE.md`, and the design reference.
 
-> **Branching workflow:** A long-lived `frontend/` branch is created from `main` at the start. Each PR branches from `frontend/` and merges back into `frontend/` via squash-merge. The "Depends on" field on each PR indicates which predecessor(s) must be merged to `frontend/` before that PR's branch is created. Do NOT branch from a predecessor's feature branch — always branch from `frontend/` after the predecessor is merged. Once all 14 PRs are merged and end-to-end testing passes, `frontend/` is merged to `main` as a single integration.
+> **Branching workflow:** A long-lived `frontend` branch is created from `main` at the start. Each PR branches from `frontend` and merges back into `frontend` via squash-merge. The "Depends on" field on each PR indicates which predecessor(s) must be merged to `frontend` before that PR's branch is created. Do NOT branch from a predecessor's feature branch — always branch from `frontend` after the predecessor is merged. Once all 14 PRs are merged and end-to-end testing passes, `frontend` is merged to `main` as a single integration.
 >
 > **Setup (run once before PR1):**
 > ```bash
 > git checkout main && git pull
-> git checkout -b frontend/
-> git push -u origin frontend/
+> git checkout -b frontend
+> git push -u origin frontend
 > ```
 
 ---
@@ -55,7 +55,7 @@ PR4 (Dashboard) and PR7 (Server Detail) can be developed concurrently after PR3 
 ## PR1: Project Scaffold & Toolchain Setup
 
 **Branch:** `ui/01-scaffold`  
-**Merge Target:** `frontend/`  
+**Merge Target:** `frontend`  
 **Size:** Small (~150 lines of config + stubs)  
 **Estimated Time:** 3–4 hours  
 **Design Reference:** `design_reference/v1/App Shell.html` — reference for the `app.html` skeleton structure and system font stack
@@ -95,7 +95,7 @@ Create the SvelteKit 5 project with all toolchain configuration: TypeScript stri
 ### PR1 Creation Steps
 
 ```bash
-git checkout -b ui/01-scaffold frontend/
+git checkout -b ui/01-scaffold frontend
 # ... implement tasks 1.1–1.12 ...
 git add -A && git commit -m "ui: bootstrap SvelteKit 5 project with Tailwind, TypeScript strict, and test toolchain"
 git push -u origin ui/01-scaffold
@@ -110,7 +110,7 @@ git push -u origin ui/01-scaffold
 ## PR2: Design Tokens, Theme System & Shared Primitives
 
 **Branch:** `ui/02-design-system`  
-**Depends on:** PR1 merged to `frontend/`  
+**Depends on:** PR1 merged to `frontend`  
 **Size:** Medium (~400 lines)  
 **Estimated Time:** 5–7 hours  
 **Design Reference:** `design_reference/v1/Component Library.html` — all StatusBadge variants, button states, type scale, spacing. `design_reference/v1/styles.css` — design token values (colors, spacing, typography). `design_reference/v1/All Screens Dark.html` — dark theme targets
@@ -158,7 +158,7 @@ Implement the design token system (CSS custom properties for light/dark themes),
 ### PR2 Creation Steps
 
 ```bash
-git checkout -b ui/02-design-system frontend/
+git checkout -b ui/02-design-system frontend
 # ... implement tasks 2.1–2.19 ...
 git add -A && git commit -m "ui: add design tokens, theme system, and shared component primitives"
 git push -u origin ui/02-design-system
@@ -175,7 +175,7 @@ git push -u origin ui/02-design-system
 ## PR3: API Client, SSE LiveDataStore & TanStack Query Setup
 
 **Branch:** `ui/03-data-layer`  
-**Depends on:** PR2 merged to `frontend/`  
+**Depends on:** PR2 merged to `frontend`  
 **Size:** Medium–Large (~500 lines)  
 **Estimated Time:** 8–10 hours  
 **Design Reference:** `design_reference/v1/Connection States.html` — SSE connected/reconnecting/disconnected visual states
@@ -227,7 +227,7 @@ Implement the entire data layer: the centralized API client with CSRF headers an
 ### PR3 Creation Steps
 
 ```bash
-git checkout -b ui/03-data-layer frontend/
+git checkout -b ui/03-data-layer frontend
 # ... implement tasks 3.1–3.22 ...
 git add -A && git commit -m "ui: implement API client, SSE LiveDataStore, and TanStack Query data layer"
 git push -u origin ui/03-data-layer
@@ -259,7 +259,7 @@ git push -u origin ui/03-data-layer
 ## PR4: App Shell — Layout, Sidebar, Header & Routing
 
 **Branch:** `ui/04-app-shell`  
-**Depends on:** PR3 merged to `frontend/`  
+**Depends on:** PR3 merged to `frontend`  
 **Size:** Medium (~450 lines)  
 **Estimated Time:** 6–8 hours  
 **Design Reference:** `design_reference/v1/App Shell.html` — sidebar, header, routing layout, collapse behavior. `design_reference/v1/Connection States.html` — header connection status indicator. `design_reference/v1/Responsive.html` — breakpoint behavior
@@ -302,7 +302,7 @@ Build the application shell: root layout with sidebar navigation, header with br
 ### PR4 Creation Steps
 
 ```bash
-git checkout -b ui/04-app-shell frontend/
+git checkout -b ui/04-app-shell frontend
 # ... implement tasks 4.1–4.14 ...
 git add -A && git commit -m "ui: implement app shell with sidebar, header, routing, and focus management"
 git push -u origin ui/04-app-shell
@@ -319,7 +319,7 @@ git push -u origin ui/04-app-shell
 ## PR5: Dashboard Page — ServerGrid, ServerCard, Gauges & Health Banner
 
 **Branch:** `ui/05-dashboard`  
-**Depends on:** PR4 merged to `frontend/`  
+**Depends on:** PR4 merged to `frontend`  
 **Size:** Medium (~450 lines)  
 **Estimated Time:** 6–8 hours  
 **Design Reference:** `design_reference/v1/Dashboard.html` — server card grid, aggregate metric cards, skeleton/loading/empty/error states. `design_reference/v1/Component Library.html` — ServerCard variants
@@ -361,7 +361,7 @@ Implement the complete dashboard page (minus charts — those come in PR6 with E
 ### PR5 Creation Steps
 
 ```bash
-git checkout -b ui/05-dashboard frontend/
+git checkout -b ui/05-dashboard frontend
 # ... implement tasks 5.1–5.14 ...
 git add -A && git commit -m "ui: implement dashboard with ServerGrid, ServerCard, and availableActions pattern"
 git push -u origin ui/05-dashboard
@@ -394,7 +394,7 @@ git push -u origin ui/05-dashboard
 ## PR6: EChartsWrapper & Dashboard Charts
 
 **Branch:** `ui/06-charts`  
-**Depends on:** PR5 merged to `frontend/`  
+**Depends on:** PR5 merged to `frontend`  
 **Size:** Medium (~350 lines)  
 **Estimated Time:** 5–7 hours  
 **Design Reference:** `design_reference/v1/Dashboard.html` — chart placement, 16:9 aspect ratio, throughput and latency chart layout
@@ -434,7 +434,7 @@ Implement the lazy-loaded ECharts integration via the `EChartsWrapper` shared co
 ### PR6 Creation Steps
 
 ```bash
-git checkout -b ui/06-charts frontend/
+git checkout -b ui/06-charts frontend
 # ... implement tasks 6.1–6.11 ...
 git add -A && git commit -m "ui: implement EChartsWrapper with lazy loading, RAF batching, and accessible table"
 git push -u origin ui/06-charts
@@ -450,7 +450,7 @@ git push -u origin ui/06-charts
 ## PR7: Server Detail Page
 
 **Branch:** `ui/07-server-detail`  
-**Depends on:** PR4 merged to `frontend/` (can be developed concurrently with PR5/PR6)  
+**Depends on:** PR4 merged to `frontend` (can be developed concurrently with PR5/PR6)  
 **Size:** Medium (~350 lines)  
 **Estimated Time:** 5–7 hours  
 **Design Reference:** `design_reference/v1/Server Detail.html` — slot grid, metrics panel, action bar with pending/failed/confirm states
@@ -486,7 +486,7 @@ Implement the server detail page with slot grid, server metrics panel, config su
 ### PR7 Creation Steps
 
 ```bash
-git checkout -b ui/07-server-detail frontend/
+git checkout -b ui/07-server-detail frontend
 # ... implement tasks 7.1–7.9 ...
 git add -A && git commit -m "ui: implement server detail page with SlotGrid and ServerActionBar"
 git push -u origin ui/07-server-detail
@@ -502,7 +502,7 @@ git push -u origin ui/07-server-detail
 ## PR8: Queue Inspector Page
 
 **Branch:** `ui/08-queue`  
-**Depends on:** PR7 merged to `frontend/`  
+**Depends on:** PR7 merged to `frontend`  
 **Size:** Small–Medium (~250 lines)  
 **Estimated Time:** 4–5 hours  
 **Design Reference:** `design_reference/v1/Queue Inspector.html` — filter bar, table layout, cancel confirmation, empty state
@@ -535,7 +535,7 @@ Implement the queue inspector with filters and the simple interactive table (Tab
 ### PR8 Creation Steps
 
 ```bash
-git checkout -b ui/08-queue frontend/
+git checkout -b ui/08-queue frontend
 # ... implement tasks 8.1–8.7 ...
 git add -A && git commit -m "ui: implement queue inspector with cancel optimistic UI"
 git push -u origin ui/08-queue
@@ -550,7 +550,7 @@ git push -u origin ui/08-queue
 ## PR9: Request Explorer — TanStack Table, Virtual Scroll & Detail Drawer
 
 **Branch:** `ui/09-explorer`  
-**Depends on:** PR7 merged to `frontend/`  
+**Depends on:** PR7 merged to `frontend`  
 **Size:** Large (~550 lines)  
 **Estimated Time:** 8–10 hours  
 **Design Reference:** `design_reference/v1/Request Explorer.html` — filter bar, TanStack Table layout, detail drawer, export buttons, virtual scroll
@@ -593,7 +593,7 @@ Implement the request explorer with TanStack Table, TanStack Virtual for virtual
 ### PR9 Creation Steps
 
 ```bash
-git checkout -b ui/09-explorer frontend/
+git checkout -b ui/09-explorer frontend
 # ... implement tasks 9.1–9.13 ...
 git add -A && git commit -m "ui: implement request explorer with TanStack Table, virtual scroll, and APG Grid keyboard"
 git push -u origin ui/09-explorer
@@ -624,7 +624,7 @@ git push -u origin ui/09-explorer
 ## PR10: Configuration Pages — Forms, Diff Preview & Concurrent Editing
 
 **Branch:** `ui/10-config`  
-**Depends on:** PR7 merged to `frontend/`  
+**Depends on:** PR7 merged to `frontend`  
 **Size:** Medium (~450 lines)  
 **Estimated Time:** 6–8 hours  
 **Design Reference:** `design_reference/v1/Configuration.html` — form layout, diff preview modal, validation errors, concurrent edit banner, priority rules editor
@@ -664,7 +664,7 @@ Implement all three config editors (server config, priority rules, global settin
 ### PR10 Creation Steps
 
 ```bash
-git checkout -b ui/10-config frontend/
+git checkout -b ui/10-config frontend
 # ... implement tasks 10.1–10.12 ...
 git add -A && git commit -m "ui: implement config editors with createConfigForm, diff preview, and concurrent editing"
 git push -u origin ui/10-config
@@ -680,7 +680,7 @@ git push -u origin ui/10-config
 ## PR11: Playground Core — Chat, Streaming, Markdown & DOMPurify
 
 **Branch:** `ui/11-playground`  
-**Depends on:** PR10 merged to `frontend/`  
+**Depends on:** PR10 merged to `frontend`  
 **Size:** Large (~550 lines)  
 **Estimated Time:** 8–10 hours  
 **Design Reference:** `design_reference/v1/Playground.html` — chat layout, parameter sidebar, streaming states, message bubbles, error states, queued state
@@ -727,7 +727,7 @@ Implement the playground page with single-model chat: `ChatPane`, `StreamingToke
 ### PR11 Creation Steps
 
 ```bash
-git checkout -b ui/11-playground frontend/
+git checkout -b ui/11-playground frontend
 # ... implement tasks 11.1–11.17 ...
 git add -A && git commit -m "ui: implement playground with streaming chat, markdown pipeline, and DOMPurify"
 git push -u origin ui/11-playground
@@ -744,7 +744,7 @@ git push -u origin ui/11-playground
 ## PR12: Playground Comparison, Model Registry & Remaining Pages
 
 **Branch:** `ui/12-comparison`  
-**Depends on:** PR11 merged to `frontend/`  
+**Depends on:** PR11 merged to `frontend`  
 **Size:** Medium (~350 lines)  
 **Estimated Time:** 5–7 hours  
 **Design Reference:** `design_reference/v1/Playground.html` — side-by-side comparison, tab fallback at <1280px. `design_reference/v1/Model Registry.html` — model card grid
@@ -779,7 +779,7 @@ Add comparison mode to the playground (side-by-side model output), implement the
 ### PR12 Creation Steps
 
 ```bash
-git checkout -b ui/12-comparison frontend/
+git checkout -b ui/12-comparison frontend
 # ... implement tasks 12.1–12.8 ...
 git add -A && git commit -m "ui: implement playground comparison mode and model registry page"
 git push -u origin ui/12-comparison
@@ -813,7 +813,7 @@ git push -u origin ui/12-comparison
 ## PR13: Security Hardening & Rust Build Integration
 
 **Branch:** `ui/13-security-build`  
-**Depends on:** PR12 merged to `frontend/`  
+**Depends on:** PR12 merged to `frontend`  
 **Size:** Medium (~300 lines)  
 **Estimated Time:** 4–6 hours  
 **Design Reference:** None — this PR is infrastructure (CSP headers, rust-embed, build pipeline). No visual changes.
@@ -853,7 +853,7 @@ Implement all security response headers, verify CSP correctness, set up `build.r
 ### PR13 Creation Steps
 
 ```bash
-git checkout -b ui/13-security-build frontend/
+git checkout -b ui/13-security-build frontend
 # ... implement tasks 13.1–13.12 ...
 git add -A && git commit -m "ui: implement security headers, CSRF enforcement, and rust-embed build integration"
 git push -u origin ui/13-security-build
@@ -869,7 +869,7 @@ git push -u origin ui/13-security-build
 ## PR14: Test Suite, Bundle Size CI & Final Polish
 
 **Branch:** `ui/14-verification`  
-**Depends on:** PR13 merged to `frontend/`  
+**Depends on:** PR13 merged to `frontend`  
 **Size:** Medium (~400 lines of tests + CI config)  
 **Estimated Time:** 6–8 hours  
 **Design Reference:** `design_reference/v1/All Screens Dark.html` — dark theme visual regression targets. `design_reference/v1/Responsive.html` — responsive breakpoint regression targets
@@ -912,7 +912,7 @@ The final PR implements the Playwright E2E test suite, Playwright visual regress
 ### PR14 Creation Steps
 
 ```bash
-git checkout -b ui/14-verification frontend/
+git checkout -b ui/14-verification frontend
 # ... implement tasks 14.1–14.14 ...
 git add -A && git commit -m "ui: add E2E tests, visual regression, bundle size CI, axe-core, and Lighthouse"
 git push -u origin ui/14-verification
