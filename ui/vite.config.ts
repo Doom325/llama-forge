@@ -1,10 +1,11 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import { sveltekit } from '@sveltejs/kit/vite';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import viteCompression from 'vite-plugin-compression';
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), viteCompression()],
+	plugins: [tailwindcss(), sveltekit(), svelteTesting(), viteCompression()],
 	test: {
 		expect: { requireAssertions: true },
 		environment: 'jsdom',

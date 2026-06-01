@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Request Explorer</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const { useRef } = React;
+
+    const ShellExplorer = ({ selectedId }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="explorer" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Explorer" }]} conn="connected" connMeta="50051" />
+            <ExplorerPage initialSelectedId={selectedId} />
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── State frames ──
+    const XFilterBar = () => (
+      <div className="ExpFilters">
+        <div className="FField"><label>Time range</label>
+          <div className="Toggle"><button className="on">Last 1h</button><button>Last 24h</button><button>Last 7d</button><button>Custom…</button></div>
+        </div>
+        <div className="FField"><label>Model</label>
+          <span className="SelWrap"><select><option>All models</option></select><svg className="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9" /></svg></span></div>
+        <div className="FField"><label>Status</label>
+          <span className="SelWrap"><select><option>All statuses</option></select><svg className="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9" /></svg></span></div>
+        <div className="FField"><label>Requestor</label><input className="Input" placeholder="Search requestor…" /></div>
+        <div className="FActions"><button className="Btn primary"><Icon name="sliders" size={14} /> Apply filters</button><button className="Btn secondary">Reset</button></div>
+      </div>
+    );
+    const XThead = () => (
+      <thead><tr>
+        <th>Timestamp</th><th>Request ID</th><th>Model</th><th>Task type</th><th>Status</th>
+        <th className="num">TTFT</th><th className="num">TPS</th><th className="num">Latency</th><th className="num">Tokens</th>
+      </tr></thead>
+    );
+    const XSK = [70, 64, 80, 80, 84, 50, 40, 54, 50];
+    const XSkeleton = ({ rows = 6 }) => (
+      <div className="ExpTableWrap"><div className="ExpScroll"><table className="ExpTable" aria-busy="true"><XThead />
+        <tbody>{Array.from({ length: rows }).map((_, r) => (
+          <tr key={r}>{XSK.map((w, c) => (
+            <td key={c}><span className="SkBar" style={{ width: w, height: 11, display: "inline-block", marginLeft: c >= 5 ? "auto" : 0 }} /></td>
+          ))}</tr>
+        ))}</tbody></table></div></div>
+    );
+    const Frame = ({ children, head }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="explorer" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Explorer" }]} conn="connected" connMeta="50051" />
+            <div className="Page"><div className="PageInner" style={{ maxWidth: 1400 }}>
+              <div className="DashHead" style={{ marginBottom: 16 }}>
+                <div className="titlewrap"><div className="titlerow"><h1 style={{ font: "var(--weight-semibold) 22px var(--font-sans)", margin: 0 }}>Request Explorer</h1></div>
+                  <div className="sub">{head}</div></div>
+                <div className="actions"><button className="Btn secondary sm"><Icon name="download" size={14} /> Export CSV</button><button className="Btn secondary sm"><Icon name="download" size={14} /> Export JSON</button></div>
+              </div>
+              {children}
+            </div></div>
+          </div>
+        </div>
+      </div>
+    );
+    const PanelCard = ({ children }) => (
+      <div className="ExpTableWrap"><div style={{ padding: 0 }}>{children}</div></div>
+    );
+
+    // ── Accessibility map ──
+    const ExplorerAnno = () => {
+      const hostRef = useRef(null);
+      const marks = useAnno(hostRef, [
+        { id: "grid", sel: ".ExpTableWrap", kind: "lm-region", label: "role=grid · APG pattern" },
+        { id: "sort", sel: ".ExpTable th.sorted", kind: "lm-search", label: "aria-sort" },
+        { id: "drawer", sel: ".Drawer.open", kind: "lm-main", label: "role=dialog" },
+        { id: "close", sel: ".Drawer.open .DClose", kind: "live", text: "focus on open", anchor: "tr" },
+        { id: "selrow", sel: ".ExpTable tbody tr.selected td:first-child", kind: "tab", n: "↩", anchor: "cl" },
+      ]);
+      return (
+        <div className="artboard-host a11y-host" data-theme="light" ref={hostRef}>
+          <div className="AppShell">
+            <Sidebar activeId="explorer" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Explorer" }]} conn="connected" connMeta="50051" />
+              <ExplorerPage initialSelectedId="req-a8f2" />
+            </div>
+          </div>
+          <div className="AnnoLayer">
+            {marks.map(m => {
+              if (m.kind === "lm-region") return <Landmark key={m.id} kind="region" {...m} inset={1} />;
+              if (m.kind === "lm-search") return <Landmark key={m.id} kind="search" {...m} inset={1} />;
+              if (m.kind === "lm-main") return <Landmark key={m.id} kind="main" {...m} inset={2} />;
+              if (m.kind === "live") return <LiveMark key={m.id} {...m} />;
+              if (m.kind === "tab") return <TabMark key={m.id} {...m} alt />;
+              return null;
+            })}
+          </div>
+          <div className="A11yLegend tr">
+            <div className="grp">
+              <h3><Icon name="info" size={14} /> Grid keyboard model</h3>
+              <div className="LegRow"><span className="keys" style={{ display: "inline-flex", gap: 4 }}><kbd className="k">←</kbd><kbd className="k">↑</kbd><kbd className="k">↓</kbd><kbd className="k">→</kbd></span><span>move between cells (APG <b>Grid</b> pattern); one tab stop holds the grid.</span></div>
+              <div className="LegRow"><kbd className="k">Enter</kbd><span>enter cell interaction (open row drawer / activate control).</span></div>
+              <div className="LegRow"><kbd className="k">Esc</kbd><span>return to grid navigation from a cell.</span></div>
+              <div className="LegRow"><kbd className="k">Home</kbd><kbd className="k">End</kbd><span>first / last cell in row; <kbd className="k">⌘</kbd>+ jumps row edges.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Sorting</div>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#d97706" }} /><span>Sortable header carries <code>aria-sort="ascending|descending"</code>; the arrow mirrors it.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Detail drawer</div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--surface-inverse)" }}>→</span><span>On open, focus moves to the <b>close button</b>.</span></div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--status-healthy-solid)" }}>↩</span><span>On close, focus returns to the <b>selected row</b>.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Note</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>Virtual scroll preserves focus on row recycle — the focused cell’s logical index is restored after DOM reuse.</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="browser" title="Request Explorer · browser"
+          subtitle="The densest screen. Horizontal filter bar (time range, multi-select model, task, status, requestor autocomplete, Apply / Reset), a results header with total count + pagination + Export CSV/JSON, and a virtualized table. Every metric is monospace; status is a StatusBadge. Sortable columns show an aria-sort arrow. Click any row to open the detail drawer.">
+          <DCArtboard id="exp-table" label="Browser (drawer closed)" width={1440} height={860}><ShellExplorer /></DCArtboard>
+          <DCArtboard id="exp-drawer" label="Row detail drawer open" width={1440} height={860}><ShellExplorer selectedId="req-a8f2" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="initial" title="Initial — no filters applied" subtitle="Nothing queried yet. The filter bar is ready; the results area prompts the operator to apply filters. No table is rendered.">
+          <DCArtboard id="x-initial" label="Awaiting filters" width={1440} height={640}>
+            <Frame head={<span>Historical request browser</span>}>
+              <XFilterBar />
+              <PanelCard>
+                <div className="Centered">
+                  <div className="ic-search"><Icon name="search" size={22} /></div>
+                  <div className="title">Apply filters to view requests</div>
+                  <div className="desc">Choose a time range and any model, status, or requestor filters, then press Apply.</div>
+                </div>
+              </PanelCard>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="empty" title="Empty results" subtitle="Filters applied but nothing matched. The result area offers a reset.">
+          <DCArtboard id="x-empty" label="No matches" width={1440} height={680}>
+            <Frame head={<span><b className="mono">0</b> requests · filters applied</span>}>
+              <XFilterBar />
+              <EmptyBlock icon="search" title="No requests match your filters"
+                desc="Try broadening your time range or removing filters." actionLabel="Reset filters" onAction={() => {}} />
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="loading" title="Loading — query running" subtitle="Applied filters show as chips; the result area shows a spinner with “Searching…”, skeleton rows beneath.">
+          <DCArtboard id="x-loading" label="Searching" width={1440} height={720}>
+            <Frame head={<span>Searching…</span>}>
+              <XFilterBar />
+              <div style={{ marginBottom: 12 }}>
+                <FilterChips chips={[{ k: "time", v: "last 24h" }, { k: "model", v: "llama-70b" }, { k: "status", v: "failed" }, { k: "requestor", v: "api-svc" }]} />
+              </div>
+              <div className="ExpTableWrap">
+                <div className="Centered" style={{ minHeight: 120, padding: "28px 24px" }}>
+                  <Spinner lg /><div className="msg">Searching 2.8M requests…</div>
+                </div>
+                <div style={{ opacity: 0.6, borderTop: "1px solid var(--border-default)" }}><XSkeleton rows={5} /></div>
+              </div>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="error" title="Error — query timed out" subtitle="The query exceeded its deadline. A red banner with a Retry action explains the likely cause.">
+          <DCArtboard id="x-error" label="Timeout" width={1440} height={700}>
+            <Frame head={<span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>}>
+              <XFilterBar />
+              <ErrorBanner kind="error" onRetry={() => {}}>Request timed out. The server may be under heavy load.</ErrorBanner>
+              <div style={{ opacity: 0.5 }}><XSkeleton rows={5} /></div>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="a11y" title="Accessibility map"
+          subtitle="The results table implements the ARIA Grid pattern: arrow keys move between cells, Enter enters cell interaction, Esc returns to grid nav. The sorted header exposes aria-sort. Opening a row moves focus into the drawer (close button); closing returns focus to the row.">
+          <DCArtboard id="exp-a11y" label="Grid keyboard · sort · drawer focus" width={1440} height={900}><ExplorerAnno /></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

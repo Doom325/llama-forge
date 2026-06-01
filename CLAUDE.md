@@ -131,11 +131,19 @@ When a `send(to="ReviewerAgent", key=..., value=<PR URL>)` lands, walk this chec
 
 ### Step 2 — Check against the document hierarchy
 
+**For backend (Rust) PRs:**
 1. **Design conformance** — does the PR's behavior match `docs/design.md`? Public APIs, error semantics, request lifecycle, priority/scheduling rules.
 2. **Component conformance** — does the PR's structure match `docs/component-designs/NN_<COMPONENT>.md`? Module layout, trait boundaries, persistence schema, concurrency model.
 3. **Plan completeness** — does the PR check off every sub-task in the phase it claims to implement, and *only* that phase? Stray sub-tasks from later phases are findings; missing sub-tasks from the current phase are findings.
 
 If `PLAN.md`, the component design, and `design.md` disagree, the higher document wins (`design.md` > component design > `PLAN.md`). Flag the inconsistency rather than silently picking one.
+
+**For frontend (SvelteKit) PRs** (branches prefixed `ui/`, targeting `frontend` branch):
+1. **Architecture conformance** — does the PR match `FRONTEND_ARCHITECTURE.md`? Component contracts (Section 5.2), state management rules (Section 6), SSE behavior (Section 7), accessibility plan (Section 9), security posture (Section 10).
+2. **Visual conformance** — does the PR match the visual target in `design_reference/v1/`? The PR's **Design Reference** field lists the specific HTML file(s) to check against. Open them in a browser to compare layout, spacing, color, and component structure.
+3. **Plan completeness** — does the PR check off every task in its section of `FRONTEND_PLAN.md`, and *only* those tasks?
+
+If `FRONTEND_ARCHITECTURE.md` and `FRONTEND_PLAN.md` disagree, the architecture doc wins.
 
 ### Step 3 — Run the rubric
 
@@ -150,7 +158,21 @@ Invoke the **`rust-architecture-reviewer`** skill (under `.claude/skills/`) to o
 | `rust-review-observability` | R24–R29 | Structured tracing, layered subscriber, no telemetry in domain, propagation |
 | `rust-review-ci` | R30–R32 | Build toolchain, CI verification beyond `cargo test`, supply-chain audit |
 
-Use the orchestrator skill (`rust-architecture-reviewer`) for full PRs. Use the individual sub-skills directly only when the PR is genuinely scoped to one concern (e.g. a CI-only change).
+Use the orchestrator skill (`rust-architecture-reviewer`) for full Rust PRs. Use the individual sub-skills directly only when the PR is genuinely scoped to one concern (e.g. a CI-only change).
+
+**For frontend PRs** (branches prefixed `ui/`), invoke the **`frontend-review`** skill to orchestrate the seven specialized frontend review skills:
+
+| Skill | Focus |
+|-------|-------|
+| `frontend-review-rendering` | Progressive rendering, document semantics, layout stability, responsiveness (Rules 1–4) |
+| `frontend-review-components` | Component contracts, intelligence distribution, composition, lifecycle (Rules 5–8) |
+| `frontend-review-state` | Source of truth, derived state, optimistic updates, form state (Rules 9–12) |
+| `frontend-review-network` | Request resilience, caching, offline, data fetching architecture (Rules 13–16) |
+| `frontend-review-performance` | Budgets, JS cost, images, critical rendering path (Rules 17–20) |
+| `frontend-review-accessibility` | Semantics, keyboard, focus, screen readers, color/contrast (Rules 21–25) |
+| `frontend-review-security` | XSS prevention, data safety, CSP (Rules 26–28) |
+
+Use the orchestrator skill (`frontend-review`) for full frontend PRs. Use individual sub-skills directly for narrowly scoped changes (e.g. a security-only PR).
 
 ### Step 4 — Apply project-specific conventions
 
@@ -164,6 +186,18 @@ Beyond the rubric, LlamaForge has these standing conventions that count as findi
 - **Hot-reload contract.** Config readers `.load()` from `ArcSwap` once per request and treat the snapshot as immutable for the request's lifetime. Mid-request re-reads are findings.
 - **Tests use `mock-llama`.** Integration tests must drive against `mock-llama` with deterministic delays/errors. Tests against a real `llama-server` are only acceptable behind a feature flag excluded from default CI.
 - **Toolchain pin is sacred.** `rust-toolchain.toml` changes need explicit justification in the PR body.
+
+**Frontend-specific conventions** (for `ui/` PRs):
+
+- **Svelte 5 runes only.** `$state`, `$derived`, `$effect` — never `onMount`, `onDestroy`, `writable`, `readable`, or any Svelte 4 API. Using Svelte 4 API is an automatic reject.
+- **No raw `{@html}` outside `renderMarkdown()`.** The ESLint rule `no-raw-html-without-sanitize` enforces this. Any `{@html}` with any argument other than the output of `renderMarkdown()` is a finding.
+- **Presentational components are pure.** No `fetch()`, no store subscriptions, no `$effect` side effects in presentational components. Only orchestrator (page-level) components do I/O.
+- **All API calls go through `lib/api/client.ts`.** No raw `fetch()`. The client auto-attaches the CSRF header on non-GET requests.
+- **TypeScript strict mode.** No `any` types. Discriminated unions over boolean flags.
+- **TanStack Query for all server state.** No Svelte stores for server-originated data. Components consume data via `createQuery()`, never from SSE events directly.
+- **StatusBadge for every status indicator.** Triple redundancy (icon + text + color). Color-only status indicators are a finding.
+- **Tailwind CSS 4 only.** No inline `style` attributes except where Svelte scoped styles are required.
+- **Accessibility from day one.** Every interactive element keyboard-navigable with visible focus ring. axe-core must pass.
 
 ### Step 5 — Send the verdict
 
@@ -195,7 +229,7 @@ When the coder pushes fixes and re-requests on the same key, repeat from Step 1 
 
 ## What's already on this machine for you
 
-- **Skills:** `.claude/skills/rust-architecture-reviewer/` and the six sub-skills are committed in this repo. They auto-load when Claude Code starts in this directory.
+- **Skills:** `.claude/skills/rust-architecture-reviewer/` and six Rust sub-skills, plus `.claude/skills/frontend-review/` and seven frontend sub-skills are committed in this repo. They auto-load when Claude Code starts in this directory.
 - **Relay registration:** Handled by `start-agent.sh` at the project root. You start already registered as `ReviewerAgent` and with background polling running.
 - **Memory:** Your global memory has standing rules (always-PR workflow, platform-neutral naming, etc.) — they apply here as well.
 
