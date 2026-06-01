@@ -1,14 +1,18 @@
 <script lang="ts">
+	import DynamicHeading from './DynamicHeading.svelte';
+
 	let {
 		title,
 		description,
 		icon,
-		action
+		action,
+		headingLevel = 3
 	}: {
 		title: string;
 		description: string;
 		icon?: string;
 		action?: { label: string; onClick: () => void };
+		headingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
 	} = $props();
 </script>
 
@@ -18,7 +22,10 @@
 	{#if icon}
 		<div class="mb-4 text-4xl" aria-hidden="true">{icon}</div>
 	{/if}
-	<h3 class="mb-2 text-lg font-semibold text-[var(--color-text-primary)]">{title}</h3>
+	<DynamicHeading
+		level={headingLevel}
+		class="mb-2 text-lg font-semibold text-[var(--color-text-primary)]">{title}</DynamicHeading
+	>
 	<p class="mb-6 max-w-md">{description}</p>
 	{#if action}
 		<button

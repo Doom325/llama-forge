@@ -1,14 +1,21 @@
-import { browser } from '$app/environment';
 import { preferences } from './preferences.svelte';
 
 export function initializeTheme() {
-	if (!browser) return;
+	if (typeof window === 'undefined') return;
 
-	$effect.root(() => {
+	return $effect.root(() => {
+		let systemPrefersDark = $state(window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+		const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+		const updateSystemTheme = (e: MediaQueryListEvent) => {
+			systemPrefersDark = e.matches;
+		};
+		mediaQuery.addEventListener('change', updateSystemTheme);
+
 		$effect(() => {
 			let activeTheme = preferences.theme;
 			if (activeTheme === 'system') {
-				activeTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+				activeTheme = systemPrefersDark ? 'dark' : 'light';
 			}
 
 			if (activeTheme === 'dark') {
@@ -17,5 +24,9 @@ export function initializeTheme() {
 				document.documentElement.setAttribute('data-theme', 'light');
 			}
 		});
+
+		return () => {
+			mediaQuery.removeEventListener('change', updateSystemTheme);
+		};
 	});
 }

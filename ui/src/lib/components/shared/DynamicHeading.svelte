@@ -22,6 +22,6 @@
 	<h4 class={className}>{@render children()}</h4>
 {:else if level === 5}
 	<h5 class={className}>{@render children()}</h5>
-{:else if level === 6}
+{:else}
 	<h6 class={className}>{@render children()}</h6>
 {/if}

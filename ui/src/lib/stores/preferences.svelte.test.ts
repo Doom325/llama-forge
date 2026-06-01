@@ -18,7 +18,7 @@ describe('Preferences Store', () => {
 		preferences.toggleTheme();
 		expect(preferences.theme).toBe('dark');
 		preferences.toggleTheme();
-		expect(preferences.theme).toBe('light');
+		expect(preferences.theme).toBe('system');
 	});
 
 	it('reads prefers-color-scheme initial read on system toggle', () => {

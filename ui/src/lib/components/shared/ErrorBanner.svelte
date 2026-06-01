@@ -36,6 +36,12 @@
 
 	let currentConfig = $derived(config[variant]);
 
+	$effect(() => {
+		if (message) {
+			visible = true;
+		}
+	});
+
 	function handleDismiss() {
 		visible = false;
 	}

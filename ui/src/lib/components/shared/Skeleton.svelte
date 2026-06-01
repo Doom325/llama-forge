@@ -17,9 +17,8 @@
 </script>
 
 <div
-	role="status"
 	aria-busy="true"
-	aria-label="Loading"
+	aria-hidden="true"
 	class="animate-pulse bg-[var(--color-border)] {variantClass} {className}"
 	style="width: {width}; height: {height};"
 ></div>

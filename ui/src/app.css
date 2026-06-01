@@ -13,14 +13,14 @@
 	--color-text-primary-dark: #f8fafc;
 	--color-text-secondary-dark: #cbd5e1;
 
-	--color-status-healthy-light: #16a34a;
-	--color-status-healthy-dark: #22c55e;
-	--color-status-degraded-light: #d97706;
-	--color-status-degraded-dark: #f59e0b;
-	--color-status-failed-light: #dc2626;
-	--color-status-failed-dark: #ef4444;
-	--color-status-pending-light: #2563eb;
-	--color-status-pending-dark: #3b82f6;
+	--color-status-healthy-light: #166534;
+	--color-status-healthy-dark: #86efac;
+	--color-status-degraded-light: #92400e;
+	--color-status-degraded-dark: #fcd34d;
+	--color-status-failed-light: #991b1b;
+	--color-status-failed-dark: #fca5a5;
+	--color-status-pending-light: #1e40af;
+	--color-status-pending-dark: #93c5fd;
 
 	--color-focus-ring-light: #2563eb;
 	--color-focus-ring-dark: #60a5fa;
@@ -64,10 +64,17 @@
 
 	/* Focus indicator base styles */
 	*:focus-visible {
-		outline: none;
+		outline: 2px solid transparent;
+		outline-offset: 2px;
 		box-shadow:
 			0 0 0 2px var(--color-bg-primary),
 			0 0 0 4px var(--color-focus-ring);
+	}
+
+	@media (forced-colors: active) {
+		*:focus-visible {
+			outline: 2px solid CanvasText;
+		}
 	}
 }
 

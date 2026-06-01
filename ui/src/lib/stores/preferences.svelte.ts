@@ -6,9 +6,9 @@ class PreferencesStore {
 
 	constructor() {
 		if (typeof localStorage !== 'undefined') {
-			const storedTheme = localStorage.getItem('theme') as Theme | null;
-			if (storedTheme) {
-				this.theme = storedTheme;
+			const storedTheme = localStorage.getItem('theme');
+			if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') {
+				this.theme = storedTheme as Theme;
 			}
 			const storedSidebar = localStorage.getItem('sidebarCollapsed');
 			if (storedSidebar !== null) {
@@ -26,14 +26,11 @@ class PreferencesStore {
 
 	toggleTheme() {
 		if (this.theme === 'system') {
-			if (typeof window !== 'undefined' && window.matchMedia) {
-				const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-				this.setTheme(prefersDark ? 'light' : 'dark');
-			} else {
-				this.setTheme('dark');
-			}
+			this.setTheme('light');
+		} else if (this.theme === 'light') {
+			this.setTheme('dark');
 		} else {
-			this.setTheme(this.theme === 'light' ? 'dark' : 'light');
+			this.setTheme('system');
 		}
 	}
 

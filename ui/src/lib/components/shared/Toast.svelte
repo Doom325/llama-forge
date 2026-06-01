@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { toastStore } from '$lib/stores/toast.svelte';
+	import type { ToastType } from '$lib/stores/toast.svelte';
 
-	const typeStyles = {
+	const typeStyles: Record<ToastType, string> = {
 		success:
 			'bg-[var(--color-status-healthy)]/10 text-[var(--color-status-healthy)] border-[var(--color-status-healthy)]/20',
 		error:
@@ -12,13 +13,13 @@
 	};
 </script>
 
-<div class="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col gap-2">
+<div
+	role="status"
+	aria-live="polite"
+	class="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col gap-2"
+>
 	{#each toastStore.toasts as toast (toast.id)}
-		<div
-			role="status"
-			aria-live="polite"
-			class="pointer-events-auto rounded-md border px-4 py-3 shadow-lg {typeStyles[toast.type]}"
-		>
+		<div class="pointer-events-auto rounded-md border px-4 py-3 shadow-lg {typeStyles[toast.type]}">
 			{toast.message}
 		</div>
 	{/each}

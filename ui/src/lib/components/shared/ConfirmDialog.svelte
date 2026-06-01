@@ -26,11 +26,6 @@
 		open = false;
 	}
 
-	function handleCancel() {
-		if (onCancel) onCancel();
-		open = false;
-	}
-
 	let confirmButtonClass = $derived(
 		variant === 'danger'
 			? 'bg-[var(--color-status-failed)] text-white hover:opacity-90'
@@ -57,7 +52,6 @@
 			<div class="mt-6 flex justify-end gap-3">
 				<Dialog.Close
 					class="rounded-md border border-[var(--color-border)] px-4 py-2 font-medium hover:bg-[var(--color-bg-secondary)]"
-					onclick={handleCancel}
 				>
 					{cancelLabel}
 				</Dialog.Close>
