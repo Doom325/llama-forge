@@ -3,6 +3,7 @@
 	import ConnectionStatus from './ConnectionStatus.svelte';
 	import KeyboardShortcuts from './KeyboardShortcuts.svelte';
 	import { preferences } from '$lib/stores/preferences.svelte';
+	import { dashboardStore } from '$lib/stores/dashboard.svelte';
 	import { page } from '$app/state';
 
 	let breadcrumb = $derived(
@@ -34,8 +35,14 @@
 	</div>
 
 	<div class="flex items-center gap-4">
-		{#if page.url.pathname === '/'}
-			<button id="dashboard-summary-btn" class="sr-only">Announce dashboard summary</button>
+		{#if page.url.pathname === '/' && dashboardStore.announceSummary}
+			<button
+				type="button"
+				class="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--color-bg-secondary)]"
+				onclick={dashboardStore.announceSummary}
+			>
+				Dashboard Summary
+			</button>
 		{/if}
 		<ConnectionStatus />
 		<KeyboardShortcuts />

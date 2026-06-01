@@ -49,6 +49,10 @@ export interface ModelInfo {
 	capabilities: string[];
 }
 
+export interface AggregatedMetrics {
+	throughput_total: number;
+}
+
 export interface GenerationParams {
 	temperature: number;
 	max_tokens: number;
@@ -78,4 +82,28 @@ export function getDetailAvailableActions(status: ServerStatus): DetailServerAct
 		actions.push('force_kill');
 	}
 	return actions;
+}
+
+export function computeFleetHealth(servers: ServerState[]) {
+	const counts = { healthy: 0, degraded: 0, failed: 0, total: servers.length };
+	let allPending = servers.length > 0;
+
+	for (const s of servers) {
+		if (s.status === 'healthy' || s.status === 'running') counts.healthy++;
+		else if (s.status === 'degraded' || s.status === 'reconnecting') counts.degraded++;
+		else if (s.status === 'failed' || s.status === 'disconnected') counts.failed++;
+
+		if (s.status !== 'pending' && s.status !== 'restarting') allPending = false;
+	}
+
+	let status: 'healthy' | 'degraded' | 'failed' = 'healthy';
+	if (counts.failed > 0) status = 'failed';
+	else if (
+		counts.degraded > 0 ||
+		(counts.healthy < counts.total && counts.healthy > 0) ||
+		allPending
+	)
+		status = 'degraded';
+
+	return { status, counts };
 }
