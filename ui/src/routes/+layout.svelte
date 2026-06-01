@@ -2,6 +2,9 @@
 	import '../app.css';
 	import { initializeTheme } from '$lib/stores/theme.svelte';
 	import { browser } from '$app/environment';
+	import { QueryClientProvider } from '@tanstack/svelte-query';
+	import { queryClient } from '$lib/api/queryClient';
+	import Toast from '$lib/components/shared/Toast.svelte';
 
 	let { children } = $props();
 
@@ -15,4 +18,8 @@
 	});
 </script>
 
-{@render children()}
+<QueryClientProvider client={queryClient}>
+	{@render children()}
+</QueryClientProvider>
+
+<Toast />

@@ -1,15 +1,9 @@
 <script lang="ts">
-	export type Status =
-		| 'healthy'
-		| 'degraded'
-		| 'failed'
-		| 'pending'
-		| 'reconnecting'
-		| 'disconnected';
+	import type { ServerStatus } from '$lib/api/types';
 
-	let { status, size = 'md' }: { status: Status; size?: 'sm' | 'md' | 'lg' } = $props();
+	let { status, size = 'md' }: { status: ServerStatus; size?: 'sm' | 'md' | 'lg' } = $props();
 
-	const statusConfig = {
+	const statusConfig: Record<ServerStatus, { icon: string; label: string; colorClass: string }> = {
 		healthy: {
 			icon: '✓',
 			label: 'Healthy',
@@ -45,6 +39,24 @@
 			label: 'Reconnecting',
 			colorClass:
 				'text-[var(--color-status-degraded)] bg-[var(--color-status-degraded)]/10 border-[var(--color-status-degraded)]/20'
+		},
+		running: {
+			icon: '▶',
+			label: 'Running',
+			colorClass:
+				'text-[var(--color-status-healthy)] bg-[var(--color-status-healthy)]/10 border-[var(--color-status-healthy)]/20'
+		},
+		stopped: {
+			icon: '■',
+			label: 'Stopped',
+			colorClass:
+				'text-[var(--color-text-secondary)] bg-[var(--color-bg-secondary)] border-[var(--color-border)]'
+		},
+		restarting: {
+			icon: '⟳',
+			label: 'Restarting',
+			colorClass:
+				'text-[var(--color-status-pending)] bg-[var(--color-status-pending)]/10 border-[var(--color-status-pending)]/20'
 		}
 	};
 
