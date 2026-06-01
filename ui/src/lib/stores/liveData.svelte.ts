@@ -16,7 +16,7 @@ export class LiveDataStore {
 
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	private buffer: Map<string, { type: string; data: unknown }> = new Map();
-	private rafId: number | null = null;
+	private flushTimeoutId: ReturnType<typeof setTimeout> | null = null;
 	private lastFlushTime = 0;
 
 	constructor(queryClient: QueryClient) {
@@ -85,6 +85,7 @@ export class LiveDataStore {
 		this.eventSource.addEventListener('queue-update', handleMessage);
 		this.eventSource.addEventListener('config-changed', handleMessage);
 		this.eventSource.addEventListener('model-update', handleMessage);
+		this.eventSource.addEventListener('heartbeat', handleMessage);
 	}
 
 	private disconnect() {
@@ -100,9 +101,9 @@ export class LiveDataStore {
 			clearTimeout(this.reconnectTimeoutId);
 			this.reconnectTimeoutId = null;
 		}
-		if (this.rafId) {
-			cancelAnimationFrame(this.rafId);
-			this.rafId = null;
+		if (this.flushTimeoutId) {
+			clearTimeout(this.flushTimeoutId);
+			this.flushTimeoutId = null;
 		}
 		this.connected = false;
 	}
@@ -155,7 +156,7 @@ export class LiveDataStore {
 	private bufferEvent(type: string, data: unknown) {
 		const keyArray = this.getQueryKey(type, data);
 		if (!keyArray) return;
-		const bufferKey = JSON.stringify(keyArray);
+		const bufferKey = JSON.stringify({ type, key: keyArray });
 
 		this.buffer.set(bufferKey, { type, data });
 
@@ -168,19 +169,17 @@ export class LiveDataStore {
 	}
 
 	private scheduleFlush() {
-		if (this.rafId) return; // already scheduled
+		if (this.flushTimeoutId) return; // already scheduled
 
-		this.rafId = requestAnimationFrame((timestamp) => {
-			this.rafId = null;
-			if (timestamp - this.lastFlushTime < 100) {
-				// Too soon, schedule next frame
-				this.scheduleFlush();
-				return;
-			}
+		const now = Date.now();
+		const elapsed = now - this.lastFlushTime;
+		const delay = Math.max(100 - elapsed, 0);
 
+		this.flushTimeoutId = setTimeout(() => {
+			this.flushTimeoutId = null;
 			this.flushBuffer();
-			this.lastFlushTime = timestamp;
-		});
+			this.lastFlushTime = Date.now();
+		}, delay);
 	}
 
 	private flushBuffer() {
@@ -190,16 +189,20 @@ export class LiveDataStore {
 		this.buffer.clear();
 
 		for (const [keyStr, event] of entries) {
-			const queryKey = JSON.parse(keyStr);
+			const { key: queryKey } = JSON.parse(keyStr);
 
 			if (event.type === 'server-update') {
 				this.queryClient.setQueryData(queryKey, event.data);
 				// Also update the global list if present
 				this.queryClient.setQueryData(['servers'], (old: ServerState[] | undefined) => {
 					if (!old) return old;
-					return old.map((s) =>
-						s.id === (event.data as ServerState).id ? (event.data as ServerState) : s
-					);
+					const updatedState = event.data as ServerState;
+					const exists = old.some((s) => s.id === updatedState.id);
+					if (exists) {
+						return old.map((s) => (s.id === updatedState.id ? updatedState : s));
+					} else {
+						return [...old, updatedState];
+					}
 				});
 			} else if (event.type === 'metrics-update') {
 				this.queryClient.setQueryData([...queryKey, 'metrics'], event.data);

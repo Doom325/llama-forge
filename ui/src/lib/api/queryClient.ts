@@ -8,7 +8,7 @@ export const queryClient = new QueryClient({
 			gcTime: 300_000,
 			refetchOnWindowFocus: true,
 			retry: 3,
-			retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30_000)
+			retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10_000)
 		},
 		mutations: {
 			retry: 0

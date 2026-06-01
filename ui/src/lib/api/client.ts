@@ -57,12 +57,12 @@ export async function apiFetch<T>(url: string, options: FetchOptions = {}): Prom
 			throw new ApiError(response.status, errorMessage, retryable);
 		}
 
-		// Handle empty responses
-		if (response.status === 204 || response.headers.get('content-length') === '0') {
+		if (response.status === 204) {
 			return {} as T;
 		}
 
-		return (await response.json()) as T;
+		const text = await response.text();
+		return (text ? JSON.parse(text) : {}) as T;
 	} catch (error) {
 		if (error instanceof ApiError) {
 			throw error;

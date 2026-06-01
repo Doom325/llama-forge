@@ -18,7 +18,8 @@ describe('Api Client', () => {
 			ok: true,
 			status: 200,
 			headers: new Headers(),
-			json: async () => ({})
+			text: () => Promise.resolve('{}'),
+			json: () => Promise.resolve({})
 		});
 
 		await apiFetch('/api/test', { method: 'POST' });
@@ -32,7 +33,8 @@ describe('Api Client', () => {
 			ok: true,
 			status: 200,
 			headers: new Headers(),
-			json: async () => ({})
+			text: () => Promise.resolve('{}'),
+			json: () => Promise.resolve({})
 		});
 
 		await apiFetch('/api/test', { method: 'GET' });
@@ -47,7 +49,8 @@ describe('Api Client', () => {
 			status: 404,
 			statusText: 'Not Found',
 			headers: new Headers(),
-			json: async () => ({ message: 'Not found here' })
+			text: () => Promise.resolve(JSON.stringify({ message: 'Not found here' })),
+			json: () => Promise.resolve({ message: 'Not found here' })
 		});
 
 		await expect(apiFetch('/api/test')).rejects.toMatchObject({
@@ -62,7 +65,8 @@ describe('Api Client', () => {
 			status: 500,
 			statusText: 'Server Error',
 			headers: new Headers(),
-			json: async () => ({ message: 'Boom' })
+			text: () => Promise.resolve(JSON.stringify({ message: 'Boom' })),
+			json: () => Promise.resolve({ message: 'Boom' })
 		});
 
 		await expect(apiFetch('/api/test')).rejects.toMatchObject({
