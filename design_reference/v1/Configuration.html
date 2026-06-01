@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Configuration</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const { useRef } = React;
+
+    // ── Server config editor (clean / dirty / diff / concurrent banner) ──
+    const ShellConfig = ({ initialValues, openModal, showBanner }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="configuration" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Configuration" }]} conn="connected" connMeta="50051" />
+            <ConfigPage initialValues={initialValues} openModal={openModal} showBanner={showBanner} />
+          </div>
+        </div>
+      </div>
+    );
+    const DIRTY = { gpuLayers: 40, batchSize: 1024 };
+
+    // ── Priority rules editor ──
+    const ShellPR = ({ initialEdit, initialDraft }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="configuration" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Configuration" }]} conn="connected" connMeta="50051" />
+            <PriorityRulesPage initialEdit={initialEdit} initialDraft={initialDraft} />
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── State frames (loading / error / empty) ──
+    const Tabs = () => (
+      <div className="Tabs" role="tablist">
+        <button className="Tab active" role="tab" aria-selected="true">Server config</button>
+        <button className="Tab" role="tab">Priority rules</button>
+        <button className="Tab" role="tab">Global settings</button>
+      </div>
+    );
+    const SK_FIELDS = ["Model path", "GPU layers", "Context size", "Batch size", "Threads", "Port", "Max concurrent slots"];
+    const SkeletonForm = () => (
+      <div className="FormCard" aria-busy="true">
+        <div className="fc-head">
+          <span className="lbl">Server:</span>
+          <span className="SkBar" style={{ width: 200, height: 32, borderRadius: 4 }} />
+        </div>
+        <div className="FormGrid">
+          {SK_FIELDS.map((label, i) => (
+            <div className={`FRow ${i === 0 ? "full" : ""}`} key={label}>
+              <label><span>{label}</span></label>
+              <span className="SkBar" style={{ height: 34, borderRadius: 4, width: "100%" }} />
+            </div>
+          ))}
+        </div>
+        <div className="FormFoot">
+          <div className="DirtyInd hidden"><span className="dot" /> Unsaved changes</div>
+          <div className="FootBtns">
+            <button className="Btn secondary" disabled style={{ borderColor: "transparent", background: "transparent" }}>Reset</button>
+            <button className="Btn primary" disabled><Icon name="check" size={14} /> Save</button>
+          </div>
+        </div>
+      </div>
+    );
+    const StateFrame = ({ children }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="configuration" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Configuration" }]} conn="connected" connMeta="50051" />
+            <div className="Page"><div className="PageInner" style={{ maxWidth: 1000 }}>
+              <div className="CfgHead"><h1>Configuration</h1></div>
+              <Tabs />
+              {children}
+            </div></div>
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Accessibility map (priority rules + validation) ──
+    const ConfigAnno = () => {
+      const hostRef = useRef(null);
+      const marks = useAnno(hostRef, [
+        { id: "t1", sel: ".RulesTable tr.editing .RSel select", kind: "tab", n: 1, anchor: "tl" },
+        { id: "t2", sel: ".RulesTable tr.editing td:nth-child(3) .RInput", kind: "tab", n: 2, anchor: "tl" },
+        { id: "t3", sel: ".RulesTable tr.editing .RInput.num", kind: "tab", n: 3, anchor: "tl" },
+        { id: "t4", sel: ".RulesTable tr.editing .RuleActions .Btn.primary", kind: "tab", n: 4, anchor: "tl" },
+        { id: "err", sel: ".FieldErr", kind: "live", text: "aria-describedby ← input", anchor: "tr" },
+      ]);
+      return (
+        <div className="artboard-host a11y-host" data-theme="light" ref={hostRef}>
+          <div className="AppShell">
+            <Sidebar activeId="configuration" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Configuration" }]} conn="connected" connMeta="50051" />
+              <PriorityRulesPage initialEdit={0} initialDraft={{ weight: 1500 }} />
+            </div>
+          </div>
+          <div className="AnnoLayer">
+            {marks.map(m => m.kind === "tab" ? <TabMark key={m.id} {...m} /> : <LiveMark key={m.id} {...m} />)}
+          </div>
+          <div className="A11yLegend tr">
+            <div className="grp">
+              <h3><Icon name="info" size={14} /> Form keyboard model</h3>
+              <div className="LegRow"><kbd className="k">Tab</kbd><kbd className="k">⇧Tab</kbd><span>standard forward/backward through fields (1→4): field select → value → weight → Save.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Inline validation</div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--surface-inverse)" }}>!</span><span>Weight input has <code>aria-invalid="true"</code> and <code>aria-describedby</code> pointing at the error text, so SR users hear “Priority must be between 0 and 1000”. Save stays disabled.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Confirm dialog</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>Focus trap: <kbd className="k">Tab</kbd> cycles within the modal; <kbd className="k">Esc</kbd> closes; focus returns to the trigger.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Concurrent edit banner</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>When another source writes the config, the banner mounts with focus on its <b>Reload</b> button.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Unsaved-changes guard</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>Dual guard: <code>beforeunload</code> (browser close/refresh) + an in-app <code>beforeNavigate</code> route guard both prompt before discarding edits.</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="server" title="Server config editor"
+          subtitle="Tabbed editor (Server config active), 2-column form with live dirty-tracking. Save / Review changes disable when clean. Changed fields highlight blue; the footer shows an unsaved indicator. Editing any field flips the clean board to dirty — these are live.">
+          <DCArtboard id="cfg-clean" label="Clean (Save disabled)" width={1440} height={720}><ShellConfig /></DCArtboard>
+          <DCArtboard id="cfg-dirty" label="Dirty (Review changes enabled)" width={1440} height={720}><ShellConfig initialValues={DIRTY} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="modal" title="Review changes · diff modal"
+          subtitle="Side-by-side diff of pending edits: changed fields highlighted green (gpu_layers 35 → 40, batch_size 512 → 1024), unchanged rows dimmed. Focus trapped; Confirm & save writes the new baseline.">
+          <DCArtboard id="cfg-diff" label="Diff modal open" width={1440} height={720}><ShellConfig initialValues={DIRTY} openModal={true} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="concurrent" title="Concurrent-edit banner"
+          subtitle="Another source wrote the config while open. A yellow banner pins above the form with a Reload action, focused by default.">
+          <DCArtboard id="cfg-banner" label="Concurrent edit detected" width={1440} height={760}><ShellConfig showBanner={true} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="rules" title="Priority rules editor"
+          subtitle="Table-based editor on the Priority rules tab. Each rule maps a match field + value to a priority weight (higher wins). Rows edit inline; Add rule appends a blank row in edit mode. Click Edit on any row — these are live.">
+          <DCArtboard id="pr-default" label="Default (read mode)" width={1440} height={620}><ShellPR /></DCArtboard>
+          <DCArtboard id="pr-editing" label="Row 1 inline-editing" width={1440} height={620}><ShellPR initialEdit={0} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="validation" title="Priority rules · validation error"
+          subtitle="Priority weight of 1500 is out of range. The field shows an invalid (red) state with an inline message, and Save is disabled until corrected.">
+          <DCArtboard id="pr-error" label="Weight out of range" width={1440} height={620}><ShellPR initialEdit={0} initialDraft={{ weight: 1500 }} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="loading" title="Loading"
+          subtitle="Reading config from the backend. Tab bar is live; the form shows labeled placeholder fields with pulsing value rectangles. Save / Reset disabled.">
+          <DCArtboard id="cfg-loading" label="Loading skeleton" width={1440} height={720}><StateFrame><SkeletonForm /></StateFrame></DCArtboard>
+        </DCSection>
+
+        <DCSection id="error" title="Error"
+          subtitle="The config read failed. A red banner with a Retry action explains the cause; the form area is empty.">
+          <DCArtboard id="cfg-error" label="Read failed" width={1440} height={620}>
+            <StateFrame>
+              <ErrorBanner kind="error" onRetry={() => {}}>Failed to load configuration. Check backend status.</ErrorBanner>
+              <div className="FormCard"><div className="Centered" style={{ minHeight: 220 }}>
+                <div className="ic-search"><Icon name="serverOff" size={22} /></div>
+                <div className="msg">No configuration to display.</div>
+              </div></div>
+            </StateFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="empty" title="Empty · first run"
+          subtitle="No configuration file exists yet. The empty state points the operator at the docs.">
+          <DCArtboard id="cfg-empty" label="No config found" width={1440} height={620}>
+            <StateFrame>
+              <EmptyBlock icon="fileText" title="No configuration found"
+                desc="Create a llamaforge.toml file to get started."
+                docLabel="Read the configuration guide" docHref="#" />
+            </StateFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="a11y" title="Accessibility map"
+          subtitle="Form fields follow standard Tab order (1→4). The out-of-range weight wires aria-invalid + aria-describedby to the inline error. Plus: confirm-dialog focus trap, concurrent-edit banner focusing Reload, and a beforeunload + beforeNavigate unsaved-changes guard.">
+          <DCArtboard id="cfg-a11y" label="Tab order · validation · guards" width={1440} height={640}><ConfigAnno /></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

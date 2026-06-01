@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Responsive breakpoints</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+    .Main > .pg-fill { flex: 1; min-height: 0; display: flex; }
+    .Main > .pg-fill > .PG { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    const BP_LABEL = { full: "FULL ≥1280", collapsed: "COLLAPSED 960–1279", hamburger: "HAMBURGER 640–959", mobile: "MOBILE <640" };
+
+    // ResizeObserver-driven shell — reuses real pages; layout adapts to artboard width.
+    const ResponsiveShell = ({ page, theme = "dark" }) => {
+      const ref = useRef(null);
+      const [bp, setBp] = useState("full");
+      useEffect(() => {
+        const el = ref.current; if (!el) return;
+        const measure = () => {
+          const w = el.offsetWidth;
+          setBp(w >= 1280 ? "full" : w >= 960 ? "collapsed" : w >= 640 ? "hamburger" : "mobile");
+        };
+        measure();
+        const ro = new ResizeObserver(measure); ro.observe(el);
+        return () => ro.disconnect();
+      }, []);
+
+      const collapsed = bp === "collapsed";
+      const hideSide = bp === "hamburger" || bp === "mobile";
+      const active = page === "dashboard" ? "dashboard" : page === "explorer" ? "explorer" : "playground";
+      const crumb = page === "dashboard" ? "Dashboard" : page === "explorer" ? "Explorer" : "Playground";
+
+      return (
+        <div className={`artboard-host rsize bp-${bp}`} data-theme={theme} ref={ref}>
+          <span className="BpTag">{BP_LABEL[bp]}</span>
+          <div className={`AppShell ${collapsed ? "collapsed" : ""}`}>
+            <Sidebar activeId={active} onNav={() => {}} collapsed={collapsed} onToggle={() => {}} />
+            <div className="Main">
+              <header className="TopBar">
+                <button className="HamBtn" aria-label="Open navigation"><Icon name="menu" size={16} /></button>
+                <div className="crumbs"><span className="crumb tail">{crumb}</span></div>
+                <div className="spacer" />
+                <ConnBadge state="connected" meta="50051" />
+                <button className="IconBtn" aria-label="Keyboard shortcuts"><span className="qmark">?</span></button>
+              </header>
+              {page === "dashboard" && <DashboardPage theme={theme} onOpenServer={() => {}} />}
+              {page === "explorer" && <ExplorerWithSticky theme={theme} />}
+              {page === "playground" && (
+                <div className="pg-fill"><PlaygroundPage mode={bp === "full" ? "compare-split" : "compare-tabs"} /></div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Explorer variant that flips on the sticky-first-column class
+    const ExplorerWithSticky = ({ theme }) => {
+      useEffect(() => {
+        document.querySelectorAll(".ExpTable").forEach(t => t.classList.add("sticky-first"));
+      });
+      return <ExplorerPage />;
+    };
+
+    const ConnBadge = ({ state, meta }) => (
+      <span className={`ConnBadge ${state}`} role="status">
+        <span className="dot" /><span>{state === "connected" ? "Connected" : state}</span>
+        {meta && <span className="meta">{meta}</span>}
+      </span>
+    );
+
+    const Row = ({ page, title, sub }) => (
+      <DCSection id={page} title={title} subtitle={sub}>
+        {[["full", 1440, 900], ["collapsed", 1024, 820], ["hamburger", 768, 820], ["mobile", 480, 860]].map(([k, w, h]) => (
+          <DCArtboard key={k} id={`${page}-${w}`} label={`${w}px`} width={w} height={h}>
+            <ResponsiveShell page={page} />
+          </DCArtboard>
+        ))}
+      </DCSection>
+    );
+
+    const App = () => (
+      <DesignCanvas>
+        <Row page="dashboard"
+          title="Dashboard · breakpoints"
+          subtitle="Metric cards reflow 4 → 2 → 1 column; server grid and charts collapse to one column on mobile. Sidebar: full (240) → icons (64) → hidden+hamburger → mobile. Each artboard reports its own resolved breakpoint (top-right)." />
+        <Row page="playground"
+          title="Playground comparison · breakpoints"
+          subtitle="At ≥1280 the two model panes sit side-by-side (split). Below 1280 they collapse to a single pane with tab switching. The parameter sidebar drops out once the shell hits the hamburger range." />
+        <Row page="explorer"
+          title="Request Explorer · breakpoints"
+          subtitle="The dense 9-column table keeps all columns and gains horizontal scroll as width shrinks, with the Timestamp column pinned sticky-left so rows stay identifiable. Filter bar stacks vertically on mobile." />
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

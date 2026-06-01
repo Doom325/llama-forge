@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Playground</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+    .Main > .pg-fill { flex: 1; min-height: 0; display: flex; }
+    .Main > .pg-fill > .PG { flex: 1; }
+    .ToastLayer { position: absolute; right: 20px; bottom: 20px; z-index: 80; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const { useRef } = React;
+
+    // ── Single-model shell (ready / streaming) ──
+    const ShellPlayground = ({ theme, state }) => (
+      <div className="artboard-host" data-theme={theme}>
+        <div className="AppShell">
+          <Sidebar activeId="playground" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Playground" }]} conn="connected" connMeta="50051" />
+            <div className="pg-fill"><PlaygroundPage state={state} /></div>
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Comparison shell (split / tabs, optional queued right pane) ──
+    const ShellCompare = ({ mode, state, collapsed }) => (
+      <div className="artboard-host" data-theme="dark">
+        <div className={`AppShell ${collapsed ? "collapsed" : ""}`}>
+          <Sidebar activeId="playground" onNav={() => {}} collapsed={collapsed} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Playground" }]} conn="connected" connMeta="50051" />
+            <div className="pg-fill"><PlaygroundPage mode={mode} state={state} /></div>
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Error shell (unavailable / stalled / network) ──
+    const ShellError = ({ state, toast }) => (
+      <div className="artboard-host" data-theme="dark">
+        <div className="AppShell">
+          <Sidebar activeId="playground" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Playground" }]} conn={state === "network" ? "disconnected" : "connected"} connMeta={state === "network" ? undefined : "50051"} />
+            <div className="pg-fill"><PlaygroundPage mode="error" state={state} /></div>
+          </div>
+        </div>
+        {toast && (
+          <div className="ToastLayer"><div className="ToastStack">
+            <Toast kind="error" title="Failed to send message" msg="Check network connection." onClose={() => {}} />
+          </div></div>
+        )}
+      </div>
+    );
+
+    // ── Accessibility map ──
+    const PlaygroundAnno = () => {
+      const hostRef = useRef(null);
+      const marks = useAnno(hostRef, [
+        { id: "secA", sel: () => document.querySelectorAll('.compare-pane')[0], kind: "region", label: 'section · "Response from Llama 3.1 70B"' },
+        { id: "secB", sel: () => document.querySelectorAll('.compare-pane')[1], kind: "region", label: 'section · "Response from Llama 3.1 8B (comparison)"' },
+        { id: "live", sel: () => document.querySelector('.compare-pane .Msg.assistant .Bubble'), kind: "live", text: "aria-live: off → polite", anchor: "tr" },
+        { id: "queue", sel: ".QueuedMsg", kind: "live", text: 'announce: "queued — position 3"', anchor: "tr" },
+        { id: "slider", sel: ".ParamRow input[type=range]", kind: "slidermark" },
+      ]);
+      return (
+        <div className="artboard-host a11y-host" data-theme="dark" ref={hostRef}>
+          <div className="AppShell">
+            <Sidebar activeId="playground" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Playground" }]} conn="connected" connMeta="50051" />
+              <div className="pg-fill"><PlaygroundPage mode="compare-split" state="queued" /></div>
+            </div>
+          </div>
+          <div className="AnnoLayer">
+            {marks.map(m => {
+              if (m.kind === "region") return <Landmark key={m.id} kind="region" {...m} inset={2} />;
+              if (m.kind === "live") return <LiveMark key={m.id} {...m} />;
+              if (m.kind === "slidermark") return (
+                <span key={m.id} className="LiveMark" style={{ left: m.x + m.w / 2, top: m.y + m.h / 2 }}>
+                  <span className="pulse" />aria-valuemin 0 · max 2 · now 0.7
+                </span>
+              );
+              return null;
+            })}
+          </div>
+          <div className="A11yLegend tr">
+            <div className="grp">
+              <h3><Icon name="info" size={14} /> Comparison landmarks</h3>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#16a34a" }} /><span>Each model response is a <code>&lt;section&gt;</code> with <code>aria-label="Response from …"</code> so SR users can jump between models by landmark.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Streaming announcements</div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--surface-inverse)" }}>1</span><span>While tokens stream, the response region is <code>aria-live="off"</code> — token-by-token updates would flood the screen reader.</span></div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--status-healthy-solid)" }}>2</span><span>On finish, a polite live region announces <b>“Generation complete”</b> with the final metrics.</span></div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--accent-blue)" }}>3</span><span>Queue changes announce <b>“Request queued — position 3.”</b></span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Keyboard</div>
+              <div className="LegRow"><kbd className="k">Enter</kbd><span>send message (<kbd className="k">⇧</kbd><kbd className="k">Enter</kbd> = newline).</span></div>
+              <div className="LegRow"><kbd className="k">Esc</kbd><span>cancel the in-flight generation.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Parameter sliders</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>Native range inputs expose <code>aria-valuemin / max / now</code>; each is labelled and paired with a numeric field.</span></div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="ready" title="Ready · light"
+          subtitle="3-column playground (parameter sidebar · chat pane · comparison slot reserved). No messages yet — the chat pane shows a centered prompt and a terminal glyph. The composer carries the Enter/Shift+Enter hint and a collapsed System prompt section.">
+          <DCArtboard id="pg-ready" label="Ready state" width={1440} height={840}><ShellPlayground theme="light" state="empty" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="streaming" title="Active conversation · streaming · dark"
+          subtitle="A user turn, a completed assistant answer (rendered bullets + monospace metrics line), and a third message streaming with a blinking cursor and a live metrics line. Cancel sits beside the streaming message; the composer’s Send becomes Stop while generating.">
+          <DCArtboard id="pg-stream" label="Streaming (dark)" width={1440} height={840}><ShellPlayground theme="dark" state="streaming" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="compare" title="Comparison · split · dark"
+          subtitle="At ≥1280 the chat area splits into two response columns sharing one composer (typing sends to both). The sidebar stacks Model A / Model B selectors. Left: Llama 3.1 70B (longer, slower). Right: Llama 3.1 8B with a close button (shorter, faster).">
+          <DCArtboard id="cmp-split" label="Both responded" width={1440} height={860}><ShellCompare mode="compare-split" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="queued" title="Comparison · right pane queued · dark"
+          subtitle="Model B has no free slot yet, so instead of a response it shows a live queue indicator — “Queued — position 3, ETA ~8s” with a progress bar and a Cancel button. Model A has already answered.">
+          <DCArtboard id="cmp-queued" label="Right pane queued" width={1440} height={860}><ShellCompare mode="compare-split" state="queued" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="responsive" title="Comparison · responsive fallback · 960 · dark"
+          subtitle="At 960px the two panes collapse to a single pane with tab switching: [Llama 3.1 70B] [Llama 3.1 8B]. The sidebar auto-collapses to icons. Still one shared composer.">
+          <DCArtboard id="cmp-tabs" label="Tab-switched (960px)" width={960} height={840}><ShellCompare mode="compare-tabs" collapsed={true} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="err-unavail" title="Error · model unavailable · dark"
+          subtitle="The selected model’s server is in Failed state, so the send resolves to an inline error bubble: “Model unavailable: server llama-70b-gpu0 is in Failed state.” with a Retry on the message.">
+          <DCArtboard id="pg-unavail" label="Model unavailable" width={1440} height={680}><ShellError state="unavailable" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="err-stall" title="Error · generation stall · dark"
+          subtitle="A streaming response has received no tokens for 30s. An amber warning is attached to the in-flight message — “Generation appears stalled — no tokens received for 30s.” — with Cancel and Retry. The cursor still blinks.">
+          <DCArtboard id="pg-stall" label="Stalled (30s)" width={1440} height={700}><ShellError state="stalled" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="err-network" title="Error · network · dark"
+          subtitle="The send failed at the transport layer. A red toast appears, the connection badge flips to Disconnected, the failed message carries a Retry, and the user’s text is preserved in the composer (not lost).">
+          <DCArtboard id="pg-network" label="Network error + toast" width={1440} height={700}><ShellError state="network" toast={true} /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="a11y" title="Accessibility map"
+          subtitle="Comparison mode: each model response is a labelled <section> landmark. During streaming the response region is aria-live=off; a separate polite region announces “Generation complete” and queue position changes. Enter sends, Esc cancels; sliders expose aria-valuemin/max/now.">
+          <DCArtboard id="pg-a11y-board" label="Landmarks · live regions · slider semantics" width={1440} height={860}><PlaygroundAnno /></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

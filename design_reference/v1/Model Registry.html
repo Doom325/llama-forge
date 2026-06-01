@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Model Registry</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>.artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }</style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+
+  <script type="text/babel">
+    const MODELS = [
+      { name: "Llama 3.1 70B", quant: "Q4_K_M", ctx: "4096",  server: "llama-70b-gpu0", status: "healthy",  tps: "42", p50: "38",  vram: "18.2" },
+      { name: "Llama 3.1 8B",  quant: "Q8_0",   ctx: "8192",  server: "llama-8b-gpu1",  status: "healthy",  tps: "85", p50: "22",  vram: "8.5" },
+      { name: "CodeLlama 34B", quant: "Q5_K_M", ctx: "4096",  server: "codellama-gpu2", status: "degraded", tps: "12", p50: "180", vram: "22.1", tpsWarn: true, p50Warn: true },
+      { name: "Mistral 7B",    quant: "Q4_K_M", ctx: "4096",  server: "mistral-gpu3",   status: "failed",   tps: null, p50: null,  vram: null },
+    ];
+
+    const Frame = ({ head, children }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="models" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Models" }]} conn="connected" connMeta="50051" />
+            <div className="Page"><div className="PageInner">
+              <div className="DashHead" style={{ marginBottom: 16 }}>
+                <div className="titlewrap"><div className="titlerow"><h1 style={{ font: "var(--weight-semibold) 22px var(--font-sans)", margin: 0 }}>Model Registry</h1></div>
+                  <div className="sub">{head}</div></div>
+                <div className="actions"><button className="Btn secondary sm"><Icon name="refresh" size={14} /> Rescan</button></div>
+              </div>
+              {children}
+            </div></div>
+          </div>
+        </div>
+      </div>
+    );
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="loaded" title="Model Registry" subtitle="GGUF models loaded across the fleet. Each card shows quantization, context, live performance (throughput + P50), VRAM, a status badge, and a link to its server. Severity stripe matches status; the failed model shows “—” for performance and VRAM.">
+          <DCArtboard id="m-loaded" label="Loaded" width={1440} height={560}>
+            <Frame head={<span>4 models loaded across 4 servers</span>}>
+              <RegistryGrid models={MODELS} onOpenServer={() => {}} />
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="loading" title="Loading" subtitle="Scanning the model directory. Four skeleton cards at the loaded card dimensions (min-height 180px).">
+          <DCArtboard id="m-loading" label="Loading skeleton" width={1440} height={540}>
+            <Frame head={<span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>scanning…</span>}>
+              <div className="ModelGrid">{[0, 1, 2, 3].map(i => <SkModelCard key={i} />)}</div>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="empty" title="Empty" subtitle="No models discovered. The empty state routes the operator to Configuration to start a server.">
+          <DCArtboard id="m-empty" label="No models" width={1440} height={560}>
+            <Frame head={<span><b className="mono">0</b> models</span>}>
+              <EmptyBlock custom={<CubeQuestion />} title="No models loaded"
+                desc="Start a server with a model to see it here." actionLabel="Go to Configuration" onAction={() => {}} />
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="error" title="Error" subtitle="The registry API failed. A red banner with retry sits above an empty card area.">
+          <DCArtboard id="m-error" label="API error" width={1440} height={560}>
+            <Frame head={<span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>}>
+              <ErrorBanner kind="error" onRetry={() => {}}>Failed to load models from the registry. Check backend status.</ErrorBanner>
+              <div className="EmptyBlock" style={{ minHeight: 220 }}>
+                <div className="eic"><Icon name="serverOff" size={28} /></div>
+                <h2 style={{ fontSize: 15 }}>Registry unavailable</h2>
+                <p>No models to display while the backend is unreachable.</p>
+              </div>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

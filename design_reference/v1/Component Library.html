@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Component Library</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    body { background: var(--surface-0); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const Sec = ({ n, title, hint, children }) => (
+      <section className="SheetSec">
+        <div className="sh"><span className="n">{n}</span><h2>{title}</h2>{hint && <span className="hint">{hint}</span>}</div>
+        {children}
+      </section>
+    );
+
+    const SC = {
+      healthy:  { id: "llama-70b-gpu0", status: "healthy",  model: "Llama 3.1 70B · Q4_K_M", total: 4, busy: 3, tps: "42", p50: "38" },
+      degraded: { id: "codellama-gpu2", status: "degraded", model: "CodeLlama 34B · Q5_K_M", total: 4, busy: 4, tps: "12", tpsWarn: true, p50: "180", p50Warn: true },
+      stopped:  { id: "phi-3-mini",     status: "stopped",  model: "Phi-3 Mini · Q4_K_M",   total: 4 },
+      failed:   { id: "mistral-gpu3",   status: "failed",   model: "Mistral 7B · Q5_K_M",   error: "CUDA out of memory" },
+    };
+
+    const DIFF_ROWS = [
+      { key: "gpu_layers", old: "35", new: "40" },
+      { key: "batch_size", old: "512", new: "1024" },
+      { key: "context_size", old: "4096", new: "4096" },
+      { key: "threads", old: "8", new: "8" },
+      { key: "flash_attn", old: "true", new: "true" },
+    ];
+
+    const App = () => (
+      <div className="Sheet">
+        <h1>Component library</h1>
+        <p className="lead">LlamaForge UI components, isolated in their prop variants. Light theme reference sheet.</p>
+
+        <Sec n="01" title="StatusBadge" hint="icon + text + color · default & small">
+          <div className="Specimens">
+            <div className="Cell">
+              <span className="clabel">Server status — default</span>
+              <div className="crow">
+                <StatusBadge status="healthy" /><StatusBadge status="degraded" /><StatusBadge status="failed" /><StatusBadge status="pending" />
+              </div>
+              <span className="clabel">Small</span>
+              <div className="crow">
+                <StatusBadge sm status="healthy" /><StatusBadge sm status="degraded" /><StatusBadge sm status="failed" /><StatusBadge sm status="pending" />
+              </div>
+            </div>
+            <div className="Cell">
+              <span className="clabel">Connection</span>
+              <div className="crow"><ConnBadge state="connected" /><ConnBadge state="reconnecting" /><ConnBadge state="disconnected" /></div>
+            </div>
+          </div>
+        </Sec>
+
+        <Sec n="02" title="ServerCard" hint="healthy · degraded · stopped · failed · selected">
+          <div className="Specimens">
+            <div style={{ width: 300 }}><div className="clabel" style={{ marginBottom: 8 }}>Healthy · 2 actions</div><ServerCard s={SC.healthy} /></div>
+            <div style={{ width: 300 }}><div className="clabel" style={{ marginBottom: 8 }}>Degraded · elevated</div><ServerCard s={SC.degraded} /></div>
+            <div style={{ width: 300 }}><div className="clabel" style={{ marginBottom: 8 }}>Stopped · 1 action</div><ServerCard s={SC.stopped} /></div>
+            <div style={{ width: 300 }}><div className="clabel" style={{ marginBottom: 8 }}>Failed · error</div><ServerCard s={SC.failed} /></div>
+            <div style={{ width: 300 }}><div className="clabel" style={{ marginBottom: 8 }}>Selected</div><ServerCard s={SC.healthy} selected={true} /></div>
+          </div>
+        </Sec>
+
+        <Sec n="03" title="ServerActionBar" hint="running · pending · stopped">
+          <div className="Specimens">
+            <div className="Cell"><span className="clabel">Running</span><ActionBar state="healthy" /></div>
+            <div className="Cell"><span className="clabel">Pending action</span><ActionBar state="restarting" /></div>
+            <div className="Cell"><span className="clabel">Stopped</span><ActionBar state="stopped" /></div>
+          </div>
+        </Sec>
+
+        <Sec n="04" title="ChatPane messages" hint="user · completed · streaming · error">
+          <div style={{ maxWidth: 720 }}>
+            <div className="ChatPane">
+              <ChatBubble variant="user" />
+              <ChatBubble variant="completed" />
+              <ChatBubble variant="streaming" />
+              <ChatBubble variant="error" />
+            </div>
+          </div>
+        </Sec>
+
+        <Sec n="05" title="DiffPreview" hint="TOML · 2 changed, 3 unchanged">
+          <div style={{ maxWidth: 520 }}><DiffPreview rows={DIFF_ROWS} /></div>
+        </Sec>
+
+        <Sec n="06" title="Toasts" hint="success · error · warning · info">
+          <div className="Specimens" style={{ alignItems: "flex-start" }}>
+            <div className="ToastStack">
+              <Toast kind="success" title="Restart issued" msg={<>Health check in ~5s for <span className="mono">llama-70b-gpu0</span>.</>} onClose={() => {}} />
+              <Toast kind="error" title="Failed to start server" msg="CUDA out of memory — reduce GPU layers." onClose={() => {}} />
+              <Toast kind="warning" title="Queue backing up" msg="12 requests behind slot-2." onClose={() => {}} />
+              <Toast kind="info" title="New model detected" msg={<><span className="mono">phi-3-mini</span> found in /models.</>} onClose={() => {}} />
+            </div>
+            <div>
+              <span className="clabel" style={{ display: "block", marginBottom: 8 }}>Stacked (newest on top, max 3)</span>
+              <div className="ToastStack">
+                <Toast kind="success" title="Saved configuration" msg="2 fields written to llamaforge.toml." onClose={() => {}} />
+                <Toast kind="info" title="Reconnected" msg="Live updates resumed." onClose={() => {}} />
+                <Toast kind="warning" title="Slot-2 slow" msg="p99 latency elevated." onClose={() => {}} />
+              </div>
+            </div>
+          </div>
+        </Sec>
+
+        <Sec n="07" title="ErrorBanner" hint="error · warning · info · ± dismiss · ± action">
+          <div style={{ maxWidth: 720, display: "flex", flexDirection: "column", gap: 0 }}>
+            <ErrorBanner kind="error" onRetry={() => {}} onDismiss={() => {}}>Failed to load queue data. Retrying…</ErrorBanner>
+            <ErrorBanner kind="warning" onDismiss={() => {}}>Configuration was updated by another source.</ErrorBanner>
+            <ErrorBanner kind="info">A new LlamaForge version (0.2.0) is available.</ErrorBanner>
+            <ErrorBanner kind="error" onRetry={() => {}}>Request timed out. The server may be under heavy load.</ErrorBanner>
+          </div>
+        </Sec>
+
+        <Sec n="08" title="EmptyState" hint="icon · title · description · action">
+          <div style={{ maxWidth: 520 }}>
+            <EmptyBlock icon="server" title="No servers configured"
+              desc="Add a server in Configuration to get started." actionLabel="Go to Configuration" onAction={() => {}} />
+          </div>
+        </Sec>
+
+        <Sec n="09" title="ConfirmDialog" hint="danger · default · focus-trapped">
+          <div className="Specimens">
+            <div className="Cell modal-cell" style={{ width: 460 }}>
+              <div className="stage"><ConfirmDialog onCancel={() => {}} onConfirm={() => {}} /></div>
+            </div>
+            <div className="Cell modal-cell" style={{ width: 460 }}>
+              <div className="stage"><QConfirm reqId="req-b3c1" onKeep={() => {}} onConfirm={() => {}} /></div>
+            </div>
+          </div>
+        </Sec>
+      </div>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

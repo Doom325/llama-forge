@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Server detail</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const CRUMBS = [
+      { label: "Dashboard" },
+      { label: "Servers" },
+      { label: "llama-70b-gpu0", mono: true },
+    ];
+
+    const ShellDetail = ({ state, theme, withModal }) => {
+      const [modal, setModal] = React.useState(!!withModal);
+      const conn = "connected";
+      return (
+        <div className="artboard-host" data-theme={theme}>
+          <div className="AppShell">
+            <Sidebar activeId="servers" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={CRUMBS} conn={conn} connMeta="50051" />
+              <ServerDetailPage state={state} theme={theme} />
+              {modal && <ConfirmDialog onCancel={() => setModal(false)} onConfirm={() => setModal(false)} />}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection
+          id="restarting"
+          title="1 · Restarting"
+          subtitle="Restart issued. The Restart button shows a spinner and “Restarting…”; Stop and Force kill are disabled. Status badge flips to ⟳ Restarting… (pending/blue). The slot grid shows all four slots offline (“—”) and live metrics read “—”."
+        >
+          <DCArtboard id="restart-light" label="Light theme" width={1440} height={1320}>
+            <ShellDetail state="restarting" theme="light" />
+          </DCArtboard>
+          <DCArtboard id="restart-dark" label="Dark theme" width={1440} height={1320}>
+            <ShellDetail state="restarting" theme="dark" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="failed"
+          title="2 · Restart failed"
+          subtitle="The restart errored. A red banner under the action bar reads “Restart failed: CUDA out of memory. Reduce GPU layers and retry.” Status badge shows ✕ Failed; the action bar now offers a primary Start button. Slots offline, metrics “—”."
+        >
+          <DCArtboard id="failed-light" label="Light theme" width={1440} height={1360}>
+            <ShellDetail state="failed" theme="light" />
+          </DCArtboard>
+          <DCArtboard id="failed-dark" label="Dark theme" width={1440} height={1360}>
+            <ShellDetail state="failed" theme="dark" />
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection
+          id="confirm"
+          title="3 · Force-kill confirmation"
+          subtitle="The healthy server with the Force-kill confirm dialog open. Focus is trapped in the modal (Tab cycles Cancel ⇄ Force kill, Esc cancels), Cancel is focused by default, and the whole artboard is dimmed behind the backdrop. The danger action is solid red."
+        >
+          <DCArtboard id="confirm-light" label="Light theme" width={1440} height={1320}>
+            <ShellDetail state="healthy" theme="light" withModal={true} />
+          </DCArtboard>
+          <DCArtboard id="confirm-dark" label="Dark theme" width={1440} height={1320}>
+            <ShellDetail state="healthy" theme="dark" withModal={true} />
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
