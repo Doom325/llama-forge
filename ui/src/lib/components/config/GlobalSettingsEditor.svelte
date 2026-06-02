@@ -53,7 +53,6 @@
 	});
 
 	let diffOpen = $state(false);
-	let reloadButton = $state<HTMLButtonElement | null>(null);
 
 	// Track which fields have been blurred so errors only show after interaction.
 	let touched = $state<Record<string, boolean>>({});
@@ -63,13 +62,6 @@
 
 	const logLevels: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
 	const logFormats: LogFormat[] = ['pretty', 'json', 'compact'];
-
-	// Move focus to the Reload button when a conflict is detected.
-	$effect(() => {
-		if (form.conflict) {
-			reloadButton?.focus();
-		}
-	});
 
 	async function handleReload() {
 		const fresh = await reload();
@@ -86,11 +78,9 @@
 		<ErrorBanner
 			message="Configuration was updated by another source."
 			variant="warning"
+			autofocusAction
 			action={{ label: 'Reload', onClick: handleReload }}
 		/>
-		<button bind:this={reloadButton} type="button" class="sr-only" onclick={handleReload}>
-			Reload configuration
-		</button>
 	</div>
 {/if}
 
@@ -113,7 +103,9 @@
 				bind:value={form.current.bind_address}
 				onblur={() => markTouched('bind_address')}
 				aria-invalid={touched.bind_address && !!form.errors.bind_address}
-				aria-describedby={form.errors.bind_address ? 'bind_address-error' : undefined}
+				aria-describedby={touched.bind_address && form.errors.bind_address
+					? 'bind_address-error'
+					: undefined}
 			/>
 			{#if touched.bind_address && form.errors.bind_address}
 				<p id="bind_address-error" role="alert" class="text-xs text-[var(--color-status-failed)]">
@@ -133,7 +125,9 @@
 				bind:value={form.current.grpc_port}
 				onblur={() => markTouched('grpc_port')}
 				aria-invalid={touched.grpc_port && !!form.errors.grpc_port}
-				aria-describedby={form.errors.grpc_port ? 'grpc_port-error' : undefined}
+				aria-describedby={touched.grpc_port && form.errors.grpc_port
+					? 'grpc_port-error'
+					: undefined}
 			/>
 			{#if touched.grpc_port && form.errors.grpc_port}
 				<p id="grpc_port-error" role="alert" class="text-xs text-[var(--color-status-failed)]">
@@ -153,7 +147,9 @@
 				bind:value={form.current.http_port}
 				onblur={() => markTouched('http_port')}
 				aria-invalid={touched.http_port && !!form.errors.http_port}
-				aria-describedby={form.errors.http_port ? 'http_port-error' : undefined}
+				aria-describedby={touched.http_port && form.errors.http_port
+					? 'http_port-error'
+					: undefined}
 			/>
 			{#if touched.http_port && form.errors.http_port}
 				<p id="http_port-error" role="alert" class="text-xs text-[var(--color-status-failed)]">
@@ -197,7 +193,7 @@
 				bind:value={form.current.metrics_retention_days}
 				onblur={() => markTouched('metrics_retention_days')}
 				aria-invalid={touched.metrics_retention_days && !!form.errors.metrics_retention_days}
-				aria-describedby={form.errors.metrics_retention_days
+				aria-describedby={touched.metrics_retention_days && form.errors.metrics_retention_days
 					? 'metrics_retention_days-error'
 					: undefined}
 			/>
@@ -224,7 +220,9 @@
 				bind:value={form.current.queue_max_depth}
 				onblur={() => markTouched('queue_max_depth')}
 				aria-invalid={touched.queue_max_depth && !!form.errors.queue_max_depth}
-				aria-describedby={form.errors.queue_max_depth ? 'queue_max_depth-error' : undefined}
+				aria-describedby={touched.queue_max_depth && form.errors.queue_max_depth
+					? 'queue_max_depth-error'
+					: undefined}
 			/>
 			{#if touched.queue_max_depth && form.errors.queue_max_depth}
 				<p
@@ -251,7 +249,8 @@
 				onblur={() => markTouched('queue_default_timeout_secs')}
 				aria-invalid={touched.queue_default_timeout_secs &&
 					!!form.errors.queue_default_timeout_secs}
-				aria-describedby={form.errors.queue_default_timeout_secs
+				aria-describedby={touched.queue_default_timeout_secs &&
+				form.errors.queue_default_timeout_secs
 					? 'queue_default_timeout_secs-error'
 					: undefined}
 			/>
@@ -279,7 +278,7 @@
 				bind:value={form.current.restart_stagger_secs}
 				onblur={() => markTouched('restart_stagger_secs')}
 				aria-invalid={touched.restart_stagger_secs && !!form.errors.restart_stagger_secs}
-				aria-describedby={form.errors.restart_stagger_secs
+				aria-describedby={touched.restart_stagger_secs && form.errors.restart_stagger_secs
 					? 'restart_stagger_secs-error'
 					: undefined}
 			/>

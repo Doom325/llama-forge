@@ -48,17 +48,15 @@
 	});
 
 	let diffOpen = $state(false);
-	let reloadButton = $state<HTMLButtonElement | null>(null);
-
-	$effect(() => {
-		if (form.conflict) {
-			reloadButton?.focus();
-		}
-	});
+	let touched = $state<Record<string, boolean>>({});
+	function markTouched(field: string) {
+		touched = { ...touched, [field]: true };
+	}
 
 	async function handleReload() {
 		const fresh = await reload();
 		form.rebase(fresh.data, fresh.etag);
+		touched = {};
 	}
 
 	function addTaskType() {
@@ -88,11 +86,9 @@
 		<ErrorBanner
 			message="Configuration was updated by another source."
 			variant="warning"
+			autofocusAction
 			action={{ label: 'Reload', onClick: handleReload }}
 		/>
-		<button bind:this={reloadButton} type="button" class="sr-only" onclick={handleReload}>
-			Reload configuration
-		</button>
 	</div>
 {/if}
 
@@ -123,12 +119,15 @@
 						type="number"
 						class={inputClass}
 						bind:value={rule.priority}
-						aria-invalid={!!form.errors[`task_types.${index}.priority`]}
-						aria-describedby={form.errors[`task_types.${index}.priority`]
+						onblur={() => markTouched(`task_types.${index}.priority`)}
+						aria-invalid={touched[`task_types.${index}.priority`] &&
+							!!form.errors[`task_types.${index}.priority`]}
+						aria-describedby={touched[`task_types.${index}.priority`] &&
+						form.errors[`task_types.${index}.priority`]
 							? `task-${index}-priority-error`
 							: undefined}
 					/>
-					{#if form.errors[`task_types.${index}.priority`]}
+					{#if touched[`task_types.${index}.priority`] && form.errors[`task_types.${index}.priority`]}
 						<p
 							id="task-{index}-priority-error"
 							role="alert"
@@ -172,12 +171,15 @@
 						type="number"
 						class={inputClass}
 						bind:value={weight.weight}
-						aria-invalid={!!form.errors[`fair_share.${index}.weight`]}
-						aria-describedby={form.errors[`fair_share.${index}.weight`]
+						onblur={() => markTouched(`fair_share.${index}.weight`)}
+						aria-invalid={touched[`fair_share.${index}.weight`] &&
+							!!form.errors[`fair_share.${index}.weight`]}
+						aria-describedby={touched[`fair_share.${index}.weight`] &&
+						form.errors[`fair_share.${index}.weight`]
 							? `fair-${index}-weight-error`
 							: undefined}
 					/>
-					{#if form.errors[`fair_share.${index}.weight`]}
+					{#if touched[`fair_share.${index}.weight`] && form.errors[`fair_share.${index}.weight`]}
 						<p
 							id="fair-{index}-weight-error"
 							role="alert"
@@ -211,12 +213,15 @@
 					type="number"
 					class={inputClass}
 					bind:value={form.current.starvation.boost_start_after_secs}
-					aria-invalid={!!form.errors['starvation.boost_start_after_secs']}
-					aria-describedby={form.errors['starvation.boost_start_after_secs']
+					onblur={() => markTouched('starvation.boost_start_after_secs')}
+					aria-invalid={touched['starvation.boost_start_after_secs'] &&
+						!!form.errors['starvation.boost_start_after_secs']}
+					aria-describedby={touched['starvation.boost_start_after_secs'] &&
+					form.errors['starvation.boost_start_after_secs']
 						? 'boost_start_after_secs-error'
 						: undefined}
 				/>
-				{#if form.errors['starvation.boost_start_after_secs']}
+				{#if touched['starvation.boost_start_after_secs'] && form.errors['starvation.boost_start_after_secs']}
 					<p
 						id="boost_start_after_secs-error"
 						role="alert"
@@ -233,10 +238,13 @@
 					type="number"
 					class={inputClass}
 					bind:value={form.current.starvation.max_boost}
-					aria-invalid={!!form.errors['starvation.max_boost']}
-					aria-describedby={form.errors['starvation.max_boost'] ? 'max_boost-error' : undefined}
+					onblur={() => markTouched('starvation.max_boost')}
+					aria-invalid={touched['starvation.max_boost'] && !!form.errors['starvation.max_boost']}
+					aria-describedby={touched['starvation.max_boost'] && form.errors['starvation.max_boost']
+						? 'max_boost-error'
+						: undefined}
 				/>
-				{#if form.errors['starvation.max_boost']}
+				{#if touched['starvation.max_boost'] && form.errors['starvation.max_boost']}
 					<p id="max_boost-error" role="alert" class="text-xs text-[var(--color-status-failed)]">
 						{form.errors['starvation.max_boost']}
 					</p>

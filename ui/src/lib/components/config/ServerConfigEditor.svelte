@@ -40,17 +40,15 @@
 	});
 
 	let diffOpen = $state(false);
-	let reloadButton = $state<HTMLButtonElement | null>(null);
-
-	$effect(() => {
-		if (form.conflict) {
-			reloadButton?.focus();
-		}
-	});
+	let touched = $state<Record<string, boolean>>({});
+	function markTouched(field: string) {
+		touched = { ...touched, [field]: true };
+	}
 
 	async function handleReload() {
 		const fresh = await reload();
 		form.rebase(fresh.data, fresh.etag);
+		touched = {};
 	}
 
 	function addServer() {
@@ -80,11 +78,9 @@
 		<ErrorBanner
 			message="Configuration was updated by another source."
 			variant="warning"
+			autofocusAction
 			action={{ label: 'Reload', onClick: handleReload }}
 		/>
-		<button bind:this={reloadButton} type="button" class="sr-only" onclick={handleReload}>
-			Reload configuration
-		</button>
 	</div>
 {/if}
 
@@ -121,12 +117,13 @@
 							type="text"
 							class={inputClass}
 							bind:value={server.id}
-							aria-invalid={!!form.errors[`servers.${index}.id`]}
-							aria-describedby={form.errors[`servers.${index}.id`]
+							onblur={() => markTouched(`servers.${index}.id`)}
+							aria-invalid={touched[`servers.${index}.id`] && !!form.errors[`servers.${index}.id`]}
+							aria-describedby={touched[`servers.${index}.id`] && form.errors[`servers.${index}.id`]
 								? `server-${index}-id-error`
 								: undefined}
 						/>
-						{#if form.errors[`servers.${index}.id`]}
+						{#if touched[`servers.${index}.id`] && form.errors[`servers.${index}.id`]}
 							<p
 								id="server-{index}-id-error"
 								role="alert"
@@ -164,12 +161,15 @@
 							type="number"
 							class={inputClass}
 							bind:value={server.port}
-							aria-invalid={!!form.errors[`servers.${index}.port`]}
-							aria-describedby={form.errors[`servers.${index}.port`]
+							onblur={() => markTouched(`servers.${index}.port`)}
+							aria-invalid={touched[`servers.${index}.port`] &&
+								!!form.errors[`servers.${index}.port`]}
+							aria-describedby={touched[`servers.${index}.port`] &&
+							form.errors[`servers.${index}.port`]
 								? `server-${index}-port-error`
 								: undefined}
 						/>
-						{#if form.errors[`servers.${index}.port`]}
+						{#if touched[`servers.${index}.port`] && form.errors[`servers.${index}.port`]}
 							<p
 								id="server-{index}-port-error"
 								role="alert"

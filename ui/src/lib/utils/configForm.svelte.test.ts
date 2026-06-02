@@ -52,11 +52,11 @@ interface Sample {
 describe('createConfigForm', () => {
 	function setup(overrides?: {
 		validate?: (d: Sample) => Record<string, string>;
-		save?: (args: { data: Sample; etag: string }) => Promise<unknown>;
+		save?: (args: { data: Sample; etag: string }) => Promise<{ etag: string | null }>;
 	}) {
 		const initial: Sample = { name: 'one', count: 1 };
 		const validate = overrides?.validate ?? (() => ({}));
-		const save = overrides?.save ?? (() => Promise.resolve());
+		const save = overrides?.save ?? (() => Promise.resolve({ etag: 'v1' }));
 		return createConfigForm<Sample>({ initial, etag: 'v1', validate, save });
 	}
 
@@ -108,6 +108,28 @@ describe('createConfigForm', () => {
 		await form.submit();
 		expect(form.isDirty).toBe(false);
 		expect(form.saved.name).toBe('changed');
+		cleanup();
+	});
+
+	it('refreshes the ETag from the save response so the next save is not a false conflict', async () => {
+		const seenEtags: string[] = [];
+		let form!: ReturnType<typeof setup>;
+		const cleanup = $effect.root(() => {
+			form = setup({
+				save: (args) => {
+					seenEtags.push(args.etag);
+					return Promise.resolve({ etag: `v${seenEtags.length + 1}` });
+				}
+			});
+			form.current.name = 'first';
+		});
+		await form.submit();
+		form.current.name = 'second';
+		await form.submit();
+		// First save sends the load-time ETag; the second must send the refreshed
+		// one (v2), not the stale v1 — otherwise the backend would 409.
+		expect(seenEtags).toEqual(['v1', 'v2']);
+		expect(form.conflict).toBe(false);
 		cleanup();
 	});
 

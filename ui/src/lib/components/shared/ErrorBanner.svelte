@@ -3,15 +3,25 @@
 		message,
 		variant = 'info',
 		dismissible = false,
-		action
+		action,
+		autofocusAction = false
 	}: {
 		message: string;
 		variant?: 'error' | 'warning' | 'info';
 		dismissible?: boolean;
 		action?: { label: string; onClick: () => void };
+		/** Move focus to the action button when the banner appears. */
+		autofocusAction?: boolean;
 	} = $props();
 
 	let visible = $state(true);
+	let actionButton = $state<HTMLButtonElement | null>(null);
+
+	$effect(() => {
+		if (autofocusAction && visible && actionButton) {
+			actionButton.focus();
+		}
+	});
 
 	const config = {
 		error: {
@@ -56,6 +66,7 @@
 		<div class="flex-1 font-medium">{message}</div>
 		{#if action}
 			<button
+				bind:this={actionButton}
 				type="button"
 				class="rounded-md border border-current px-3 py-1.5 text-sm font-semibold hover:bg-current/10"
 				onclick={action.onClick}

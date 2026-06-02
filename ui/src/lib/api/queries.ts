@@ -164,8 +164,10 @@ export function createCancelRequestMutation() {
 
 export function createSaveConfigMutation(section: ConfigSection) {
 	return createMutation(() => ({
+		// Returns { data, etag }: the PUT response echoes the new ETag so the form
+		// can refresh its If-Match version after a successful save.
 		mutationFn: ({ data, etag }: { data: unknown; etag: string }) =>
-			apiFetch(`/api/config/${section}`, {
+			apiFetchWithMeta<unknown>(`/api/config/${section}`, {
 				method: 'PUT',
 				body: JSON.stringify(data),
 				headers: { 'If-Match': etag }

@@ -26,8 +26,12 @@ export interface CreateConfigFormOptions<T> {
 	etag: string | null;
 	/** Pure validator run on every edit. Return `{}` when valid. */
 	validate: (data: T) => ValidationErrors;
-	/** Persists the config; should reject with an {@link ApiError} on failure. */
-	save: (args: { data: T; etag: string }) => Promise<unknown>;
+	/**
+	 * Persists the config; should reject with an {@link ApiError} on failure.
+	 * Resolves with the new `etag` echoed by the PUT response so the form can
+	 * refresh its If-Match version for subsequent saves.
+	 */
+	save: (args: { data: T; etag: string }) => Promise<{ etag: string | null }>;
 }
 
 export interface ConfigForm<T> {
@@ -129,8 +133,12 @@ export function createConfigForm<T>(options: CreateConfigFormOptions<T>): Config
 			conflict = false;
 			const payload = $state.snapshot(current) as T;
 			try {
-				await save({ data: payload, etag: etag ?? '' });
+				const result = await save({ data: payload, etag: etag ?? '' });
 				saved = structuredClone(payload);
+				// Refresh the ETag from the save response. Without this, a second
+				// edit+save by the same user would send the now-stale If-Match and
+				// trip a false "updated by another source" conflict.
+				if (result && result.etag) etag = result.etag;
 			} catch (error) {
 				if (error instanceof ApiError && error.status === 409) {
 					conflict = true;
