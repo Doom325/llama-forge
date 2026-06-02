@@ -1,19 +1,7 @@
 <script lang="ts">
+	// Completion is announced by the page-level live region (the page owns the
+	// streaming→idle transition); this component just renders the live tokens.
 	let { tokens, isStreaming }: { tokens: string; isStreaming: boolean } = $props();
-
-	// Track the streaming→done transition so the polite region only announces
-	// completion once (and never floods AT while tokens stream in).
-	let announce = $state('');
-	let wasStreaming = $state(false);
-	$effect(() => {
-		if (isStreaming) {
-			wasStreaming = true;
-			announce = '';
-		} else if (wasStreaming) {
-			wasStreaming = false;
-			announce = 'Generation complete.';
-		}
-	});
 </script>
 
 <div
@@ -26,8 +14,6 @@
 		{tokens}{#if isStreaming}<span class="streaming-cursor" aria-hidden="true">▋</span>{/if}
 	</p>
 </div>
-
-<span aria-live="polite" class="sr-only">{announce}</span>
 
 <style>
 	.streaming-cursor {

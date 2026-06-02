@@ -42,29 +42,48 @@ export async function streamChatCompletion(
 	const decoder = new TextDecoder();
 	let buffer = '';
 
+	// Handle one SSE frame. Returns true when the [DONE] sentinel is seen.
+	const handleFrame = (frame: string): boolean => {
+		const line = frame.trim();
+		if (!line.startsWith('data:')) return false;
+		const data = line.slice('data:'.length).trim();
+		if (data === '[DONE]') return true;
+		try {
+			const parsed = JSON.parse(data);
+			const delta = parsed?.choices?.[0]?.delta?.content;
+			if (typeof delta === 'string' && delta.length > 0) {
+				onToken(delta);
+			}
+		} catch {
+			// Ignore keep-alive comments and partial/non-JSON frames.
+		}
+		return false;
+	};
+
 	for (;;) {
 		const { value, done } = await reader.read();
 		if (done) break;
 		buffer += decoder.decode(value, { stream: true });
 
-		// SSE frames are separated by a blank line; keep the trailing partial.
-		const frames = buffer.split('\n\n');
+		// Frames are separated by a blank line; tolerate LF and CRLF framing and
+		// keep the trailing partial in the buffer.
+		const frames = buffer.split(/\r?\n\r?\n/);
 		buffer = frames.pop() ?? '';
-
 		for (const frame of frames) {
-			const line = frame.trim();
-			if (!line.startsWith('data:')) continue;
-			const data = line.slice('data:'.length).trim();
-			if (data === '[DONE]') return;
-			try {
-				const parsed = JSON.parse(data);
-				const delta = parsed?.choices?.[0]?.delta?.content;
-				if (typeof delta === 'string' && delta.length > 0) {
-					onToken(delta);
-				}
-			} catch {
-				// Ignore keep-alive comments and partial/non-JSON frames.
-			}
+			if (handleFrame(frame)) return;
 		}
 	}
+
+	// Flush a final frame that was not terminated by a blank line.
+	if (buffer.trim()) handleFrame(buffer);
+}
+
+/**
+ * True for the DOMExceptions that represent a graceful stop rather than a
+ * failure: user-cancel raises `AbortError`, and `AbortSignal.timeout()` raises
+ * `TimeoutError` (propagated as-is by `AbortSignal.any`). Both should end the
+ * stream quietly instead of surfacing an error state.
+ */
+export function isAbortError(err: unknown): boolean {
+	return err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError');
 }

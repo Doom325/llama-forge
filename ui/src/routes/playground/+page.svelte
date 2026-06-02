@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { createModelsQuery } from '$lib/api/queries';
-	import { streamChatCompletion } from '$lib/api/chat';
+	import { streamChatCompletion, isAbortError } from '$lib/api/chat';
 	import { ApiError } from '$lib/api/client';
 	import { loadHighlighter } from '$lib/utils/markdown';
 	import { toastStore } from '$lib/stores/toast.svelte';
@@ -70,6 +70,9 @@
 	}
 
 	function updateParams(next: GenerationParams) {
+		// replaceState: param sliders fire oninput continuously during a drag —
+		// pushing history entries would make Back unusable. Tuning is not a
+		// navigation milestone.
 		writeUrl(
 			{
 				temperature: String(next.temperature),
@@ -77,7 +80,7 @@
 				top_p: String(next.top_p),
 				top_k: String(next.top_k)
 			},
-			false
+			true
 		);
 	}
 
@@ -134,9 +137,8 @@
 
 		messages = [...messages, { role: 'user', content, timestamp: Date.now() }];
 
-		// Briefly show queued, then transition to streaming.
-		streamingState = { status: 'queued', position: 1, eta: null };
-		liveMessage = 'Request queued at position 1.';
+		// Go straight to streaming. The `queued` state + its announcement are wired
+		// for when the backend reports a real queue position; we don't fake one.
 		streamingState = { status: 'streaming', tokens: '', ttft: 0 };
 
 		controller = new AbortController();
@@ -179,13 +181,16 @@
 			liveMessage = 'Generation complete.';
 			streamingState = { status: 'idle' };
 		} catch (err) {
-			if (err instanceof DOMException && err.name === 'AbortError') {
-				// User cancel or timeout: keep whatever streamed as an assistant turn.
+			if (isAbortError(err)) {
+				// Graceful stop. AbortSignal.any propagates the originating signal's
+				// reason, so a 120s timeout surfaces as TimeoutError (not AbortError);
+				// controller.signal.aborted distinguishes user-cancel from timeout.
+				const userCancelled = controller?.signal.aborted ?? false;
 				if (tokens.length > 0) {
 					messages = [...messages, { role: 'assistant', content: tokens, timestamp: Date.now() }];
 				}
 				streamingState = { status: 'idle' };
-				liveMessage = 'Generation stopped.';
+				liveMessage = userCancelled ? 'Generation stopped.' : 'Generation timed out.';
 			} else {
 				const message =
 					err instanceof ApiError || err instanceof Error ? err.message : 'Generation failed.';
