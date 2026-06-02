@@ -13,6 +13,7 @@ pub(crate) mod management;
 pub(crate) mod middleware;
 pub(crate) mod openai;
 pub mod streaming;
+pub(crate) mod ui;
 
 pub use error::{AnthropicProtocolError, ApiError, TransportError};
 pub use grpc::start_grpc_server;
@@ -389,6 +390,29 @@ mod tests {
 
         let text = res.text().await.unwrap();
         assert_eq!(text, ""); // Mock exporter returns empty string
+
+        handles.shutdown();
+        handles.wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_csrf_blocks_mutation_without_custom_header() {
+        let deps = build_test_deps(0);
+        let handles = start_servers(deps).await.unwrap();
+        let http_addr = handles.http_addr;
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{}/api/servers/gpu0/stop", http_addr);
+
+        // Mutating /api/* without the CSRF header is rejected with 403 Forbidden.
+        let blocked = client.post(&url).send().await.unwrap();
+        assert_eq!(blocked.status(), 403);
+
+        // The same request WITH the header clears the CSRF guard (not 403).
+        let allowed = client.post(&url).header("X-LlamaForge-Request", "1").send().await.unwrap();
+        assert_ne!(allowed.status(), 403);
 
         handles.shutdown();
         handles.wait().await.unwrap();

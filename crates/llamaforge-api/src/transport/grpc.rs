@@ -86,11 +86,8 @@ impl InferenceService for GrpcInferenceService {
             .validate_routable(&incoming.model_target, &incoming.capabilities)
             .map_err(map_admission_error)?;
 
-        let mut response_stream = self
-            .inference_engine
-            .chat_completion(chat_req)
-            .await
-            .map_err(map_dispatch_error)?;
+        let mut response_stream =
+            self.inference_engine.chat_completion(chat_req).await.map_err(map_dispatch_error)?;
 
         let (tx, rx) = tokio::sync::mpsc::channel(128);
 
@@ -128,7 +125,10 @@ fn map_admission_error(err: llamaforge_core::types::traits::AdmissionError) -> S
                 _ => None,
             };
             if let Some(secs) = retry_after {
-                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                if let Ok(hv) = secs
+                    .to_string()
+                    .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+                {
                     status.metadata_mut().insert("retry-after", hv);
                 }
             }
@@ -153,7 +153,10 @@ fn map_dispatch_error(err: llamaforge_core::types::traits::DispatchError) -> Sta
                 _ => None,
             };
             if let Some(secs) = retry_after {
-                if let Ok(hv) = secs.to_string().parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>() {
+                if let Ok(hv) = secs
+                    .to_string()
+                    .parse::<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>()
+                {
                     status.metadata_mut().insert("retry-after", hv);
                 }
             }

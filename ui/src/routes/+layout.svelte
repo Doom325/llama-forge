@@ -29,6 +29,13 @@
 			mainH1.focus();
 		}
 	});
+
+	// Remove the app.html pre-hydration skeleton here rather than via an inline
+	// <script>, so the app runs under a strict CSP (no 'unsafe-inline' for
+	// scripts; SvelteKit hashes its own inline bootstrap — see svelte.config.js).
+	$effect(() => {
+		document.getElementById('pre-hydration-skeleton')?.remove();
+	});
 </script>
 
 <QueryClientProvider client={queryClient}>
