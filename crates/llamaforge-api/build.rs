@@ -8,9 +8,11 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    // ui/src covers components, routes, app.html, and app.css (Tailwind entry).
     println!("cargo:rerun-if-changed=../../ui/src");
     println!("cargo:rerun-if-changed=../../ui/package.json");
     println!("cargo:rerun-if-changed=../../ui/svelte.config.js");
+    println!("cargo:rerun-if-changed=../../ui/vite.config.ts");
 
     if std::env::var("PROFILE").as_deref() != Ok("release") {
         return;

@@ -750,9 +750,11 @@ where
             state.large_body_limit.clone(),
             large_body_limit_middleware,
         ))
-        .layer(axum::middleware::from_fn(request_id_middleware))
-        // CSRF guard for mutating /api/* requests.
+        // CSRF guard for mutating /api/* requests. Placed inside request_id (it
+        // runs after request_id assigns the id) so a 403 still flows back out
+        // through request_id_middleware and carries request-id correlation.
         .layer(axum::middleware::from_fn(super::middleware::csrf_middleware))
+        .layer(axum::middleware::from_fn(request_id_middleware))
         .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
         .layer(super::middleware::build_cors_layer(state.config_reader.clone()));
 
