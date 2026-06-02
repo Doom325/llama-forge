@@ -18,7 +18,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../../ui/svelte.config.js");
     println!("cargo:rerun-if-changed=../../ui/vite.config.ts");
 
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
     let ui_dir = Path::new(&manifest_dir).join("../../ui");
 
     // Guarantee the embed folder exists so the rust-embed derive compiles even
