@@ -1,0 +1,124 @@
+name: UI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ui/**'
+      - '.github/workflows/ui.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ui/**'
+      - '.github/workflows/ui.yml'
+
+defaults:
+  run:
+    working-directory: ui
+
+jobs:
+  build-test:
+    name: Check, Build, Bundle & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Audit — no raw fetch outside sanctioned modules
+        # client.ts (JSON wrapper) and chat.ts (SSE streaming) are the only
+        # sanctioned raw-fetch call sites. See scripts/audit.js.
+        run: npm run audit:fetch
+
+      - name: Unit tests
+        run: npm run test:unit -- --run
+
+      - name: Build
+        run: npm run build
+
+      - name: Bundle-size budget
+        run: node scripts/check-bundle-size.js
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E & a11y tests
+        # Visual regression is excluded here — its committed baselines are
+        # macOS-rendered and font/anti-aliasing differs on the Linux runner. It
+        # runs as a separate informational job below.
+        run: npx playwright test --grep-invert "visual:"
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: ui/playwright-report/
+          retention-days: 7
+
+  visual:
+    name: Visual regression (informational)
+    runs-on: ubuntu-latest
+    # Non-blocking: the committed snapshots are macOS dev baselines. To make this
+    # gate authoritative, regenerate baselines in this runner environment
+    # (`npx playwright test --grep "visual:" --update-snapshots`) and commit them.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Visual regression
+        run: npx playwright test --grep "visual:"
+      - name: Upload visual diff report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-report
+          path: ui/playwright-report/
+          retention-days: 7
+
+  lighthouse:
+    name: Lighthouse CI (informational)
+    runs-on: ubuntu-latest
+    # Non-blocking until one real CI run confirms the thresholds clear. The job
+    # runs against `npm run preview`, which does NOT carry the Rust server's
+    # security headers, so best-practices may under-report vs the real
+    # deployment. Promote to a required check only after validating in-runner.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run Lighthouse CI
+        run: npx --yes @lhci/cli@0.15.x autorun

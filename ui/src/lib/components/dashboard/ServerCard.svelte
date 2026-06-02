@@ -3,6 +3,7 @@
 	import DynamicHeading from '$lib/components/shared/DynamicHeading.svelte';
 	import type { ServerState, ServerMetricsSummary, DetailServerAction } from '$lib/api/types';
 	import { formatTokensPerSecond, formatDuration } from '$lib/utils/format';
+	import { base } from '$app/paths';
 
 	let {
 		server,
@@ -22,7 +23,7 @@
 </script>
 
 <a
-	href="/servers/{server.id}"
+	href="{base}/servers/{server.id}"
 	role="gridcell"
 	aria-label="Server {server.name}"
 	tabindex={isFocused ? 0 : -1}
@@ -66,7 +67,7 @@
 			<button
 				type="button"
 				tabindex={isFocused ? 0 : -1}
-				class="rounded-md bg-[var(--color-status-healthy)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--color-focus-ring)]"
+				class="rounded-md bg-[var(--color-success-fill)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--color-focus-ring)]"
 				onclick={(e) => {
 					e.preventDefault();
 					e.stopPropagation();

@@ -28,8 +28,8 @@
 
 	let confirmButtonClass = $derived(
 		variant === 'danger'
-			? 'bg-[var(--color-status-failed)] text-white hover:opacity-90'
-			: 'bg-[var(--color-focus-ring)] text-white hover:opacity-90'
+			? 'bg-[var(--color-danger-fill)] text-white hover:opacity-90'
+			: 'bg-[var(--color-accent-fill)] text-white hover:opacity-90'
 	);
 </script>
 
