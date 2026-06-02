@@ -10,12 +10,37 @@ import svelteConfig from './svelte.config.js';
 
 const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
-// Custom rule stub for no-raw-html-without-sanitize (to be implemented in PR11/PR10)
+// Enforces that `{@html ...}` is only ever used with the output of
+// renderMarkdown() — the single sanitized source (FRONTEND_ARCHITECTURE.md §10.1).
+// svelte-eslint-parser represents `{@html expr}` as a SvelteMustacheTag with
+// kind === 'raw'.
 const localPlugin = {
 	rules: {
 		'no-raw-html-without-sanitize': {
-			create() {
-				return {}; // Placeholder
+			meta: {
+				type: 'problem',
+				docs: { description: '{@html} is only allowed with renderMarkdown() output' },
+				schema: [],
+				messages: {
+					unsafe:
+						'{@html} may only render the output of renderMarkdown(); raw HTML from any other expression is forbidden.'
+				}
+			},
+			create(context) {
+				return {
+					SvelteMustacheTag(node) {
+						if (node.kind !== 'raw') return;
+						const expr = node.expression;
+						const isSanitized =
+							expr &&
+							expr.type === 'CallExpression' &&
+							expr.callee.type === 'Identifier' &&
+							expr.callee.name === 'renderMarkdown';
+						if (!isSanitized) {
+							context.report({ node, messageId: 'unsafe' });
+						}
+					}
+				};
 			}
 		}
 	}
