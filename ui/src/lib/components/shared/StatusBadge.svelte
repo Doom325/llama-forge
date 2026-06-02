@@ -1,7 +1,11 @@
 <script lang="ts">
 	import type { ServerStatus } from '$lib/api/types';
 
-	let { status, size = 'md' }: { status: ServerStatus; size?: 'sm' | 'md' | 'lg' } = $props();
+	let {
+		status,
+		size = 'md',
+		customLabel
+	}: { status: ServerStatus; size?: 'sm' | 'md' | 'lg'; customLabel?: string } = $props();
 
 	const statusConfig: Record<ServerStatus, { icon: string; label: string; colorClass: string }> = {
 		healthy: {
@@ -60,7 +64,10 @@
 		}
 	};
 
-	let config = $derived(statusConfig[status]);
+	let config = $derived({
+		...statusConfig[status],
+		label: customLabel || statusConfig[status].label
+	});
 
 	let sizeClasses = $derived(
 		size === 'sm'
