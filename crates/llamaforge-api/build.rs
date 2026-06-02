@@ -23,7 +23,9 @@ fn main() {
 
     // Guarantee the embed folder exists so the rust-embed derive compiles even
     // when the UI has not been built (debug, CI, fresh checkout). Empty is fine.
-    let _ = std::fs::create_dir_all(ui_dir.join("build"));
+    // .expect so a failure here is legible instead of resurfacing as a cryptic
+    // E0599 "no `get`" from the derive.
+    std::fs::create_dir_all(ui_dir.join("build")).expect("create ui/build for rust-embed");
 
     // Only build/populate the UI for release; debug serves from the filesystem.
     if std::env::var("PROFILE").as_deref() != Ok("release") {
