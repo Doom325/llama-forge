@@ -77,6 +77,44 @@ export interface GenerationParams {
 	top_k: number;
 }
 
+// Playground chat / streaming (FRONTEND_ARCHITECTURE.md §5.2, §5.4, §6.4).
+export interface ResponseMetrics {
+	/** Time to first token, milliseconds. */
+	ttft: number;
+	tokensPerSecond: number;
+	totalTokens: number;
+}
+
+export interface ChatError {
+	message: string;
+	retryable: boolean;
+}
+
+export interface Message {
+	role: 'user' | 'assistant';
+	content: string;
+	timestamp: number;
+	metrics?: ResponseMetrics;
+}
+
+/** Streaming lifecycle as a discriminated union — impossible states unrepresentable. */
+export type StreamingState =
+	| { status: 'idle' }
+	| { status: 'queued'; position: number; eta: number | null }
+	| { status: 'streaming'; tokens: string; ttft: number }
+	| { status: 'complete'; response: string; metrics: ResponseMetrics }
+	| { status: 'error'; error: ChatError; partialResponse: string | null };
+
+export interface ChatCompletionRequest {
+	model: string;
+	messages: { role: 'user' | 'assistant' | 'system'; content: string }[];
+	temperature: number;
+	max_tokens: number;
+	top_p: number;
+	top_k: number;
+	stream: true;
+}
+
 export type ConfigSection = 'servers' | 'priority' | 'global';
 
 // Configuration shapes. These mirror the backend `llamaforge-core` config
