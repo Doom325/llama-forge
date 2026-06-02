@@ -35,18 +35,27 @@
 		return 'text-[var(--color-text-primary)] hover:bg-[var(--color-bg-secondary)] focus:bg-[var(--color-bg-secondary)]';
 	}
 
+	let focusedIndex = $state(0);
+
 	function handleKeydown(e: KeyboardEvent, index: number) {
 		if (e.key === 'ArrowDown') {
 			e.preventDefault();
-			const next = (index + 1) % availableActions.length;
-			const el = document.getElementById(`action-btn-${availableActions[next]}`);
+			focusedIndex = (index + 1) % availableActions.length;
+			const el = document.getElementById(`action-btn-${availableActions[focusedIndex]}`);
 			el?.focus();
 		} else if (e.key === 'ArrowUp') {
 			e.preventDefault();
-			const prev = (index - 1 + availableActions.length) % availableActions.length;
-			const el = document.getElementById(`action-btn-${availableActions[prev]}`);
+			focusedIndex = (index - 1 + availableActions.length) % availableActions.length;
+			const el = document.getElementById(`action-btn-${availableActions[focusedIndex]}`);
 			el?.focus();
+		} else if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			if (pendingAction === null) onAction(availableActions[index]!);
 		}
+	}
+
+	function handleFocus(index: number) {
+		focusedIndex = index;
 	}
 </script>
 
@@ -66,18 +75,22 @@
 		<div role="menu" aria-label="Server actions" class="flex flex-col gap-1">
 			{#each availableActions as action, index (action)}
 				{@const isPending = pendingAction === action}
+				{@const disabled = pendingAction !== null}
 				<button
 					id="action-btn-{action}"
 					type="button"
 					role="menuitem"
-					disabled={pendingAction !== null}
-					class="w-full rounded-md px-3 py-2 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus-ring)] disabled:cursor-not-allowed disabled:opacity-50 {getActionClass(
+					{disabled}
+					class="w-full rounded-md px-3 py-2 text-left text-sm font-medium transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus-ring)] {getActionClass(
 						action
 					)}"
-					onclick={() => onAction(action)}
+					class:opacity-50={disabled}
+					class:cursor-not-allowed={disabled}
+					onclick={() => !disabled && onAction(action)}
 					onkeydown={(e) => handleKeydown(e, index)}
-					aria-disabled={pendingAction !== null}
-					tabindex={index === 0 ? 0 : -1}
+					onfocus={() => handleFocus(index)}
+					aria-disabled={disabled}
+					tabindex={index === focusedIndex ? 0 : -1}
 				>
 					{getActionLabel(action, isPending)}
 				</button>

@@ -135,7 +135,7 @@
 	<title>{server ? server.name : 'Server Detail'} | LlamaForge</title>
 </svelte:head>
 
-<div role="main" class="mx-auto max-w-[1400px] space-y-6">
+<div class="mx-auto max-w-[1400px] space-y-6">
 	{#if serverQuery.isPending}
 		<Skeleton width="300px" height="2rem" />
 		<Skeleton height="300px" />

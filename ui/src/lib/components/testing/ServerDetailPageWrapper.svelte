@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ServerDetailPage from './+page.svelte';
+	import ServerDetailPage from '../../../routes/servers/[id]/+page.svelte';
 	import QueryClientTestWrapper from '$lib/components/testing/QueryClientTestWrapper.svelte';
 </script>
 

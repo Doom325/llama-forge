@@ -19,14 +19,14 @@ describe('SlotGrid', () => {
 
 		expect(screen.getByText('Slots (2 Active / 8 Total)')).toBeInTheDocument();
 
-		// Idle slots should map to healthy badges
-		expect(screen.getAllByLabelText('Status: Healthy').length).toBe(5);
+		// Idle slots should map to custom "Idle" badges
+		expect(screen.getAllByLabelText('Status: Idle').length).toBe(5);
 
-		// Processing slots should map to pending badges
-		expect(screen.getAllByLabelText('Status: Pending').length).toBe(2);
+		// Processing slots should map to custom "Processing" badges
+		expect(screen.getAllByLabelText('Status: Processing').length).toBe(2);
 
-		// Loading slots should map to reconnecting badges
-		expect(screen.getAllByLabelText('Status: Reconnecting').length).toBe(1);
+		// Loading slots should map to custom "Loading" badges
+		expect(screen.getAllByLabelText('Status: Loading').length).toBe(1);
 
 		expect(screen.getByText('req-1')).toBeInTheDocument();
 		expect(screen.getByText('mistral')).toBeInTheDocument();

@@ -16,6 +16,12 @@
 		return 'healthy'; // idle
 	}
 
+	function getSlotBadgeLabel(status: SlotState['status']) {
+		if (status === 'processing') return 'Processing';
+		if (status === 'loading') return 'Loading';
+		return 'Idle';
+	}
+
 	function getSlotIcon(status: SlotState['status']) {
 		if (status === 'processing') return '⚙️';
 		if (status === 'loading') return '⏳';
@@ -42,7 +48,11 @@
 						<span class="text-sm font-medium text-[var(--color-text-secondary)]"
 							>Slot {slot.id}</span
 						>
-						<StatusBadge status={getSlotBadgeStatus(slot.status)} size="sm" />
+						<StatusBadge
+							status={getSlotBadgeStatus(slot.status)}
+							customLabel={getSlotBadgeLabel(slot.status)}
+							size="sm"
+						/>
 					</div>
 
 					<div class="mt-2 flex items-center gap-2">

@@ -59,11 +59,7 @@ describe('ServerActionBar', () => {
 		expect(onAction).toHaveBeenCalledWith('stop');
 
 		// Transition to pending
-		rerender({
-			availableActions: ['restart', 'stop'],
-			pendingAction: 'stop',
-			onAction
-		});
+		rerender({ availableActions: ['restart', 'stop'], pendingAction: 'stop', onAction });
 
 		// The element should still have focus, but text should be Stopping...
 		const pendingBtn = screen.getByRole('menuitem', { name: 'Stopping...' });
