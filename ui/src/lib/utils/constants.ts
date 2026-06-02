@@ -8,6 +8,7 @@ export const ROUTES = {
 	EXPLORER: '/explorer',
 	CONFIG_SERVERS: '/config/servers',
 	CONFIG_PRIORITY: '/config/priority',
+	CONFIG_GLOBAL: '/config/global',
 	PLAYGROUND: '/playground',
 	MODELS: '/models'
 };

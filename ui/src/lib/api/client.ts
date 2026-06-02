@@ -15,7 +15,16 @@ interface FetchOptions extends RequestInit {
 	timeout?: number;
 }
 
-export async function apiFetch<T>(url: string, options: FetchOptions = {}): Promise<T> {
+export interface FetchResult<T> {
+	data: T;
+	/** Value of the response `ETag` header, if present. */
+	etag: string | null;
+}
+
+async function requestJson<T>(
+	url: string,
+	options: FetchOptions = {}
+): Promise<{ data: T; response: Response }> {
 	const { timeout, ...fetchOptions } = options;
 	const isMutation =
 		fetchOptions.method && fetchOptions.method !== 'GET' && fetchOptions.method !== 'HEAD';
@@ -58,11 +67,11 @@ export async function apiFetch<T>(url: string, options: FetchOptions = {}): Prom
 		}
 
 		if (response.status === 204) {
-			return {} as T;
+			return { data: {} as T, response };
 		}
 
 		const text = await response.text();
-		return (text ? JSON.parse(text) : {}) as T;
+		return { data: (text ? JSON.parse(text) : {}) as T, response };
 	} catch (error) {
 		if (error instanceof ApiError) {
 			throw error;
@@ -75,4 +84,22 @@ export async function apiFetch<T>(url: string, options: FetchOptions = {}): Prom
 		// Network error
 		throw new ApiError(0, error instanceof Error ? error.message : 'Network error', true);
 	}
+}
+
+export async function apiFetch<T>(url: string, options: FetchOptions = {}): Promise<T> {
+	const { data } = await requestJson<T>(url, options);
+	return data;
+}
+
+/**
+ * Like {@link apiFetch}, but also returns the response `ETag` so callers doing
+ * optimistic concurrency control (an `If-Match` header on a later PUT) can
+ * capture the version they loaded.
+ */
+export async function apiFetchWithMeta<T>(
+	url: string,
+	options: FetchOptions = {}
+): Promise<FetchResult<T>> {
+	const { data, response } = await requestJson<T>(url, options);
+	return { data, etag: response.headers.get('ETag') };
 }
