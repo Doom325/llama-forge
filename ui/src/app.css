@@ -28,6 +28,18 @@
 
 	--color-focus-ring-light: #2563eb;
 	--color-focus-ring-dark: #60a5fa;
+
+	/* Solid button fills paired with white text. Distinct from the focus-ring /
+	   status tokens above, which are tuned as light pastel *foregrounds* on dark
+	   backgrounds (great for outlines and badge text) but fail WCAG AA contrast
+	   when used as a *background* under white text in dark mode (axe 14.9).
+	   These fills hold >= 4.5:1 against #fff in both themes. */
+	--color-accent-fill-light: #2563eb; /* white on this: 4.54:1 */
+	--color-accent-fill-dark: #2563eb; /* white on this: 4.54:1 */
+	--color-success-fill-light: #166534; /* white on this: 7.4:1 */
+	--color-success-fill-dark: #15803d; /* white on this: 4.7:1 */
+	--color-danger-fill-light: #991b1b; /* white on this: 7.0:1 */
+	--color-danger-fill-dark: #b91c1c; /* white on this: 5.9:1 */
 }
 
 @layer base {
@@ -44,6 +56,9 @@
 		--color-status-pending: var(--color-status-pending-light);
 
 		--color-focus-ring: var(--color-focus-ring-light);
+		--color-accent-fill: var(--color-accent-fill-light);
+		--color-success-fill: var(--color-success-fill-light);
+		--color-danger-fill: var(--color-danger-fill-light);
 		--color-nav-active-bg: color-mix(in srgb, var(--color-focus-ring) 10%, transparent);
 		--color-nav-active-text: #1d4ed8;
 	}
@@ -61,6 +76,9 @@
 		--color-status-pending: var(--color-status-pending-dark);
 
 		--color-focus-ring: var(--color-focus-ring-dark);
+		--color-accent-fill: var(--color-accent-fill-dark);
+		--color-success-fill: var(--color-success-fill-dark);
+		--color-danger-fill: var(--color-danger-fill-dark);
 		--color-nav-active-bg: color-mix(in srgb, var(--color-focus-ring) 10%, transparent);
 		--color-nav-active-text: #60a5fa;
 	}

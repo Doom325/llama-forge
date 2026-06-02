@@ -235,7 +235,7 @@
 							tabindex={activeTab === 'primary' ? 0 : -1}
 							class="rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] {activeTab ===
 							'primary'
-								? 'bg-[var(--color-focus-ring)] text-white'
+								? 'bg-[var(--color-accent-fill)] text-white'
 								: 'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
 							onclick={() => selectTab('primary')}
 							onkeydown={handleTabKeydown}
@@ -251,7 +251,7 @@
 							tabindex={activeTab === 'comparison' ? 0 : -1}
 							class="rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] {activeTab ===
 							'comparison'
-								? 'bg-[var(--color-focus-ring)] text-white'
+								? 'bg-[var(--color-accent-fill)] text-white'
 								: 'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
 							onclick={() => selectTab('comparison')}
 							onkeydown={handleTabKeydown}

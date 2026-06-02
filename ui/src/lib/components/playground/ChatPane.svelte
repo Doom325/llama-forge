@@ -118,7 +118,7 @@
 			{:else}
 				<button
 					type="button"
-					class="rounded-md bg-[var(--color-focus-ring)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] disabled:opacity-50"
+					class="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] disabled:opacity-50"
 					onclick={submit}
 					disabled={draft.trim().length === 0}
 				>

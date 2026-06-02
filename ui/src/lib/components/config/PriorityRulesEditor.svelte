@@ -272,7 +272,7 @@
 		{/if}
 		<button
 			type="submit"
-			class="rounded-md bg-[var(--color-focus-ring)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+			class="rounded-md bg-[var(--color-accent-fill)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
 			disabled={form.isSubmitting}
 		>
 			{form.isSubmitting ? 'Saving…' : 'Save'}
