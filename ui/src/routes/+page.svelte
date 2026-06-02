@@ -40,16 +40,16 @@
 
 	let throughputHistory = $state<TimeSeriesPoint[]>([]);
 	let latencyHistory = $state<LatencyPercentilePoint[]>([]);
-	let lastMetricsTime = 0;
+	let lastMetricsUpdate = $state(0);
 
 	$effect(() => {
-		const metrics = metricsQuery.data as Record<string, unknown> | undefined;
-		if (metrics && metrics.throughput_total !== undefined) {
-			const now = Date.now();
-			if (now - lastMetricsTime > 100) {
-				// Throttle and prevent infinite loops
-				lastMetricsTime = now;
+		if (metricsQuery.dataUpdatedAt > lastMetricsUpdate) {
+			lastMetricsUpdate = metricsQuery.dataUpdatedAt;
+			const metrics = metricsQuery.data;
+
+			if (metrics && metrics.throughput_total !== undefined) {
 				untrack(() => {
+					const now = Date.now();
 					let newThroughput = [
 						...throughputHistory,
 						{ timestamp: now, value: Number(metrics.throughput_total) }
@@ -58,15 +58,14 @@
 						newThroughput = newThroughput.slice(-MAX_HISTORY_POINTS);
 					throughputHistory = newThroughput;
 
-					const latency = metrics.latency as Record<string, number> | undefined;
-					if (latency) {
+					if (metrics.latency) {
 						let newLatency = [
 							...latencyHistory,
 							{
 								timestamp: now,
-								p50: latency.p50 || 0,
-								p90: latency.p90 || 0,
-								p99: latency.p99 || 0
+								p50: metrics.latency.p50 || 0,
+								p90: metrics.latency.p90 || 0,
+								p99: metrics.latency.p99 || 0
 							}
 						];
 						if (newLatency.length > MAX_HISTORY_POINTS)

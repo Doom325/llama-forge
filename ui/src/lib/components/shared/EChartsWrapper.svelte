@@ -37,16 +37,17 @@
 	let updatePending = false;
 
 	// Keep a copy of data capped at maxPoints
-	let windowedSeries = $state<DataSeries[]>([]);
-
-	$effect(() => {
-		// Window data
-		windowedSeries = series.map((s) => {
+	let windowedSeries = $derived(
+		series.map((s) => {
 			const data = s.data.length > maxPoints ? s.data.slice(-maxPoints) : s.data;
 			return { ...s, data };
-		});
+		})
+	);
 
-		scheduleUpdate();
+	$effect(() => {
+		if (windowedSeries) {
+			scheduleUpdate();
+		}
 	});
 
 	function scheduleUpdate() {
@@ -123,6 +124,8 @@
 		chartInstance.setOption(option);
 	}
 
+	let isUnmounted = false;
+
 	onMount(() => {
 		let resizeObserver: ResizeObserver | null = null;
 
@@ -134,7 +137,7 @@
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 
 		import('echarts').then((echarts) => {
-			if (!container) return; // unmounted before load
+			if (isUnmounted || !container) return; // unmounted before load
 
 			// Try dark theme based on data attribute
 			const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -150,6 +153,7 @@
 		});
 
 		return () => {
+			isUnmounted = true;
 			document.removeEventListener('visibilitychange', handleVisibilityChange);
 			if (rafId) cancelAnimationFrame(rafId);
 			if (resizeObserver) resizeObserver.disconnect();
