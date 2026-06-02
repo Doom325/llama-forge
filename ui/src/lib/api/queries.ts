@@ -46,11 +46,11 @@ export function createQueueQuery() {
 	}));
 }
 
-export function createRequestsQuery(filters: Record<string, string>) {
+export function createRequestsQuery(getFilters: () => Record<string, string>) {
 	return createQuery(() => ({
-		queryKey: ['requests', filters],
+		queryKey: ['requests', getFilters()],
 		queryFn: () => {
-			const searchParams = new URLSearchParams(filters);
+			const searchParams = new URLSearchParams(getFilters());
 			return apiFetch<RequestRecord[]>(`/api/requests?${searchParams.toString()}`);
 		},
 		staleTime: 30_000,
