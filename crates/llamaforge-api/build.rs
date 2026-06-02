@@ -1,8 +1,12 @@
-//! Builds and embeds the web UI for RELEASE builds only.
+//! Web UI embedding support for `rust-embed`.
 //!
-//! Debug builds skip this: `rust-embed` serves `ui/build` from the filesystem
-//! at runtime, so `cargo build` / CI need neither node nor a pre-built UI.
-//! Release builds run the production UI build so `rust-embed` can embed it.
+//! `rust-embed`'s derive needs the embed folder (`ui/build`) to EXIST at compile
+//! time even in debug builds (where assets are served from the filesystem at
+//! runtime). On a fresh checkout / CI it does not exist yet, so we create it —
+//! an empty dir compiles fine and simply serves nothing until the UI is built.
+//!
+//! For RELEASE builds we additionally run the production UI build so the assets
+//! are present to embed. Debug / CI need neither node nor a pre-built UI.
 
 use std::path::Path;
 use std::process::Command;
@@ -14,6 +18,14 @@ fn main() {
     println!("cargo:rerun-if-changed=../../ui/svelte.config.js");
     println!("cargo:rerun-if-changed=../../ui/vite.config.ts");
 
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
+    let ui_dir = Path::new(&manifest_dir).join("../../ui");
+
+    // Guarantee the embed folder exists so the rust-embed derive compiles even
+    // when the UI has not been built (debug, CI, fresh checkout). Empty is fine.
+    let _ = std::fs::create_dir_all(ui_dir.join("build"));
+
+    // Only build/populate the UI for release; debug serves from the filesystem.
     if std::env::var("PROFILE").as_deref() != Ok("release") {
         return;
     }
@@ -21,10 +33,6 @@ fn main() {
     if std::env::var("LLAMAFORGE_SKIP_UI_BUILD").is_ok() {
         return;
     }
-
-    let manifest_dir =
-        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
-    let ui_dir = Path::new(&manifest_dir).join("../../ui");
     if !ui_dir.join("package.json").exists() {
         println!("cargo:warning=ui/ not found; the web UI will not be embedded");
         return;
