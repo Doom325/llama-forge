@@ -63,7 +63,9 @@ export function createAggregatedMetricsQuery(filters: Record<string, string>) {
 		queryKey: ['metrics', 'aggregated', filters],
 		queryFn: () => {
 			const searchParams = new URLSearchParams(filters);
-			return apiFetch<unknown>(`/api/metrics?${searchParams.toString()}`);
+			return apiFetch<import('./types').AggregatedMetrics>(
+				`/api/metrics?${searchParams.toString()}`
+			);
 		},
 		staleTime: 30_000,
 		gcTime: 300_000 // 5 min
