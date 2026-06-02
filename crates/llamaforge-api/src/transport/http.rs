@@ -742,7 +742,7 @@ where
         .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
         .with_state(state.clone());
 
-    inference_router
+    let api_router = inference_router
         .merge(management_router)
         .layer(axum::middleware::from_fn(metrics_middleware))
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
@@ -751,9 +751,15 @@ where
             large_body_limit_middleware,
         ))
         .layer(axum::middleware::from_fn(request_id_middleware))
+        // CSRF guard for mutating /api/* requests.
+        .layer(axum::middleware::from_fn(super::middleware::csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
-        .layer(super::middleware::build_cors_layer(state.config_reader.clone()))
-        .layer(CatchPanicLayer::new())
+        .layer(super::middleware::build_cors_layer(state.config_reader.clone()));
+
+    // The web UI is mounted OUTSIDE the API middleware stack — no auth, no CORS;
+    // its handlers set their own CSP + security headers. CatchPanic wraps the
+    // whole app so a panic in any route can't take down the connection.
+    api_router.merge(super::ui::ui_router()).layer(CatchPanicLayer::new())
 }
 
 pub async fn start_http_server<CW, RMS, SM>(
@@ -1070,6 +1076,9 @@ mod tests {
         let req = Request::builder()
             .method("POST")
             .uri("/api/servers/-bad/start")
+            // Pass the CSRF guard so we reach the handler that emits the 400 we
+            // want to inspect (the guard would otherwise 403 a mutating /api/*).
+            .header("x-llamaforge-request", "1")
             .body(Body::empty())
             .unwrap();
 
@@ -1116,9 +1125,9 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn test_anthropic_missing_version_header_admitted() {
-        use metrics_exporter_prometheus::PrometheusBuilder;
-        use ax_extract::{State, Extension, ConnectInfo};
+        use ax_extract::{ConnectInfo, Extension, State};
         use axum::extract as ax_extract;
+        use metrics_exporter_prometheus::PrometheusBuilder;
 
         let mut config = AppConfig::default();
         config.global.queue_default_timeout_secs = 1;
@@ -1153,10 +1162,7 @@ mod tests {
         });
         let body_bytes_stream = Body::from(serde_json::to_string(&body_json).unwrap());
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
 
         let body_bytes = rt.block_on(axum::body::to_bytes(body_bytes_stream, 1024)).unwrap();
 
@@ -1179,7 +1185,8 @@ mod tests {
                 ConnectInfo(remote_addr),
                 headers,
                 body_bytes,
-            ).await
+            )
+            .await
         });
 
         let res = res.unwrap();
@@ -1193,7 +1200,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_queue_full_returns_429_with_retry_after() {
-
         struct MockRouteValidatorRejects;
         impl RouteValidator for MockRouteValidatorRejects {
             fn validate_routable(
@@ -1300,10 +1306,7 @@ mod tests {
 
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(
-            res.headers().get("content-type").unwrap(),
-            "application/json"
-        );
+        assert_eq!(res.headers().get("content-type").unwrap(), "application/json");
         assert!(res.headers().contains_key("x-request-id"));
 
         let body_bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
@@ -1325,7 +1328,13 @@ mod tests {
                 &self,
                 _req: llamaforge_core::types::ChatCompletionRequest,
             ) -> Result<
-                Pin<Box<dyn Stream<Item = Result<ChatCompletionChunk, StreamError>> + Send + 'static>>,
+                Pin<
+                    Box<
+                        dyn Stream<Item = Result<ChatCompletionChunk, StreamError>>
+                            + Send
+                            + 'static,
+                    >,
+                >,
                 llamaforge_core::types::traits::DispatchError,
             > {
                 Err(llamaforge_core::types::traits::DispatchError::RateLimited {

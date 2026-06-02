@@ -513,9 +513,10 @@ async fn test_vc3_10_management_api_round_trip() {
     assert!(srv.get("slots_busy").is_some(), "missing slots_busy");
     assert!(srv.get("port").is_none(), "port should not be exposed in DTO");
 
-    // Start server
+    // Start server (mutating /api/* requires the CSRF header, as the UI sends).
     let res = client
         .post(http_url(&handles, "/api/servers/00000000-0000-0000-0000-000000000001/start"))
+        .header("X-LlamaForge-Request", "1")
         .send()
         .await
         .unwrap();
@@ -524,6 +525,7 @@ async fn test_vc3_10_management_api_round_trip() {
     // Stop server
     let res = client
         .post(http_url(&handles, "/api/servers/00000000-0000-0000-0000-000000000001/stop"))
+        .header("X-LlamaForge-Request", "1")
         .send()
         .await
         .unwrap();

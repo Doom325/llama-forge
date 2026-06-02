@@ -6,6 +6,9 @@ import viteCompression from 'vite-plugin-compression';
 
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit(), svelteTesting(), viteCompression()],
+	// Emit .vite/manifest.json so the bundle-size CI check (PR14) can map routes
+	// to chunks and enforce per-route budgets.
+	build: { manifest: true },
 	test: {
 		expect: { requireAssertions: true },
 		environment: 'jsdom',

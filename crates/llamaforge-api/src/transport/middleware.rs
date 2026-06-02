@@ -33,6 +33,35 @@ pub(crate) fn build_cors_layer(config_reader: Arc<dyn ConfigReader>) -> CorsLaye
         .max_age(std::time::Duration::from_secs(3600))
 }
 
+/// Rejects mutating requests to `/api/*` that lack the `X-LlamaForge-Request`
+/// header with `403 Forbidden`. Browsers can't attach custom headers to
+/// cross-origin form / `no-cors` requests, so this blocks CSRF from external
+/// origins (FRONTEND_ARCHITECTURE.md §10.2). GET/HEAD and non-`/api` paths
+/// (including the public UI and `/v1` SDK surface) are unaffected.
+pub(crate) async fn csrf_middleware(
+    req: Request,
+    next: Next,
+) -> Result<Response, super::error::ApiError> {
+    let is_mutation = matches!(
+        *req.method(),
+        axum::http::Method::POST
+            | axum::http::Method::PUT
+            | axum::http::Method::PATCH
+            | axum::http::Method::DELETE
+    );
+    if is_mutation && req.uri().path().starts_with("/api/") {
+        let header_ok = req
+            .headers()
+            .get("x-llamaforge-request")
+            .map(|value| value.as_bytes() == b"1")
+            .unwrap_or(false);
+        if !header_ok {
+            return Err(super::error::ApiError::Csrf);
+        }
+    }
+    Ok(next.run(req).await)
+}
+
 #[derive(Clone)]
 pub struct LargeBodyConcurrencyLimit {
     semaphore: Arc<Semaphore>,
@@ -165,7 +194,8 @@ pub(crate) async fn request_id_middleware(mut req: Request, next: Next) -> Respo
             let mut new_res = body.into_response();
             *new_res.status_mut() = axum::http::StatusCode::PAYLOAD_TOO_LARGE;
             for (k, v) in response.headers() {
-                if k != axum::http::header::CONTENT_TYPE && k != axum::http::header::CONTENT_LENGTH {
+                if k != axum::http::header::CONTENT_TYPE && k != axum::http::header::CONTENT_LENGTH
+                {
                     new_res.headers_mut().insert(k, v.clone());
                 }
             }

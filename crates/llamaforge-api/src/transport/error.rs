@@ -43,6 +43,12 @@ pub enum ApiError {
     PreconditionFailed(String),
     #[error("Internal error: {0}")]
     Internal(String),
+    /// Surface as `403 Forbidden`. CSRF guard: a mutating `/api/*` request
+    /// arrived without the `X-LlamaForge-Request` header. Browsers do not attach
+    /// custom headers to cross-origin form/`no-cors` requests, so this blocks
+    /// CSRF from external origins (FRONTEND_ARCHITECTURE.md §10.2).
+    #[error("CSRF validation failed")]
+    Csrf,
 }
 
 /// Fallback `Retry-After` (seconds) for the `QueueFull` branch when
@@ -124,6 +130,11 @@ impl IntoResponse for ApiError {
             ApiError::Internal(msg) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", msg.clone())
             }
+            ApiError::Csrf => (
+                StatusCode::FORBIDDEN,
+                "csrf_failure",
+                "Missing or invalid X-LlamaForge-Request header".to_string(),
+            ),
         };
 
         let body = Json(json!({
@@ -163,6 +174,7 @@ impl From<ApiError> for tonic::Status {
             }
             ApiError::PreconditionFailed(msg) => tonic::Status::failed_precondition(msg),
             ApiError::Internal(msg) => tonic::Status::internal(msg),
+            ApiError::Csrf => tonic::Status::permission_denied("CSRF validation failed"),
         }
     }
 }
