@@ -1,10 +1,24 @@
 import { render, screen } from '@testing-library/svelte';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import DashboardPageWrapper from './DashboardPageWrapper.svelte';
 import * as queries from '$lib/api/queries';
 
 describe('Dashboard Summary', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
 	it('announces summary via toast on event', async () => {
+		let currentTime = 1000;
+		vi.spyOn(Date, 'now').mockImplementation(() => {
+			currentTime += 100;
+			return currentTime;
+		});
+
 		// Mock queries to provide known data for the summary
 		vi.spyOn(queries, 'createServersQuery').mockReturnValue({
 			isPending: false,
