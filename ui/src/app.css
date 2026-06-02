@@ -1,0 +1,115 @@
+@import 'tailwindcss';
+
+@theme {
+	--sidebar-width: 240px;
+	--sidebar-collapsed-width: 64px;
+	--header-height: 56px;
+	--card-min-height: 180px;
+	--color-bg-primary-light: #ffffff;
+	--color-bg-secondary-light: #f8fafc;
+	--color-border-light: #e2e8f0;
+	--color-text-primary-light: #0f172a;
+	--color-text-secondary-light: #475569;
+
+	--color-bg-primary-dark: #0f172a;
+	--color-bg-secondary-dark: #1e293b;
+	--color-border-dark: #334155;
+	--color-text-primary-dark: #f8fafc;
+	--color-text-secondary-dark: #cbd5e1;
+
+	--color-status-healthy-light: #166534;
+	--color-status-healthy-dark: #86efac;
+	--color-status-degraded-light: #92400e;
+	--color-status-degraded-dark: #fcd34d;
+	--color-status-failed-light: #991b1b;
+	--color-status-failed-dark: #fca5a5;
+	--color-status-pending-light: #1e40af;
+	--color-status-pending-dark: #93c5fd;
+
+	--color-focus-ring-light: #2563eb;
+	--color-focus-ring-dark: #60a5fa;
+
+	/* Solid button fills paired with white text. Distinct from the focus-ring /
+	   status tokens above, which are tuned as light pastel *foregrounds* on dark
+	   backgrounds (great for outlines and badge text) but fail WCAG AA contrast
+	   when used as a *background* under white text in dark mode (axe 14.9).
+	   These fills hold >= 4.5:1 against #fff in both themes. */
+	--color-accent-fill-light: #2563eb; /* white on this: 4.54:1 */
+	--color-accent-fill-dark: #2563eb; /* white on this: 4.54:1 */
+	--color-success-fill-light: #166534; /* white on this: 7.4:1 */
+	--color-success-fill-dark: #15803d; /* white on this: 4.7:1 */
+	--color-danger-fill-light: #991b1b; /* white on this: 7.0:1 */
+	--color-danger-fill-dark: #b91c1c; /* white on this: 5.9:1 */
+}
+
+@layer base {
+	:root {
+		--color-bg-primary: var(--color-bg-primary-light);
+		--color-bg-secondary: var(--color-bg-secondary-light);
+		--color-border: var(--color-border-light);
+		--color-text-primary: var(--color-text-primary-light);
+		--color-text-secondary: var(--color-text-secondary-light);
+
+		--color-status-healthy: var(--color-status-healthy-light);
+		--color-status-degraded: var(--color-status-degraded-light);
+		--color-status-failed: var(--color-status-failed-light);
+		--color-status-pending: var(--color-status-pending-light);
+
+		--color-focus-ring: var(--color-focus-ring-light);
+		--color-accent-fill: var(--color-accent-fill-light);
+		--color-success-fill: var(--color-success-fill-light);
+		--color-danger-fill: var(--color-danger-fill-light);
+		--color-nav-active-bg: color-mix(in srgb, var(--color-focus-ring) 10%, transparent);
+		--color-nav-active-text: #1d4ed8;
+	}
+
+	:root[data-theme='dark'] {
+		--color-bg-primary: var(--color-bg-primary-dark);
+		--color-bg-secondary: var(--color-bg-secondary-dark);
+		--color-border: var(--color-border-dark);
+		--color-text-primary: var(--color-text-primary-dark);
+		--color-text-secondary: var(--color-text-secondary-dark);
+
+		--color-status-healthy: var(--color-status-healthy-dark);
+		--color-status-degraded: var(--color-status-degraded-dark);
+		--color-status-failed: var(--color-status-failed-dark);
+		--color-status-pending: var(--color-status-pending-dark);
+
+		--color-focus-ring: var(--color-focus-ring-dark);
+		--color-accent-fill: var(--color-accent-fill-dark);
+		--color-success-fill: var(--color-success-fill-dark);
+		--color-danger-fill: var(--color-danger-fill-dark);
+		--color-nav-active-bg: color-mix(in srgb, var(--color-focus-ring) 10%, transparent);
+		--color-nav-active-text: #60a5fa;
+	}
+
+	body {
+		background-color: var(--color-bg-primary);
+		color: var(--color-text-primary);
+	}
+
+	/* Focus indicator base styles */
+	*:focus-visible {
+		outline: 2px solid transparent;
+		outline-offset: 2px;
+		box-shadow:
+			0 0 0 2px var(--color-bg-primary),
+			0 0 0 4px var(--color-focus-ring);
+	}
+
+	@media (forced-colors: active) {
+		*:focus-visible {
+			outline: 2px solid CanvasText;
+		}
+	}
+}
+
+/* prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}

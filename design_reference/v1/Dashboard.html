@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Dashboard</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    const { useRef } = React;
+
+    // ── Loaded (full shell + dashboard, themed) ──
+    const ShellWithDashboard = ({ theme }) => {
+      const [active, setActive] = React.useState("dashboard");
+      return (
+        <div className="artboard-host" data-theme={theme}>
+          <div className="AppShell">
+            <Sidebar activeId={active} onNav={setActive} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Dashboard" }]} conn="connected" connMeta="50051" />
+              <DashboardPage theme={theme} onOpenServer={() => {}} />
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ── Loading skeleton ──
+    const ShellLoading = ({ theme }) => (
+      <div className="artboard-host" data-theme={theme}>
+        <div className="AppShell">
+          <Sidebar activeId="dashboard" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Dashboard" }]} conn="connected" connMeta="50051" />
+            <SkeletonDashboard />
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Empty (no servers) ──
+    const ShellEmpty = () => {
+      const [active, setActive] = React.useState("dashboard");
+      return (
+        <div className="artboard-host" data-theme="light">
+          <div className="AppShell">
+            <Sidebar activeId={active} onNav={setActive} collapsed={false} onToggle={() => {}} hideCounts={true} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Dashboard" }]} conn="connected" connMeta="50051" />
+              <DashEmpty onConfigure={() => setActive("configuration")} />
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // ── Backend unreachable: stale + never-loaded ──
+    const ShellStale = () => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="dashboard" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Dashboard" }]} conn="disconnected" />
+            <BackendBanner onRetry={() => {}} />
+            <DashStale theme="light" onRetry={() => {}} />
+          </div>
+        </div>
+      </div>
+    );
+    const ShellErrorFull = () => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="dashboard" onNav={() => {}} collapsed={false} onToggle={() => {}} hideCounts={true} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Dashboard" }]} conn="disconnected" />
+            <BackendBanner onRetry={() => {}} />
+            <DashErrorFull onRetry={() => {}} />
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── Accessibility map ──
+    const DashAnnotated = ({ showKbd }) => {
+      const hostRef = useRef(null);
+      const marks = useAnno(hostRef, [
+        { id: "nav",    sel: ".Sidebar", kind: "landmark-nav" },
+        { id: "banner", sel: ".TopBar", kind: "landmark-banner" },
+        { id: "main",   sel: ".Page", kind: "landmark-main" },
+        { id: "region", sel: ".Card", kind: "landmark-region" },
+        { id: "t2", sel: ".Sidebar nav .NavItem", kind: "tab", n: 2, anchor: "cl" },
+        { id: "t3", sel: ".CollapseBtn", kind: "tab", n: 3, anchor: "cl" },
+        { id: "t4", sel: ".SummaryBtn", kind: "tab", n: 4, anchor: "tl" },
+        { id: "t5", sel: ".DashHead .actions .Btn.secondary", kind: "tab", n: 5, anchor: "tl" },
+        { id: "t6", sel: ".DashHead .actions .Btn.primary", kind: "tab", n: 6, anchor: "tl" },
+        { id: "t7", sel: ".IconBtn", kind: "tab", n: 7, anchor: "tr" },
+        { id: "t8", sel: ".ServerGrid .ServerCard", kind: "tab", n: 8, anchor: "tl", alt: true },
+        { id: "lv1", sel: ".ConnBadge", kind: "live", text: "aria-live: polite", anchor: "tr" },
+        { id: "lv2", sel: ".DashHead .sub", kind: "live", text: "aria-live: polite", anchor: "tr" },
+      ]);
+      return (
+        <div className="artboard-host a11y-host" data-theme="light" ref={hostRef}>
+          <a href="#main" className="SkipLink">Skip to content</a>
+          <div className="AppShell">
+            <Sidebar activeId="dashboard" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+            <div className="Main">
+              <TopBar crumbs={[{ label: "Dashboard" }]} conn="connected" connMeta="50051" />
+              <DashboardPage theme="light" onOpenServer={() => {}} />
+            </div>
+          </div>
+          <div className="AnnoLayer">
+            {marks.map(m => {
+              if (m.kind === "landmark-nav") return <Landmark key={m.id} kind="nav" {...m} inset={2} label="nav · Primary navigation" />;
+              if (m.kind === "landmark-banner") return <Landmark key={m.id} kind="banner" {...m} inset={2} label="banner · header" />;
+              if (m.kind === "landmark-main") return <Landmark key={m.id} kind="main" {...m} inset={3} label="main · id=main (skip target)" />;
+              if (m.kind === "landmark-region") return <Landmark key={m.id} kind="region" {...m} inset={1} label="region · Fleet" />;
+              if (m.kind === "tab") return <TabMark key={m.id} {...m} />;
+              if (m.kind === "live") return <LiveMark key={m.id} {...m} />;
+              return null;
+            })}
+          </div>
+          <div className="A11yLegend tr">
+            <div className="grp">
+              <h3><Icon name="info" size={14} /> Landmarks &amp; tab order</h3>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#7c3aed" }} /><span><b>nav</b> — sidebar, <code>aria-label="Primary"</code></span></div>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#0891b2" }} /><span><b>banner</b> — top header bar</span></div>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#2563eb" }} /><span><b>main</b> — content, <code>id="main"</code></span></div>
+              <div className="LegRow"><span className="sw" style={{ borderColor: "#16a34a" }} /><span><b>region</b> — Fleet card, labelled</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Tab order</div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--accent-blue)" }}>1</span><span><b>Skip to content</b> — first tab stop, jumps to <code>#main</code></span></div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--accent-blue)" }}>2–7</span><span>Nav items → collapse → summary → Refresh → Add server → Help</span></div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--status-healthy-solid)" }}>8</span><span><b>Server grid</b> — roving tabindex: one tab stop, <kbd className="k">↑</kbd><kbd className="k">↓</kbd> move between cards</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Announcements</div>
+              <div className="LegRow"><span className="dot" style={{ background: "var(--surface-inverse)" }}>♺</span><span><b>aria-live=polite</b> on connection status &amp; fleet counts; a visually-hidden live region announces toasts.</span></div>
+            </div>
+            <div className="grp">
+              <div className="gl">Also verified</div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>On route change, focus moves to the <code>&lt;h1&gt;</code> (tabindex=-1) so SR users hear the new page.</span></div>
+              <div className="LegRow"><Icon name="check" size={12} /><span>Press <kbd className="k">?</kbd> anywhere to open the keyboard shortcuts overlay.</span></div>
+            </div>
+          </div>
+          {showKbd && <KbdOverlay />}
+        </div>
+      );
+    };
+
+    const KbdOverlay = () => (
+      <div className="KbdScrim">
+        <div className="KbdModal" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+          <div className="kh"><h2>Keyboard shortcuts</h2><span className="esc">Esc to close</span></div>
+          <div className="KbdBody">
+            <div className="kgrp">
+              <div className="t">Navigation</div>
+              {[["Go to Dashboard", ["g", "d"]], ["Go to Queue", ["g", "q"]], ["Go to Explorer", ["g", "e"]], ["Command palette", ["⌘", "k"]], ["Skip to content", ["Tab"]]].map(([d, k]) => (
+                <div className="KbdRow" key={d}><span className="desc">{d}</span><span className="keys">{k.map((x, i) => <kbd className="k" key={i}>{x}</kbd>)}</span></div>
+              ))}
+            </div>
+            <div className="kgrp">
+              <div className="t">Actions</div>
+              {[["Refresh all", ["r"]], ["Add server", ["a"]], ["Toggle sidebar", ["⌘", "\\"]], ["Toggle theme", ["⌘", "⇧", "l"]], ["This help", ["?"]]].map(([d, k]) => (
+                <div className="KbdRow" key={d}><span className="desc">{d}</span><span className="keys">{k.map((x, i) => <kbd className="k" key={i}>{x}</kbd>)}</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="loaded" title="Dashboard · loaded"
+          subtitle="Health-at-a-glance: aggregate metrics, server-card grid (auto-fill, 320px min), and two time-series charts (ECharts, 16:9). Every number is monospace; every status is a StatusBadge. The “Dashboard summary” button speaks an audio overview. Charts show a “Loading chart…” skeleton, then render after ~0.85s.">
+          <DCArtboard id="dash-light" label="Light theme" width={1440} height={1340}><ShellWithDashboard theme="light" /></DCArtboard>
+          <DCArtboard id="dash-dark" label="Dark theme" width={1440} height={1340}><ShellWithDashboard theme="dark" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="loading" title="Loading state"
+          subtitle="First ~300ms before API data arrives. Sidebar + header are live; the content region is skeletonised — pulsing placeholders sized to match the loaded layout (metric cards, 4 server cards at min-height 180px, two 16:9 chart containers). Every skeleton container is aria-busy; the pulse respects prefers-reduced-motion.">
+          <DCArtboard id="loading-light" label="Skeleton" width={1440} height={1340}><ShellLoading theme="light" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="empty" title="Empty · no servers configured"
+          subtitle="Backend reachable, fleet empty. Aggregate metrics read “—” / “0”; the server grid is replaced by an empty state (server-plus icon, instructions, primary action routing to Configuration); both charts show a “No data” placeholder.">
+          <DCArtboard id="empty-light" label="Light theme" width={1440} height={1080}><ShellEmpty /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="unreachable" title="Backend unreachable"
+          subtitle="Connection flips to ✕ Disconnected with a red error banner + Retry. Left: last-known data is preserved but dimmed behind a “Stale data” strip. Right: nothing was ever loaded, so the content area is a full-page error.">
+          <DCArtboard id="stale-light" label="Stale data (last-known)" width={1440} height={1360}><ShellStale /></DCArtboard>
+          <DCArtboard id="never-light" label="Never loaded (full-page error)" width={1440} height={760}><ShellErrorFull /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="anno" title="Accessibility map"
+          subtitle="ARIA landmarks (nav / banner / main / region), the keyboard tab order (numbered — green = roving-tabindex group), and aria-live announcement points overlaid on the live page. The skip-to-content link is pinned visible (it normally appears only on focus).">
+          <DCArtboard id="dash-a11y" label="Landmarks · tab order · live regions" width={1440} height={1340}><DashAnnotated /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="kbd" title="Keyboard shortcuts overlay"
+          subtitle="Pressing “?” anywhere opens this overlay — a focus-trapped dialog (Esc closes) grouping navigation and action shortcuts.">
+          <DCArtboard id="dash-kbd" label="“?” overlay open" width={1440} height={900}><DashAnnotated showKbd={true} /></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

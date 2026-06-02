@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Connection Status States</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host {
+      width: 100%; height: 100%;
+      background: var(--surface-0);
+      color: var(--text-primary);
+      display: flex; flex-direction: column;
+    }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+
+    /* The header mock — topbar + optional banner, then a faded content stub */
+    .HeaderMock { display: flex; flex-direction: column; }
+    .stub {
+      flex: 1; padding: 20px;
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          transparent, transparent 11px,
+          color-mix(in srgb, var(--border-subtle) 55%, transparent) 11px,
+          color-mix(in srgb, var(--border-subtle) 55%, transparent) 12px
+        );
+    }
+    .stub .skel {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .skel .bar {
+      height: 12px; border-radius: 3px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-subtle);
+    }
+    .skel .cards { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin-top: 6px; }
+    .skel .ch {
+      height: 64px; border-radius: var(--radius-md);
+      background: var(--surface-1); border: 1px solid var(--border-default);
+      box-shadow: var(--shadow-inset-top);
+    }
+    .skel .frozen { opacity: 0.55; filter: saturate(0.85); }
+
+    /* The faded scrim shown over content when disconnected */
+    .stub.dimmed .skel { opacity: 0.4; }
+
+    .note {
+      font: 11px var(--font-mono); color: var(--text-tertiary);
+      padding: 6px 20px 0; max-width: 1400px; margin: 0 auto; width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+
+  <script type="text/babel">
+    // A focused header mock: TopBar with a given connection state, an optional
+    // banner below it, and a faded content stub so the indicator reads in context.
+    const HeaderMock = ({ theme, conn, connMeta, banner, bannerMeta, frozen }) => (
+      <div className="artboard-host" data-theme={theme}>
+        <div className="HeaderMock">
+          <header className="TopBar">
+            <div className="crumbs">
+              <span className="crumb tail">Dashboard</span>
+            </div>
+            <div className="spacer" />
+            <ConnBadge state={conn} meta={connMeta} />
+            <button className="IconBtn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+              <span className="qmark">?</span>
+            </button>
+          </header>
+          {banner && <Banner kind={banner} meta={bannerMeta} />}
+        </div>
+        <div className={`stub ${frozen ? "dimmed" : ""}`}>
+          <div className={`skel ${frozen ? "frozen" : ""}`}>
+            <div className="bar" style={{ width: "30%", height: 18 }} />
+            <div className="cards">
+              <div className="ch" /><div className="ch" /><div className="ch" /><div className="ch" />
+            </div>
+            <div className="bar" style={{ width: "100%", marginTop: 8 }} />
+            <div className="bar" style={{ width: "92%" }} />
+            <div className="bar" style={{ width: "96%" }} />
+          </div>
+        </div>
+      </div>
+    );
+
+    const Pair = ({ idBase, label, ...props }) => (
+      <DCSection id={idBase} title={label.title} subtitle={label.sub}>
+        <DCArtboard id={`${idBase}-light`} label="Light" width={1080} height={420}>
+          <HeaderMock theme="light" {...props} />
+        </DCArtboard>
+        <DCArtboard id={`${idBase}-dark`} label="Dark" width={1080} height={420}>
+          <HeaderMock theme="dark" {...props} />
+        </DCArtboard>
+      </DCSection>
+    );
+
+    const App = () => (
+      <DesignCanvas>
+        <Pair
+          idBase="connected"
+          label={{
+            title: "1 · Connected — steady state",
+            sub: "Green StatusBadge with a slow breathing dot (2s pulse). No banner — live data flows over SSE. This is the resting state operators see 99% of the time."
+          }}
+          conn="connected" connMeta="50051"
+        />
+        <Pair
+          idBase="reconnecting"
+          label={{
+            title: "2 · Reconnecting — SSE dropped",
+            sub: "Amber StatusBadge, dot pulses at 1.4s to signal in-flight. A warning banner drops in below the header: spinning refresh icon + “Live updates paused — reconnecting…” + last-updated timestamp. Content dims slightly to show it's stale. Triple redundancy: icon + text + amber."
+          }}
+          conn="reconnecting"
+          banner="warn" bannerMeta="12s ago"
+          frozen={true}
+        />
+        <Pair
+          idBase="disconnected"
+          label={{
+            title: "3 · Disconnected — network offline",
+            sub: "Red StatusBadge (✕ semantics via solid dot). Error banner: alert-triangle icon + “No network connection” + last-updated. Content is frozen and dimmed. Triple redundancy: icon + text + red."
+          }}
+          conn="disconnected"
+          banner="error" bannerMeta="1m 40s ago"
+          frozen={true}
+        />
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

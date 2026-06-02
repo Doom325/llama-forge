@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LlamaForge — Queue Inspector</title>
+  <link rel="icon" href="assets/favicon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .artboard-host { width: 100%; height: 100%; background: var(--surface-0); color: var(--text-primary); position: relative; }
+    .artboard-host[data-theme="dark"] { color-scheme: dark; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="lf-core.jsx"></script>
+  <script type="text/babel" src="lf-pages.jsx"></script>
+
+  <script type="text/babel">
+    // Live populated/empty inspector
+    const ShellQueue = ({ theme, empty }) => (
+      <div className="artboard-host" data-theme={theme}>
+        <div className="AppShell">
+          <Sidebar activeId="queue" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Queue" }]} conn="connected" connMeta="50051" />
+            <QueuePage forceEmpty={empty} />
+          </div>
+        </div>
+      </div>
+    );
+
+    // ── State frames (loading / error) ──
+    const QFilterBar = () => (
+      <div className="FilterBar">
+        <div className="Toggle" role="group" aria-label="Filter by status">
+          <button className="on">All</button><button>Queued</button><button>Processing</button>
+        </div>
+        <div className="Field"><label>Model</label>
+          <span className="SelWrap"><select><option>All models</option></select>
+            <svg className="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9" /></svg></span></div>
+        <div className="Field"><label>Priority</label>
+          <span className="SelWrap"><select><option>All priorities</option></select>
+            <svg className="chev" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9" /></svg></span></div>
+      </div>
+    );
+    const QThead = () => (
+      <thead><tr>
+        <th className="num">Position</th><th>Request ID</th><th>Model</th><th>Priority</th>
+        <th>Requestor</th><th>Status</th><th className="num">ETA</th><th className="num">Actions</th>
+      </tr></thead>
+    );
+    const SK_COLS = [28, 84, 80, 110, 90, 86, 44, 60];
+    const QSkeletonTable = () => (
+      <div className="QTableWrap">
+        <table className="QTable" aria-busy="true">
+          <QThead />
+          <tbody>
+            {Array.from({ length: 5 }).map((_, r) => (
+              <tr key={r}>{SK_COLS.map((w, c) => (
+                <td key={c}><span className="SkBar" style={{ width: w, height: 12, display: "inline-block", marginLeft: c >= 6 || c === 0 ? "auto" : 0 }} /></td>
+              ))}</tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+    const Frame = ({ count, children }) => (
+      <div className="artboard-host" data-theme="light">
+        <div className="AppShell">
+          <Sidebar activeId="queue" onNav={() => {}} collapsed={false} onToggle={() => {}} />
+          <div className="Main">
+            <TopBar crumbs={[{ label: "Queue" }]} conn="connected" connMeta="50051" />
+            <div className="Page"><div className="PageInner">
+              <div className="QHead"><h1>Queue Inspector</h1><div className="sub">{count}</div></div>
+              {children}
+            </div></div>
+          </div>
+        </div>
+      </div>
+    );
+
+    const App = () => (
+      <DesignCanvas>
+        <DCSection id="queue" title="Queue Inspector · 7 requests"
+          subtitle="Live view of queued requests. Status toggle (All / Queued / Processing) and Model + Priority dropdowns filter the table live. Position, Priority and ETA are click-to-sort. Processing shows a spinning badge; Queued a gray clock. Cancel opens a confirm dialog, then the row animates out. The controls are interactive.">
+          <DCArtboard id="queue-light" label="Light theme" width={1440} height={760}><ShellQueue theme="light" /></DCArtboard>
+          <DCArtboard id="queue-dark" label="Dark theme" width={1440} height={760}><ShellQueue theme="dark" /></DCArtboard>
+        </DCSection>
+
+        <DCSection id="empty" title="Empty" subtitle="Queue is empty — every request is served immediately. The table is replaced by a positive empty state.">
+          <DCArtboard id="q-empty" label="Empty state" width={1440} height={640}>
+            <Frame count={<><b>0</b> requests queued</>}>
+              <EmptyBlock good icon="check" title="Queue is empty" desc="All requests are being served immediately." />
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="loading" title="Loading" subtitle="Initial fetch. Filter bar is present; the table shows 5 pulsing skeleton rows matched to column widths, with aria-busy on the table.">
+          <DCArtboard id="q-loading" label="Loading skeleton" width={1440} height={640}>
+            <Frame count={<span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>loading…</span>}>
+              <QFilterBar />
+              <QSkeletonTable />
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="error" title="Error" subtitle="The queue request failed and is auto-retrying. A red banner with a Retry action sits above a dimmed skeleton table.">
+          <DCArtboard id="q-error" label="Load error" width={1440} height={680}>
+            <Frame count={<span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 13 }}>—</span>}>
+              <QFilterBar />
+              <ErrorBanner kind="error" spinning onRetry={() => {}}>Failed to load queue data. Retrying…</ErrorBanner>
+              <div style={{ opacity: 0.5 }}><QSkeletonTable /></div>
+            </Frame>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
