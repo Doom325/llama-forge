@@ -42,9 +42,10 @@ for (const file of files) {
 		const trimmed = line.trim();
 		// Skip comment lines.
 		if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
-		// Ignore prefetch/refetch/window.fetch-type identifiers; require a bare
-		// `fetch(` not preceded by a word char, dot, or dash.
-		if (FETCH_RE.test(line) && !/[\w.-]fetch\s*\(/.test(line)) {
+		// Ignore apiFetch/refetch/prefetch (word-char prefix); but DO flag a
+		// dotted raw fetch like `window.fetch(` / `globalThis.fetch(` — hence the
+		// char class excludes the dot.
+		if (FETCH_RE.test(line) && !/[\w-]fetch\s*\(/.test(line)) {
 			offenders.push(`${rel}:${i + 1}: ${trimmed}`);
 		}
 	});

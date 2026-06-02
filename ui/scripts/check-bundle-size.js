@@ -118,6 +118,11 @@ if (writeMode) {
 const baseline = existsSync(BASELINE_PATH) ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8')) : null;
 const baselineChunks = baseline?.chunks ?? {};
 
+// Budget + drift threshold come from the baseline (single source of truth); the
+// constants above are only the fallback and what `--write` stamps into a new file.
+const aggregateBudget = baseline?.aggregateBudgetBytes ?? AGGREGATE_BUDGET_BYTES;
+const driftThreshold = baseline?.driftThresholdBytes ?? DRIFT_THRESHOLD_BYTES;
+
 const rows = [...jsChunks.keys()].sort().map((logical) => {
 	const cur = sizes[logical];
 	const base = baselineChunks[logical] ?? null;
@@ -146,21 +151,21 @@ console.log(
 	`${pad('TOTAL', nameWidth)}  ${padL(kb(total) + ' KB', 10)}  ` +
 		`${padL(baseline ? kb(baseline.totalGzipBytes) + ' KB' : '—', 10)}`
 );
-console.log(`Aggregate budget: ${kb(AGGREGATE_BUDGET_BYTES)} KB\n`);
+console.log(`Aggregate budget: ${kb(aggregateBudget)} KB\n`);
 
 const failures = [];
 
-if (total > AGGREGATE_BUDGET_BYTES) {
+if (total > aggregateBudget) {
 	failures.push(
-		`Aggregate gzipped JS (${kb(total)} KB) exceeds budget (${kb(AGGREGATE_BUDGET_BYTES)} KB).`
+		`Aggregate gzipped JS (${kb(total)} KB) exceeds budget (${kb(aggregateBudget)} KB).`
 	);
 }
 
 if (baseline) {
 	for (const r of rows) {
-		if (r.drift !== null && r.drift > DRIFT_THRESHOLD_BYTES) {
+		if (r.drift !== null && r.drift > driftThreshold) {
 			failures.push(
-				`Chunk "${r.file}" grew by ${kb(r.drift)} KB (> ${kb(DRIFT_THRESHOLD_BYTES)} KB drift threshold).`
+				`Chunk "${r.file}" grew by ${kb(r.drift)} KB (> ${kb(driftThreshold)} KB drift threshold).`
 			);
 		}
 	}

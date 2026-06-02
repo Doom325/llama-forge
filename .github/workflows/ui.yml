@@ -98,8 +98,13 @@ jobs:
           retention-days: 7
 
   lighthouse:
-    name: Lighthouse CI
+    name: Lighthouse CI (informational)
     runs-on: ubuntu-latest
+    # Non-blocking until one real CI run confirms the thresholds clear. The job
+    # runs against `npm run preview`, which does NOT carry the Rust server's
+    # security headers, so best-practices may under-report vs the real
+    # deployment. Promote to a required check only after validating in-runner.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
