@@ -48,15 +48,6 @@
 		gcTime: 300_000 // 5 min
 	}));
 
-	$effect(() => {
-		console.log(
-			'QUERY STATE:',
-			requestsQuery.status,
-			requestsQuery.fetchStatus,
-			requestsQuery.error
-		);
-	});
-
 	let selectedRequest = $state<RequestRecord | null>(null);
 	let drawerOpen = $state(false);
 
@@ -162,8 +153,9 @@
 			description="Try adjusting your filters or search query."
 			icon="🔍"
 		/>
+	{:else}
+		<ExplorerTable data={requestsQuery.data} onRowClick={handleRowClick} />
 	{/if}
 
 	<RequestDetailDrawer request={selectedRequest} open={drawerOpen} onClose={handleDrawerClose} />
 </div>
-andleDrawerClose} />

@@ -83,11 +83,21 @@
 		renderFallbackValue: null
 	});
 
-	let table = $derived(
-		createTable(
+	let table = $derived.by(() => {
+		const t = createTable(
 			tableOptions as unknown as import('@tanstack/table-core').TableOptionsResolved<RequestRecord>
-		) as unknown as Table<RequestRecord>
-	);
+		) as unknown as Table<RequestRecord>;
+		// table-core's getState() returns options.state verbatim — it does NOT merge
+		// the feature-provided defaults. A partially-controlled state (sorting only)
+		// therefore leaves slices like columnPinning undefined, and getHeaderGroups
+		// crashes reading `columnPinning.left`. Merge the full initialState in, exactly
+		// as the official TanStack table adapters do.
+		t.setOptions((prev) => ({
+			...prev,
+			state: { ...t.initialState, ...prev.state }
+		}));
+		return t;
+	});
 
 	// Virtualizer setup
 	let tableContainer: HTMLDivElement | undefined = $state();
