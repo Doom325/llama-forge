@@ -21,7 +21,7 @@
 
 	{#if q.isPending}
 		<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-			{#each Array(6), i (i)}
+			{#each Array.from({ length: 6 }), i (i)}
 				<div
 					class="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-5"
 				>

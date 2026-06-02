@@ -129,8 +129,8 @@
 	});
 
 	// Latest prompt forwarded to the comparison pane so it generates the same
-	// thing. ComparisonPane guards against resending the same value.
-	let sharedPrompt = $state<string | null>(null);
+	// thing. The nonce lets the pane mirror identical consecutive prompts.
+	let sharedPrompt = $state<{ content: string; nonce: number } | null>(null);
 
 	function toggleCompare() {
 		comparing = !comparing;
@@ -179,10 +179,13 @@
 			toastStore.add('error', 'Select a model before sending a message.');
 			return;
 		}
-		await session.send(content, selectedModel, currentParams);
-		// Mirror the prompt to the comparison pane (if open) so both models
-		// answer the same thing. Set after the primary send is dispatched.
-		sharedPrompt = content;
+		// Kick the primary stream, then IMMEDIATELY mirror the prompt to the
+		// comparison pane so both fetches run concurrently. session.send() only
+		// resolves on [DONE], so awaiting it before mirroring would serialise the
+		// two streams (comparison wouldn't start until the primary finished).
+		const primary = session.send(content, selectedModel, currentParams);
+		sharedPrompt = { content, nonce: (sharedPrompt?.nonce ?? 0) + 1 };
+		await primary;
 	}
 </script>
 
@@ -207,7 +210,8 @@
 				: 'border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
 			onclick={toggleCompare}
 			aria-pressed={comparing}
-			disabled={models.length === 0}
+			disabled={models.length < 2}
+			title={models.length < 2 ? 'Needs at least two registered models' : undefined}
 		>
 			Compare
 		</button>
@@ -279,12 +283,12 @@
 						hidden={activeTab !== 'comparison'}
 						class="flex h-[70vh] min-h-[28rem] flex-col"
 					>
-						<ComparisonPane
-							model={comparisonModel}
-							parameters={currentParams}
-							{sharedPrompt}
-							onClose={closeComparison}
-						/>
+						{#key comparisonModel.id}<ComparisonPane
+								model={comparisonModel}
+								parameters={currentParams}
+								{sharedPrompt}
+								onClose={closeComparison}
+							/>{/key}
 					</div>
 				{:else}
 					<!-- Wide: primary + comparison side-by-side. -->
@@ -299,12 +303,12 @@
 							/>
 						</div>
 						<div class="flex h-[70vh] min-h-[28rem] flex-col">
-							<ComparisonPane
-								model={comparisonModel}
-								parameters={currentParams}
-								{sharedPrompt}
-								onClose={closeComparison}
-							/>
+							{#key comparisonModel.id}<ComparisonPane
+									model={comparisonModel}
+									parameters={currentParams}
+									{sharedPrompt}
+									onClose={closeComparison}
+								/>{/key}
 						</div>
 					</div>
 				{/if}

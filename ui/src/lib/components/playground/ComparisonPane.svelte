@@ -11,7 +11,9 @@
 	}: {
 		model: ModelInfo;
 		parameters: GenerationParams;
-		sharedPrompt: string | null;
+		// Carries a nonce so identical consecutive prompts still mirror (the value
+		// alone would dedupe them away).
+		sharedPrompt: { content: string; nonce: number } | null;
 		onClose: () => void;
 	} = $props();
 
@@ -22,17 +24,22 @@
 	// Polite announcement surfaced on mount (and if the model changes).
 	const announcement = $derived(`Comparison pane opened for ${model.name}.`);
 
-	// Track the last prompt we forwarded so unrelated re-renders (e.g. a param
-	// tweak) don't resend the same shared prompt. A new send only fires when
-	// sharedPrompt transitions to a non-null value we have not yet sent.
-	let lastSent: string | null = null;
+	// Mirror the primary pane's prompt. Guard on the nonce (not the text) so an
+	// identical consecutive prompt still mirrors, while unrelated re-renders
+	// (e.g. a param tweak) don't resend.
+	let lastNonce = -1;
 	$effect(() => {
-		const prompt = sharedPrompt;
-		if (prompt !== null && prompt !== lastSent) {
-			lastSent = prompt;
-			void session.send(prompt, model, parameters);
+		const shared = sharedPrompt;
+		if (shared && shared.nonce !== lastNonce) {
+			lastNonce = shared.nonce;
+			void session.send(shared.content, model, parameters);
 		}
 	});
+
+	// Abort this pane's in-flight stream on ANY unmount — the header Compare
+	// toggle, a comparison-model switch (via {#key} in the page), or navigation —
+	// not just the in-pane Close button. Prevents an orphaned fetch/reader.
+	$effect(() => () => session.cancel());
 
 	function handleClose() {
 		// Aborting cancels only THIS pane's in-flight stream.
