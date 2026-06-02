@@ -1,5 +1,5 @@
 import { createQuery, createMutation } from '@tanstack/svelte-query';
-import { apiFetch } from './client';
+import { apiFetch, apiFetchWithMeta } from './client';
 import { queryClient, liveDataStore } from './queryClient';
 import { toastStore } from '$lib/stores/toast.svelte';
 import type {
@@ -72,10 +72,12 @@ export function createAggregatedMetricsQuery(filters: Record<string, string>) {
 	}));
 }
 
-export function createConfigQuery(section: ConfigSection) {
+// Returns `{ data, etag }` — the ETag is captured at load time so the editor
+// can send it back as `If-Match` on save for optimistic concurrency control.
+export function createConfigQuery<T = unknown>(section: ConfigSection) {
 	return createQuery(() => ({
 		queryKey: ['config', section],
-		queryFn: () => apiFetch<unknown>(`/api/config/${section}`),
+		queryFn: () => apiFetchWithMeta<T>(`/api/config/${section}`),
 		staleTime: 60_000,
 		gcTime: 600_000 // 10 min
 	}));

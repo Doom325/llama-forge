@@ -79,6 +79,57 @@ export interface GenerationParams {
 
 export type ConfigSection = 'servers' | 'priority' | 'global';
 
+// Configuration shapes. These mirror the backend `llamaforge-core` config
+// structs (Section 2.6). Frontend validation is intentionally loose — the
+// backend is the authoritative validator (see FRONTEND_ARCHITECTURE.md §6.6).
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+export type LogFormat = 'pretty' | 'json' | 'compact';
+
+export interface GlobalSettings {
+	bind_address: string;
+	grpc_port: number;
+	http_port: number;
+	log_level: LogLevel;
+	log_format: LogFormat;
+	metrics_retention_days: number;
+	queue_max_depth: number;
+	queue_default_timeout_secs: number;
+	restart_stagger_secs: number;
+}
+
+export interface ServerConfigItem {
+	id: string;
+	alias: string;
+	model_path: string;
+	port: number;
+	gpu_layers: number;
+	parallel_slots: number;
+	ctx_size: number;
+}
+
+export interface ServersConfig {
+	servers: ServerConfigItem[];
+}
+
+export interface PriorityRule {
+	task_type: string;
+	priority: number;
+}
+
+export interface FairShareWeight {
+	requestor: string;
+	weight: number;
+}
+
+export interface PriorityRulesConfig {
+	task_types: PriorityRule[];
+	fair_share: FairShareWeight[];
+	starvation: {
+		boost_start_after_secs: number;
+		max_boost: number;
+	};
+}
+
 export type ServerAction = 'restart' | 'stop' | 'start';
 export type DetailServerAction = ServerAction | 'force_kill';
 
