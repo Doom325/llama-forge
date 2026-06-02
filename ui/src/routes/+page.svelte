@@ -16,9 +16,15 @@
 	import SystemHealthBanner from '$lib/components/dashboard/SystemHealthBanner.svelte';
 	import Skeleton from '$lib/components/shared/Skeleton.svelte';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
+	import ThroughputChart from '$lib/components/dashboard/ThroughputChart.svelte';
+	import LatencyChart from '$lib/components/dashboard/LatencyChart.svelte';
+	import type { TimeSeriesPoint, LatencyPercentilePoint } from '$lib/api/types';
 	import { formatTokensPerSecond } from '$lib/utils/format';
 	import { goto } from '$app/navigation';
 	import { toastStore } from '$lib/stores/toast.svelte';
+	import { untrack } from 'svelte';
+
+	const MAX_HISTORY_POINTS = 500;
 
 	const serversQuery = createServersQuery();
 	const queueQuery = createQueueQuery();
@@ -31,6 +37,46 @@
 	let servers = $derived(serversQuery.data ?? []);
 
 	let healthData = $derived(computeFleetHealth(servers));
+
+	let throughputHistory = $state<TimeSeriesPoint[]>([]);
+	let latencyHistory = $state<LatencyPercentilePoint[]>([]);
+	let lastMetricsTime = 0;
+
+	$effect(() => {
+		const metrics = metricsQuery.data as Record<string, unknown> | undefined;
+		if (metrics && metrics.throughput_total !== undefined) {
+			const now = Date.now();
+			if (now - lastMetricsTime > 100) {
+				// Throttle and prevent infinite loops
+				lastMetricsTime = now;
+				untrack(() => {
+					let newThroughput = [
+						...throughputHistory,
+						{ timestamp: now, value: Number(metrics.throughput_total) }
+					];
+					if (newThroughput.length > MAX_HISTORY_POINTS)
+						newThroughput = newThroughput.slice(-MAX_HISTORY_POINTS);
+					throughputHistory = newThroughput;
+
+					const latency = metrics.latency as Record<string, number> | undefined;
+					if (latency) {
+						let newLatency = [
+							...latencyHistory,
+							{
+								timestamp: now,
+								p50: latency.p50 || 0,
+								p90: latency.p90 || 0,
+								p99: latency.p99 || 0
+							}
+						];
+						if (newLatency.length > MAX_HISTORY_POINTS)
+							newLatency = newLatency.slice(-MAX_HISTORY_POINTS);
+						latencyHistory = newLatency;
+					}
+				});
+			}
+		}
+	});
 
 	function handleAction(id: string, action: DetailServerAction) {
 		if (action === 'restart') restartMutation.mutate(id);
@@ -127,4 +173,21 @@
 			{/snippet}
 		</ServerGrid>
 	{/if}
+
+	<div class="mt-8 mb-4 flex items-center justify-between">
+		<h2 class="text-xl font-bold">Metrics History</h2>
+	</div>
+
+	<div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+		<div
+			class="h-[400px] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-6"
+		>
+			<ThroughputChart data={throughputHistory} />
+		</div>
+		<div
+			class="h-[400px] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-6"
+		>
+			<LatencyChart data={latencyHistory} />
+		</div>
+	</div>
 </div>

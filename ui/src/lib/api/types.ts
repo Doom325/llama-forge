@@ -49,8 +49,25 @@ export interface ModelInfo {
 	capabilities: string[];
 }
 
+export interface TimeSeriesPoint {
+	timestamp: number;
+	value: number;
+}
+
+export interface LatencyPercentilePoint {
+	timestamp: number;
+	p50: number;
+	p90: number;
+	p99: number;
+}
+
 export interface AggregatedMetrics {
 	throughput_total: number;
+	latency?: {
+		p50: number;
+		p90: number;
+		p99: number;
+	};
 }
 
 export interface GenerationParams {
