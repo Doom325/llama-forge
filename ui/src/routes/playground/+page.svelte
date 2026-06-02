@@ -2,28 +2,20 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { createModelsQuery } from '$lib/api/queries';
-	import { streamChatCompletion, isAbortError } from '$lib/api/chat';
-	import { ApiError } from '$lib/api/client';
 	import { loadHighlighter } from '$lib/utils/markdown';
 	import { toastStore } from '$lib/stores/toast.svelte';
+	import { createChatSession } from '$lib/utils/chatSession.svelte';
 	import {
 		DEFAULT_TEMPERATURE,
 		DEFAULT_MAX_TOKENS,
 		DEFAULT_TOP_P,
-		DEFAULT_TOP_K,
-		TIMEOUTS
+		DEFAULT_TOP_K
 	} from '$lib/utils/constants';
-	import type {
-		ChatCompletionRequest,
-		GenerationParams,
-		Message,
-		ModelInfo,
-		ResponseMetrics,
-		StreamingState
-	} from '$lib/api/types';
+	import type { GenerationParams, ModelInfo } from '$lib/api/types';
 	import ChatPane from '$lib/components/playground/ChatPane.svelte';
 	import ParameterSidebar from '$lib/components/playground/ParameterSidebar.svelte';
 	import ModelSelector from '$lib/components/playground/ModelSelector.svelte';
+	import ComparisonPane from '$lib/components/playground/ComparisonPane.svelte';
 
 	const modelsQuery = createModelsQuery();
 
@@ -92,10 +84,8 @@
 		updateParams(defaults);
 	}
 
-	let messages = $state<Message[]>([]);
-	let streamingState = $state<StreamingState>({ status: 'idle' });
-	let controller = $state<AbortController | null>(null);
-	let liveMessage = $state('');
+	// Single source of truth for the primary conversation's streaming + state.
+	const session = createChatSession();
 
 	// Seed the URL with default params on first mount if absent, so deep links
 	// and the sidebar always reflect concrete values (replaceState — no history).
@@ -122,99 +112,80 @@
 		loadHighlighter();
 	});
 
-	// Rough token estimate (~4 chars/token) — the backend is authoritative, but
-	// usage stats are not always returned mid-stream, so we approximate.
-	function estimateTokens(text: string): number {
-		return Math.max(1, Math.ceil(text.length / 4));
+	// --- Comparison mode -----------------------------------------------------
+
+	let comparing = $state(false);
+	let comparisonModelId = $state<string | null>(null);
+
+	// The model rendered in the comparison pane: explicit selection, else the
+	// first model that differs from the primary, else the primary itself.
+	const comparisonModel = $derived.by<ModelInfo | null>(() => {
+		if (comparisonModelId) {
+			const match = models.find((m) => m.id === comparisonModelId);
+			if (match) return match;
+		}
+		const primaryId = selectedModel?.id;
+		return models.find((m) => m.id !== primaryId) ?? selectedModel ?? null;
+	});
+
+	// Latest prompt forwarded to the comparison pane so it generates the same
+	// thing. The nonce lets the pane mirror identical consecutive prompts.
+	let sharedPrompt = $state<{ content: string; nonce: number } | null>(null);
+
+	function toggleCompare() {
+		comparing = !comparing;
+	}
+
+	function closeComparison() {
+		comparing = false;
+	}
+
+	function handleComparisonModelChange(e: Event & { currentTarget: HTMLSelectElement }) {
+		comparisonModelId = e.currentTarget.value;
+	}
+
+	// Narrow layout (<1280px) swaps the two-column grid for an ARIA tabs widget.
+	let isNarrow = $state(false);
+	$effect(() => {
+		const mql = window.matchMedia('(max-width: 1279px)');
+		isNarrow = mql.matches;
+		const onChange = (e: MediaQueryListEvent) => {
+			isNarrow = e.matches;
+		};
+		mql.addEventListener('change', onChange);
+		return () => mql.removeEventListener('change', onChange);
+	});
+
+	// Roving-tabindex tabs widget for the narrow layout. Both panels stay mounted
+	// (we only toggle `hidden`) so neither stream is interrupted on tab switch.
+	type TabKey = 'primary' | 'comparison';
+	let activeTab = $state<TabKey>('primary');
+
+	function selectTab(tab: TabKey) {
+		activeTab = tab;
+	}
+
+	function handleTabKeydown(e: KeyboardEvent) {
+		if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+		e.preventDefault();
+		const next: TabKey = activeTab === 'primary' ? 'comparison' : 'primary';
+		activeTab = next;
+		const id = next === 'primary' ? 'pg-tab-primary' : 'pg-tab-comparison';
+		document.getElementById(id)?.focus();
 	}
 
 	async function handleSend(content: string) {
-		const model = selectedModel;
-		if (!model) {
+		if (!selectedModel) {
 			toastStore.add('error', 'Select a model before sending a message.');
 			return;
 		}
-
-		messages = [...messages, { role: 'user', content, timestamp: Date.now() }];
-
-		// Go straight to streaming. The `queued` state + its announcement are wired
-		// for when the backend reports a real queue position; we don't fake one.
-		streamingState = { status: 'streaming', tokens: '', ttft: 0 };
-
-		controller = new AbortController();
-		const params = currentParams;
-		const req: ChatCompletionRequest = {
-			model: model.id,
-			messages: messages.map((m) => ({ role: m.role, content: m.content })),
-			temperature: params.temperature,
-			max_tokens: params.max_tokens,
-			top_p: params.top_p,
-			top_k: params.top_k,
-			stream: true
-		};
-
-		const start = Date.now();
-		let ttft = 0;
-		let tokens = '';
-
-		try {
-			await streamChatCompletion(
-				req,
-				AbortSignal.any([controller.signal, AbortSignal.timeout(TIMEOUTS.PLAYGROUND_ABORT)]),
-				(delta) => {
-					if (ttft === 0) ttft = Date.now() - start;
-					tokens += delta;
-					streamingState = { status: 'streaming', tokens, ttft };
-				}
-			);
-
-			const elapsedMs = Date.now() - start;
-			const totalTokens = estimateTokens(tokens);
-			const tokensPerSecond = elapsedMs > 0 ? totalTokens / (elapsedMs / 1000) : 0;
-			const metrics: ResponseMetrics = { ttft, tokensPerSecond, totalTokens };
-
-			messages = [
-				...messages,
-				{ role: 'assistant', content: tokens, timestamp: Date.now(), metrics }
-			];
-			streamingState = { status: 'complete', response: tokens, metrics };
-			liveMessage = 'Generation complete.';
-			streamingState = { status: 'idle' };
-		} catch (err) {
-			if (isAbortError(err)) {
-				// Graceful stop. AbortSignal.any propagates the originating signal's
-				// reason, so a 120s timeout surfaces as TimeoutError (not AbortError);
-				// controller.signal.aborted distinguishes user-cancel from timeout.
-				const userCancelled = controller?.signal.aborted ?? false;
-				if (tokens.length > 0) {
-					messages = [...messages, { role: 'assistant', content: tokens, timestamp: Date.now() }];
-				}
-				streamingState = { status: 'idle' };
-				liveMessage = userCancelled ? 'Generation stopped.' : 'Generation timed out.';
-			} else {
-				const message =
-					err instanceof ApiError || err instanceof Error ? err.message : 'Generation failed.';
-				streamingState = {
-					status: 'error',
-					error: { message, retryable: true },
-					partialResponse: tokens.length > 0 ? tokens : null
-				};
-				liveMessage = 'Generation failed.';
-				toastStore.add('error', message);
-			}
-		} finally {
-			controller = null;
-		}
-	}
-
-	function handleCancel() {
-		controller?.abort();
-	}
-
-	function handleClear() {
-		messages = [];
-		streamingState = { status: 'idle' };
-		liveMessage = '';
+		// Kick the primary stream, then IMMEDIATELY mirror the prompt to the
+		// comparison pane so both fetches run concurrently. session.send() only
+		// resolves on [DONE], so awaiting it before mirroring would serialise the
+		// two streams (comparison wouldn't start until the primary finished).
+		const primary = session.send(content, selectedModel, currentParams);
+		sharedPrompt = { content, nonce: (sharedPrompt?.nonce ?? 0) + 1 };
+		await primary;
 	}
 </script>
 
@@ -223,29 +194,166 @@
 </svelte:head>
 
 <div class="mx-auto max-w-[1400px] space-y-6">
-	<div class="border-b border-[var(--color-border)] pb-6">
-		<h1 tabindex="-1" class="text-3xl font-bold text-[var(--color-text-primary)]">Playground</h1>
-		<p class="text-sm text-[var(--color-text-secondary)]">
-			Stream chat completions and tune generation parameters interactively.
-		</p>
+	<div
+		class="flex flex-col gap-4 border-b border-[var(--color-border)] pb-6 sm:flex-row sm:items-center sm:justify-between"
+	>
+		<div>
+			<h1 tabindex="-1" class="text-3xl font-bold text-[var(--color-text-primary)]">Playground</h1>
+			<p class="text-sm text-[var(--color-text-secondary)]">
+				Stream chat completions and tune generation parameters interactively.
+			</p>
+		</div>
+		<button
+			type="button"
+			class="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] {comparing
+				? 'border-[var(--color-focus-ring)] bg-[var(--color-focus-ring)]/10 text-[var(--color-focus-ring)]'
+				: 'border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
+			onclick={toggleCompare}
+			aria-pressed={comparing}
+			disabled={models.length < 2}
+			title={models.length < 2 ? 'Needs at least two registered models' : undefined}
+		>
+			Compare
+		</button>
 	</div>
 
 	<!-- Polite live region for queue/completion announcements. -->
-	<span aria-live="polite" class="sr-only">{liveMessage}</span>
+	<span aria-live="polite" class="sr-only">{session.liveMessage}</span>
 
 	<div class="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_18rem]">
-		<div class="order-2 flex h-[70vh] min-h-[28rem] flex-col lg:order-1">
-			<ChatPane
-				{messages}
-				{streamingState}
-				onSend={handleSend}
-				onCancel={handleCancel}
-				onClear={handleClear}
-			/>
+		<div class="order-2 lg:order-1">
+			{#if comparing && comparisonModel}
+				{#if isNarrow}
+					<!-- Narrow: proper ARIA tabs widget. Panels stay mounted. -->
+					<div role="tablist" aria-label="Playground panes" class="mb-3 flex gap-1">
+						<button
+							id="pg-tab-primary"
+							type="button"
+							role="tab"
+							aria-selected={activeTab === 'primary'}
+							aria-controls="pg-panel-primary"
+							tabindex={activeTab === 'primary' ? 0 : -1}
+							class="rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] {activeTab ===
+							'primary'
+								? 'bg-[var(--color-focus-ring)] text-white'
+								: 'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
+							onclick={() => selectTab('primary')}
+							onkeydown={handleTabKeydown}
+						>
+							Primary
+						</button>
+						<button
+							id="pg-tab-comparison"
+							type="button"
+							role="tab"
+							aria-selected={activeTab === 'comparison'}
+							aria-controls="pg-panel-comparison"
+							tabindex={activeTab === 'comparison' ? 0 : -1}
+							class="rounded-md px-4 py-2 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] {activeTab ===
+							'comparison'
+								? 'bg-[var(--color-focus-ring)] text-white'
+								: 'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] hover:bg-[var(--color-border)]'}"
+							onclick={() => selectTab('comparison')}
+							onkeydown={handleTabKeydown}
+						>
+							{comparisonModel.name}
+						</button>
+					</div>
+
+					<div
+						id="pg-panel-primary"
+						role="tabpanel"
+						aria-labelledby="pg-tab-primary"
+						hidden={activeTab !== 'primary'}
+						class="flex h-[70vh] min-h-[28rem] flex-col"
+					>
+						<ChatPane
+							messages={session.messages}
+							streamingState={session.streamingState}
+							onSend={handleSend}
+							onCancel={session.cancel}
+							onClear={session.clear}
+						/>
+					</div>
+
+					<div
+						id="pg-panel-comparison"
+						role="tabpanel"
+						aria-labelledby="pg-tab-comparison"
+						hidden={activeTab !== 'comparison'}
+						class="flex h-[70vh] min-h-[28rem] flex-col"
+					>
+						{#key comparisonModel.id}<ComparisonPane
+								model={comparisonModel}
+								parameters={currentParams}
+								{sharedPrompt}
+								onClose={closeComparison}
+							/>{/key}
+					</div>
+				{:else}
+					<!-- Wide: primary + comparison side-by-side. -->
+					<div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+						<div class="flex h-[70vh] min-h-[28rem] flex-col">
+							<ChatPane
+								messages={session.messages}
+								streamingState={session.streamingState}
+								onSend={handleSend}
+								onCancel={session.cancel}
+								onClear={session.clear}
+							/>
+						</div>
+						<div class="flex h-[70vh] min-h-[28rem] flex-col">
+							{#key comparisonModel.id}<ComparisonPane
+									model={comparisonModel}
+									parameters={currentParams}
+									{sharedPrompt}
+									onClose={closeComparison}
+								/>{/key}
+						</div>
+					</div>
+				{/if}
+			{:else}
+				<div class="flex h-[70vh] min-h-[28rem] flex-col">
+					<ChatPane
+						messages={session.messages}
+						streamingState={session.streamingState}
+						onSend={handleSend}
+						onCancel={session.cancel}
+						onClear={session.clear}
+					/>
+				</div>
+			{/if}
 		</div>
 
 		<div class="order-1 space-y-6 lg:order-2">
 			<ModelSelector {models} selected={selectedModel} onSelect={updateModel} />
+
+			{#if comparing}
+				<div class="space-y-1">
+					<label
+						for="comparison-model-selector"
+						class="block text-sm font-medium text-[var(--color-text-secondary)]"
+					>
+						Comparison model
+					</label>
+					<select
+						id="comparison-model-selector"
+						class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-focus-ring)] focus:ring-1 focus:ring-[var(--color-focus-ring)] focus:outline-none"
+						value={comparisonModel?.id ?? ''}
+						onchange={handleComparisonModelChange}
+						disabled={models.length === 0}
+					>
+						{#if models.length === 0}
+							<option value="">No models available</option>
+						{:else}
+							{#each models as model (model.id)}
+								<option value={model.id}>{model.name}</option>
+							{/each}
+						{/if}
+					</select>
+				</div>
+			{/if}
+
 			<ParameterSidebar
 				params={currentParams}
 				{defaults}
