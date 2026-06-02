@@ -1,30 +1,28 @@
 <script lang="ts">
 	import EChartsWrapper, { type DataSeries } from '../shared/EChartsWrapper.svelte';
-
-	export interface LatencyPercentilePoint {
-		timestamp: number;
-		p50: number;
-		p90: number;
-		p99: number;
-	}
+	import type { LatencyPercentilePoint } from '$lib/api/types';
 
 	let { data }: { data: LatencyPercentilePoint[] } = $props();
 
+	// Colorblind-safe palette (Okabe-Ito inspired)
 	let series: DataSeries[] = $derived([
 		{
 			name: 'p50',
 			data: data.map((d) => ({ timestamp: d.timestamp, value: d.p50 })),
-			color: '#22c55e' // Green
+			color: '#56B4E9', // Sky Blue
+			type: 'dashed'
 		},
 		{
 			name: 'p90',
 			data: data.map((d) => ({ timestamp: d.timestamp, value: d.p90 })),
-			color: '#f59e0b' // Yellow/Orange
+			color: '#E69F00', // Orange
+			type: 'dotted'
 		},
 		{
 			name: 'p99',
 			data: data.map((d) => ({ timestamp: d.timestamp, value: d.p99 })),
-			color: '#ef4444' // Red
+			color: '#D55E00', // Vermilion
+			type: 'solid'
 		}
 	]);
 </script>

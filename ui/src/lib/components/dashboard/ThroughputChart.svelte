@@ -1,8 +1,6 @@
 <script lang="ts">
-	import EChartsWrapper, {
-		type TimeSeriesPoint,
-		type DataSeries
-	} from '../shared/EChartsWrapper.svelte';
+	import EChartsWrapper, { type DataSeries } from '../shared/EChartsWrapper.svelte';
+	import type { TimeSeriesPoint } from '$lib/api/types';
 
 	let { data }: { data: TimeSeriesPoint[] } = $props();
 

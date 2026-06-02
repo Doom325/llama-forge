@@ -17,15 +17,14 @@
 	import Skeleton from '$lib/components/shared/Skeleton.svelte';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
 	import ThroughputChart from '$lib/components/dashboard/ThroughputChart.svelte';
-	import LatencyChart, {
-		type LatencyPercentilePoint
-	} from '$lib/components/dashboard/LatencyChart.svelte';
-	import type { TimeSeriesPoint } from '$lib/components/shared/EChartsWrapper.svelte';
+	import LatencyChart from '$lib/components/dashboard/LatencyChart.svelte';
+	import type { TimeSeriesPoint, LatencyPercentilePoint } from '$lib/api/types';
 	import { formatTokensPerSecond } from '$lib/utils/format';
 	import { goto } from '$app/navigation';
 	import { toastStore } from '$lib/stores/toast.svelte';
-
 	import { untrack } from 'svelte';
+
+	const MAX_HISTORY_POINTS = 500;
 
 	const serversQuery = createServersQuery();
 	const queueQuery = createQueueQuery();
@@ -51,14 +50,17 @@
 				// Throttle and prevent infinite loops
 				lastMetricsTime = now;
 				untrack(() => {
-					throughputHistory = [
+					let newThroughput = [
 						...throughputHistory,
 						{ timestamp: now, value: Number(metrics.throughput_total) }
 					];
+					if (newThroughput.length > MAX_HISTORY_POINTS)
+						newThroughput = newThroughput.slice(-MAX_HISTORY_POINTS);
+					throughputHistory = newThroughput;
 
 					const latency = metrics.latency as Record<string, number> | undefined;
 					if (latency) {
-						latencyHistory = [
+						let newLatency = [
 							...latencyHistory,
 							{
 								timestamp: now,
@@ -67,6 +69,9 @@
 								p99: latency.p99 || 0
 							}
 						];
+						if (newLatency.length > MAX_HISTORY_POINTS)
+							newLatency = newLatency.slice(-MAX_HISTORY_POINTS);
+						latencyHistory = newLatency;
 					}
 				});
 			}

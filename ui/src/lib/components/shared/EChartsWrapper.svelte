@@ -12,6 +12,7 @@
 		name: string;
 		data: TimeSeriesPoint[];
 		color?: string;
+		type?: 'solid' | 'dashed' | 'dotted';
 	}
 
 	let {
@@ -63,14 +64,25 @@
 	function applyOptions() {
 		if (!chartInstance) return;
 
-		const echartSeries = windowedSeries.map((s) => ({
-			name: s.name,
-			type: 'line',
-			showSymbol: false,
-			data: s.data.map((p) => [p.timestamp, p.value]),
-			itemStyle: s.color ? { color: s.color } : undefined,
-			lineStyle: s.color ? { color: s.color } : undefined
-		}));
+		const echartSeries = windowedSeries.map((s) => {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const seriesObj: any = {
+				name: s.name,
+				type: 'line' as const,
+				showSymbol: true,
+				symbol: 'circle',
+				symbolSize: 4,
+				data: s.data.map((p) => [p.timestamp, p.value])
+			};
+			if (s.color) {
+				seriesObj.itemStyle = { color: s.color };
+				seriesObj.lineStyle = { color: s.color };
+			}
+			if (s.type) {
+				seriesObj.lineStyle = { ...seriesObj.lineStyle, type: s.type };
+			}
+			return seriesObj;
+		});
 
 		const option: EChartsOption = {
 			tooltip: {
@@ -161,12 +173,7 @@
 	);
 </script>
 
-<div
-	role="img"
-	aria-label="{title} chart"
-	class="relative w-full overflow-hidden"
-	style="height: {height};"
->
+<div class="relative w-full overflow-hidden" style="height: {height};">
 	{#if !loaded}
 		<Skeleton width="100%" height="100%" class="absolute inset-0" />
 	{/if}
