@@ -10,8 +10,8 @@ import type { ChatCompletionRequest } from './types';
  * so user-cancel and the generation timeout both abort the underlying fetch.
  *
  * Resolves when the stream ends (`data: [DONE]`); rejects with an
- * {@link ApiError} on a non-OK response, and propagates the `AbortError` from
- * the signal on cancel/timeout.
+ * {@link ApiError} on a non-OK response, and propagates the signal's abort
+ * reason (`AbortError` on user cancel, `TimeoutError` on timeout).
  */
 export async function streamChatCompletion(
 	body: ChatCompletionRequest,
