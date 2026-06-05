@@ -213,3 +213,153 @@ export function computeFleetHealth(servers: ServerState[]) {
 
 	return { status, counts };
 }
+
+// ---------------------------------------------------------------------------
+// Setup Wizard (08_SETUP_WIZARD.md). NOTE: /api/setup/* responses use a FLAT
+// envelope — the backend adds a top-level `version: 1` field *alongside* the
+// payload's own fields (not a nested `{ version, data }`). Queries therefore
+// type the inner shape directly and ignore the extra `version` field.
+// ---------------------------------------------------------------------------
+
+// --- Hardware Detection ---
+export interface GpuInfo {
+	index: number;
+	name: string;
+	vram_mb: number;
+}
+
+export interface CpuInfo {
+	name: string;
+	cores_physical: number;
+	cores_logical: number;
+}
+
+export type SetupBackend = 'cuda' | 'metal' | 'vulkan' | 'cpu';
+
+export interface HardwareInfo {
+	gpus: GpuInfo[];
+	cpu: CpuInfo;
+	ram_mb: number;
+	recommended_backend: SetupBackend;
+}
+
+// --- Binary Scanner (discriminated on `found`) ---
+export type BinaryScanResult =
+	| { found: true; path: string; binary_version: string; backends: string[] }
+	| { found: false; searched_paths: string[] };
+
+// --- Model Scanner ---
+export interface ModelScanRequest {
+	source: 'local';
+	directories: string[];
+	max_depth?: number;
+	max_results?: number;
+}
+
+export interface DiscoveredModel {
+	id: string;
+	path: string;
+	filename: string;
+	size_bytes: number;
+	quantization_hint: string;
+	architecture_hint: string;
+	modified: string;
+}
+
+export type TruncationReason = 'timeout' | 'max_results' | 'max_depth' | null;
+
+export interface ModelScanResult {
+	models: DiscoveredModel[];
+	scan_duration_ms: number;
+	files_scanned: number;
+	truncated: boolean;
+	truncation_reason: TruncationReason;
+	warnings: string[];
+}
+
+// --- Build (discriminated on `status`) ---
+export type BuildPhase = 'cloning' | 'configuring' | 'building';
+
+export type BuildStatus =
+	| { status: 'idle' }
+	| {
+			status: 'running';
+			build_id: string;
+			phase: BuildPhase;
+			percent: number | null;
+			logLines: string[];
+	  }
+	| {
+			status: 'complete';
+			build_id: string;
+			binary_path: string;
+			duration_secs: number;
+			log_path?: string;
+			replaced_existing?: boolean;
+			backup_path?: string | null;
+	  }
+	| {
+			status: 'failed';
+			build_id: string;
+			phase: BuildPhase;
+			error: string;
+			lastLines: string[];
+			log_path?: string;
+	  }
+	| { status: 'cancelled'; build_id: string };
+
+// --- Config Recommendation ---
+export interface RecommendationRequest {
+	models: Array<{ path: string; size_bytes: number }>;
+}
+
+export interface ConfigRecommendation {
+	gpu_layers: number;
+	ctx_size: number;
+	parallel_slots: number;
+	cache_type_k: string;
+	cache_type_v: string;
+	flash_attn: string;
+	estimated_vram_mb: number;
+	port: number;
+}
+
+export interface ServerRecommendation {
+	model_path: string;
+	recommended: ConfigRecommendation;
+	rationale: Record<string, string>;
+}
+
+export interface RecommendationResult {
+	servers: ServerRecommendation[];
+	warnings: string[];
+}
+
+// --- Server config draft (client-side, merged from recommendation + overrides) ---
+export interface ServerConfigDraft {
+	model_path: string;
+	alias: string;
+	binary_path: string;
+	port: number;
+	gpu_layers: number;
+	parallel_slots: number;
+	ctx_size: number;
+	cache_type_k: string;
+	cache_type_v: string;
+	flash_attn: string;
+	estimated_vram_mb: number;
+}
+
+// --- Save Config ---
+export interface SaveConfigRequest {
+	path: string;
+	force: boolean;
+	servers: ServerConfigDraft[];
+	global_overrides?: {
+		bind_address?: string;
+		http_port?: number;
+	};
+}
+
+// --- Wizard navigation ---
+export type WizardStep = 'welcome' | 'hardware' | 'binary' | 'models' | 'configure' | 'review';
