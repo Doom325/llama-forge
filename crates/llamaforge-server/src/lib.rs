@@ -15,6 +15,7 @@
 //! `docs/component-designs/03_SERVER_MANAGER.md`.
 
 pub mod binary_scanner;
+pub mod build;
 pub(crate) mod error;
 pub mod hardware;
 pub(crate) mod health;
@@ -36,6 +37,10 @@ pub(crate) mod vram_estimate;
 
 pub use binary_scanner::{
     scan_binary, BinaryFoundFlag, BinaryScanError, BinaryScanRequest, BinaryScanResult,
+};
+pub use build::{
+    available_disk_gb, effective_jobs, run_build, BuildBackend, BuildCommands, BuildComplete,
+    BuildEvent, BuildFailed, BuildOutcome, BuildPhase, BuildRequest, PhaseTimeouts, MIN_DISK_GB,
 };
 pub use error::ServerManagerError;
 pub use hardware::{

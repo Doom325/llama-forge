@@ -16,7 +16,7 @@ tracing = { workspace = true }
 dashmap = { workspace = true }
 reqwest = { workspace = true }
 parking_lot = { workspace = true }
-nix = { workspace = true, features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process", "fs"] }
 tokio-util = { workspace = true }
 metrics = { workspace = true }
 chrono = { workspace = true }
