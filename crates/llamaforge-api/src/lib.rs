@@ -21,6 +21,7 @@
 
 pub mod adapters;
 pub mod dispatch;
+pub mod setup;
 pub mod transport;
 
 // Re-exports of the load-bearing public surface (PLAN.md PR3 task 3.3).
@@ -35,3 +36,5 @@ pub use dispatch::dispatcher::Dispatcher;
 pub use adapters::metrics_exporter::MetricsExporterAdapter;
 pub use adapters::queue::QueueSubmitterAdapter;
 pub use adapters::server_control::ServerControlAdapter;
+
+pub use setup::{setup_router, SetupState};
