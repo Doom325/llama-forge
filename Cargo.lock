@@ -1336,6 +1336,7 @@ dependencies = [
  "llamaforge-metrics",
  "llamaforge-server",
  "metrics",
+ "nix",
  "opentelemetry",
  "opentelemetry_sdk",
  "serde_json",
