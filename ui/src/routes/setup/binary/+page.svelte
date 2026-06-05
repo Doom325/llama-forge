@@ -96,7 +96,14 @@
 			// An event arrived → the connection is healthy; reset the
 			// consecutive-failure counter (design: 3 *consecutive* disconnects).
 			attempts = 0;
-			const input = toEventInput(name, JSON.parse(event.data));
+			// A malformed event must not break the stream — skip it and keep going.
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(event.data);
+			} catch {
+				return;
+			}
+			const input = toEventInput(name, parsed);
 			if (!input) return;
 			buildStatus = applyBuildEvent(buildStatus, id, input);
 			if (input.event === 'complete') {

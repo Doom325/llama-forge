@@ -3,6 +3,7 @@
 	// generated TOML, save it, validate-launch the servers, then poll /api/status
 	// until the orchestrator reports running. Owns all I/O for this step.
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import {
 		createPreviewConfigMutation,
 		createSetupSaveConfigMutation,
@@ -125,7 +126,7 @@
 		<CompletionScreen
 			state={completionState}
 			onretry={pollStatus}
-			ongotodashboard={() => goto('/')}
+			ongotodashboard={() => goto(`${base}/`)}
 		/>
 		{#if backupPath}
 			<p class="text-xs text-[var(--color-text-secondary)]">

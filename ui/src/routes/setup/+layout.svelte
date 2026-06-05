@@ -2,6 +2,7 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { goto, afterNavigate } from '$app/navigation';
+	import { base } from '$app/paths';
 	import { queryClient } from '$lib/api/queryClient';
 	import StepIndicator from '$lib/components/setup/StepIndicator.svelte';
 	import StepNavigation from '$lib/components/setup/StepNavigation.svelte';
@@ -31,7 +32,7 @@
 	};
 
 	function stepPath(step: WizardStep): string {
-		return step === 'welcome' ? '/setup' : `/setup/${step}`;
+		return step === 'welcome' ? `${base}/setup` : `${base}/setup/${step}`;
 	}
 
 	function stepFromPath(pathname: string): WizardStep {
@@ -43,8 +44,26 @@
 	const currentIndex = $derived(WIZARD_STEPS.indexOf(currentStep));
 	const configureIndex = WIZARD_STEPS.indexOf('configure');
 
+	// The step guards read server data via queryClient.getQueryData(), which is
+	// NOT a Svelte-reactive source — so re-evaluating them on store changes alone
+	// would miss query results landing. Bump a counter on every cache change and
+	// reference it in the cache-reading deriveds to keep them reactive.
+	let cacheVersion = $state(0);
+	$effect(() => {
+		// Bump ONLY on query-data state changes (fetch success / setQueryData),
+		// NOT on observer events — those fire on every re-render and would feed
+		// back into the bump, causing effect_update_depth_exceeded.
+		const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+			if (event.type === 'updated') cacheVersion += 1;
+		});
+		return unsubscribe;
+	});
+
 	// completedSteps is *derived* from the transition guards, never stored.
-	const done = $derived(completedSteps(queryClient, store));
+	const done = $derived.by(() => {
+		void cacheVersion;
+		return completedSteps(queryClient, store);
+	});
 
 	const indicatorSteps = $derived(
 		WIZARD_STEPS.map((step, index) => ({
@@ -57,7 +76,10 @@
 		}))
 	);
 
-	const canAdvance = $derived(STEP_TRANSITIONS[currentStep].canAdvance(queryClient, store));
+	const canAdvance = $derived.by(() => {
+		void cacheVersion;
+		return STEP_TRANSITIONS[currentStep].canAdvance(queryClient, store);
+	});
 
 	function navigateTo(index: number) {
 		const target = WIZARD_STEPS[index];
@@ -91,6 +113,10 @@
 		document.querySelector<HTMLElement>('main h1[tabindex="-1"]')?.focus();
 	});
 </script>
+
+<svelte:head>
+	<title>Setup — LlamaForge</title>
+</svelte:head>
 
 <div class="mx-auto max-w-3xl space-y-8 px-4 py-8">
 	<StepIndicator steps={indicatorSteps} onnavigate={navigateTo} />
