@@ -12,20 +12,25 @@
 //! `X-Setup-Session-Id` header is attached to each request's tracing span for
 //! correlation.
 
+mod build;
 mod config_assembly;
 mod handlers;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{extract::Request, Json, Router};
-use llamaforge_server::HardwareInfo;
+use llamaforge_server::{BuildCommands, HardwareInfo, PhaseTimeouts};
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tracing::Instrument;
+use uuid::Uuid;
 
 pub use config_assembly::{GlobalOverrides, SaveConfigRequest, ServerConfigDraft};
 
@@ -43,11 +48,47 @@ pub struct SetupState {
     hardware_cache: Arc<RwLock<Option<HardwareInfo>>>,
     /// Serializes `save-config` writes so concurrent saves can't interleave.
     save_lock: Arc<Mutex<()>>,
+    /// In-flight and finished build jobs, keyed by build id (Section 11.4).
+    builds: Arc<RwLock<HashMap<Uuid, Arc<build::BuildJob>>>>,
+    /// git/cmake programs used by builds (overridable for tests).
+    build_commands: BuildCommands,
+    /// Per-phase build timeouts (overridable for tests).
+    build_timeouts: PhaseTimeouts,
+    /// Directory for persisted build logs; `None` → the default XDG location.
+    build_log_dir: Option<PathBuf>,
+    /// SSE-disconnect grace before an abandoned build is killed; `None` → 2 min.
+    build_disconnect_grace: Option<Duration>,
+    /// Minimum free disk (GB) required to start a build; `None` → `MIN_DISK_GB`.
+    build_min_disk_gb: Option<u64>,
 }
 
 impl SetupState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Override the build toolchain + timeouts (test seam for mock git/cmake).
+    #[doc(hidden)]
+    pub fn with_build_config(mut self, commands: BuildCommands, timeouts: PhaseTimeouts) -> Self {
+        self.build_commands = commands;
+        self.build_timeouts = timeouts;
+        self
+    }
+
+    /// Override build log directory, disconnect grace, and min-disk threshold
+    /// (test seam — keeps logs out of the real XDG dir and lets tests exercise
+    /// the grace-kill and insufficient-disk paths).
+    #[doc(hidden)]
+    pub fn with_build_overrides(
+        mut self,
+        log_dir: PathBuf,
+        disconnect_grace: Duration,
+        min_disk_gb: u64,
+    ) -> Self {
+        self.build_log_dir = Some(log_dir);
+        self.build_disconnect_grace = Some(disconnect_grace);
+        self.build_min_disk_gb = Some(min_disk_gb);
+        self
     }
 }
 
@@ -64,6 +105,10 @@ pub fn setup_router(state: SetupState) -> Router {
         .route("/api/setup/preview-config", post(handlers::preview_config_handler))
         .route("/api/setup/save-config", post(handlers::save_config_handler))
         .route("/api/setup/validate-launch", post(handlers::validate_launch_handler))
+        .route("/api/setup/build", post(build::build_create_handler))
+        .route("/api/setup/build/{id}", get(build::build_status_handler))
+        .route("/api/setup/build/{id}", delete(build::build_cancel_handler))
+        .route("/api/setup/build/{id}/stream", get(build::build_stream_handler))
         .layer(axum::middleware::from_fn(crate::transport::middleware::csrf_middleware))
         .layer(axum::middleware::from_fn(session_span_middleware))
         .with_state(state)
