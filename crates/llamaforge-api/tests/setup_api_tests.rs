@@ -59,6 +59,22 @@ fn draft(model_path: &str, binary_path: &str, port: u16) -> Value {
     })
 }
 
+/// An ephemeral port that is free at call time (released immediately).
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+/// Create real model + binary files in `dir` so save/preview pre-validation
+/// (which checks the paths exist) passes. Returns (model_path, binary_path).
+fn real_paths(dir: &Path) -> (String, String) {
+    let model = dir.join("model.gguf");
+    let binary = dir.join("llama-server");
+    fs::write(&model, b"GGUF\x00").unwrap();
+    fs::write(&binary, b"#!/bin/sh\n").unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    (model.display().to_string(), binary.display().to_string())
+}
+
 // --- 5.14: hardware endpoint ----------------------------------------------
 
 #[tokio::test]
@@ -189,12 +205,13 @@ async fn validation_rejects_bad_input() {
 async fn preview_and_save_config_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("llamaforge.toml");
+    let (model, binary) = real_paths(dir.path());
     let app = setup_router(SetupState::new());
 
     let request = json!({
         "path": config_path,
         "force": false,
-        "servers": [draft("/models/m.gguf", "/usr/local/bin/llama-server", 8080)],
+        "servers": [draft(&model, &binary, free_port())],
     });
 
     // Preview returns TOML, writes nothing.
@@ -218,6 +235,7 @@ async fn preview_and_save_config_roundtrip() {
 #[tokio::test]
 async fn save_config_unwritable_path_is_forbidden() {
     let dir = tempfile::tempdir().unwrap();
+    let (model, binary) = real_paths(dir.path());
     let locked = dir.path().join("locked");
     fs::create_dir(&locked).unwrap();
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap(); // read+exec, no write
@@ -226,16 +244,42 @@ async fn save_config_unwritable_path_is_forbidden() {
     let request = json!({
         "path": locked.join("llamaforge.toml"),
         "force": false,
-        "servers": [draft("/models/m.gguf", "/usr/local/bin/llama-server", 8080)],
+        "servers": [draft(&model, &binary, free_port())],
     });
     let res = app.oneshot(post("/api/setup/save-config", &request, true)).await.unwrap();
 
     let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o755));
 
-    // Non-root: unwritable directory → 403. Root may bypass; tolerate that.
+    // Pre-validation passes (real files, free port); unwritable dir → 403.
+    // Root may bypass the permission; tolerate that.
     if res.status() != StatusCode::OK {
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
     }
+}
+
+// --- 5.19b: pre-validation failure → 422 with details ---------------------
+
+#[tokio::test]
+async fn save_config_pre_validation_returns_422_with_details() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("llamaforge.toml");
+    let app = setup_router(SetupState::new());
+
+    // Nonexistent binary + model paths → pre-validation collects both failures.
+    let request = json!({
+        "path": config_path,
+        "force": false,
+        "servers": [draft("/nope/model.gguf", "/nope/llama-server", free_port())],
+    });
+    let res = app.oneshot(post("/api/setup/save-config", &request, true)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = body_json(res).await;
+    assert_eq!(body["error"], "pre_validation_failed");
+    let details = body["details"].as_array().unwrap();
+    assert!(details.iter().any(|d| d["field"] == "model_path"));
+    assert!(details.iter().any(|d| d["field"] == "binary_path"));
+    assert!(!config_path.exists(), "must not write on pre-validation failure");
 }
 
 // --- 5.20: session correlation header is accepted --------------------------

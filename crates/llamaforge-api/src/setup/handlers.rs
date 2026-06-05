@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use std::net::TcpListener;
+
 use axum::extract::{Json, Query, State};
 use axum::response::{IntoResponse, Response};
-use llamaforge_core::config::AppConfig;
+use llamaforge_core::config::{AppConfig, ConfigLoadError, TomlFileConfigSource};
 use llamaforge_server::{
     detect_hardware, recommend, scan_binary, scan_models, BinaryScanRequest, ModelScanRequest,
     RecommendationRequest,
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::config_assembly::{assemble_config, render_toml, SaveConfigRequest, ServerConfigDraft};
-use super::{SetupError, SetupState, Versioned, SETUP_API_VERSION};
+use super::{SetupError, SetupState, ValidationDetail, Versioned, SETUP_API_VERSION};
 
 /// Query params for the hardware endpoint.
 #[derive(Debug, Default, Deserialize)]
@@ -102,6 +104,12 @@ pub(super) async fn preview_config_handler(
 ) -> Result<Versioned<PreviewResponse>, SetupError> {
     let existing = load_existing(Path::new(&request.path)).await;
     let config = assemble_config(existing, &request).map_err(SetupError::BadRequest)?;
+
+    let details = pre_validate(&config, &request).await;
+    if !details.is_empty() {
+        return Err(SetupError::PreValidation(details));
+    }
+
     let toml = render_toml(&config).map_err(SetupError::Internal)?;
     Ok(Versioned(PreviewResponse { toml }))
 }
@@ -125,9 +133,15 @@ pub(super) async fn save_config_handler(
     let path = PathBuf::from(&request.path);
     let existing = load_existing(&path).await;
     let config = assemble_config(existing, &request).map_err(SetupError::BadRequest)?;
-    let rendered = render_toml(&config).map_err(SetupError::Internal)?;
 
-    // Pre-validation: the rendered TOML must round-trip back to a valid config.
+    // Pre-validation (Section 13.5 Step 1): collect all failures and return 422.
+    let details = pre_validate(&config, &request).await;
+    if !details.is_empty() {
+        return Err(SetupError::PreValidation(details));
+    }
+
+    let rendered = render_toml(&config).map_err(SetupError::Internal)?;
+    // The rendered TOML must round-trip back to a valid config (internal invariant).
     toml::from_str::<AppConfig>(&rendered)
         .map_err(|e| SetupError::Internal(format!("config failed round-trip validation: {e}")))?;
 
@@ -146,18 +160,36 @@ pub(super) async fn save_config_handler(
     }
 
     // Atomic write via a temp sibling (also probes writability before backup).
+    // Any failure after the temp is written cleans it up so no orphan remains.
     let tmp = sibling(&path, "tmp");
     tokio::fs::write(&tmp, rendered.as_bytes()).await.map_err(map_write_error)?;
 
-    let backup_path = if replaced_existing { Some(backup_and_prune(&path).await?) } else { None };
+    let backup_path = match maybe_backup(replaced_existing, &path).await {
+        Ok(backup) => backup,
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(e);
+        }
+    };
 
-    tokio::fs::rename(&tmp, &path).await.map_err(map_write_error)?;
+    if let Err(e) = tokio::fs::rename(&tmp, &path).await.map_err(map_write_error) {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
+    }
 
     Ok(Versioned(SaveResponse {
         path: path.display().to_string(),
         replaced_existing,
         backup_path: backup_path.map(|p| p.display().to_string()),
     }))
+}
+
+async fn maybe_backup(replaced_existing: bool, path: &Path) -> Result<Option<PathBuf>, SetupError> {
+    if replaced_existing {
+        Ok(Some(backup_and_prune(path).await?))
+    } else {
+        Ok(None)
+    }
 }
 
 /// `POST /api/setup/validate-launch` — spawn the first server, wait for its
@@ -248,6 +280,63 @@ pub(super) async fn validate_launch_handler(
         ValidateResponse { success: false, message, stderr }
     };
     Ok(Versioned(response))
+}
+
+// ---------------------------------------------------------------------------
+// Pre-validation (Section 13.5 Step 1).
+// ---------------------------------------------------------------------------
+
+/// Run the three pre-validation checks over the assembled config, collecting
+/// **all** failures (not short-circuiting) into `details`:
+/// 1. each server's `binary_path`/`model_path` resolves to an existing file;
+/// 2. each server's port is bindable (not already in use);
+/// 3. the config passes the core load-time validation pipeline (unique ports,
+///    non-empty fields, `parallel_slots > 0` — design doc §11.6).
+async fn pre_validate(config: &AppConfig, request: &SaveConfigRequest) -> Vec<ValidationDetail> {
+    let mut details = Vec::new();
+
+    for server in &request.servers {
+        if !is_readable_file(&server.binary_path).await {
+            details.push(ValidationDetail {
+                field: "binary_path".to_string(),
+                error: format!("{} does not exist or is not a readable file", server.binary_path),
+            });
+        }
+        if !is_readable_file(&server.model_path).await {
+            details.push(ValidationDetail {
+                field: "model_path".to_string(),
+                error: format!("{} does not exist or is not a readable file", server.model_path),
+            });
+        }
+        if !is_port_available(server.port) {
+            details.push(ValidationDetail {
+                field: "port".to_string(),
+                error: format!("port {} is already in use", server.port),
+            });
+        }
+    }
+
+    // Reuse the core load-time validation so duplicate ports and other semantic
+    // rules can't slip through to `serve`. It mutates (fair-share normalization)
+    // and short-circuits, so validate a clone and surface its first error.
+    let mut probe = config.clone();
+    if let Err(ConfigLoadError::ValidationError { message }) =
+        TomlFileConfigSource::validate(&mut probe)
+    {
+        details.push(ValidationDetail { field: "config".to_string(), error: message });
+    }
+
+    details
+}
+
+/// Whether `path` exists and is a regular file we can stat.
+async fn is_readable_file(path: &str) -> bool {
+    tokio::fs::metadata(path).await.map(|m| m.is_file()).unwrap_or(false)
+}
+
+/// Whether `port` can be bound on loopback (released immediately).
+fn is_port_available(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
 // ---------------------------------------------------------------------------

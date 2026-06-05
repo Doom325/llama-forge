@@ -114,6 +114,13 @@ impl<T: Serialize> IntoResponse for Versioned<T> {
 // Errors.
 // ---------------------------------------------------------------------------
 
+/// One failed pre-validation check (08_SETUP_WIZARD.md Section 13.5 Step 1).
+#[derive(Debug, Clone, serde::Serialize)]
+pub(crate) struct ValidationDetail {
+    pub field: String,
+    pub error: String,
+}
+
 /// Setup endpoint error, rendered as a structured JSON body with the matching
 /// HTTP status (Section 11 input-validation contract).
 #[derive(Debug)]
@@ -124,6 +131,8 @@ pub(crate) enum SetupError {
     Forbidden(String),
     /// Conflict (e.g. config exists without `force`) → 409.
     Conflict(String),
+    /// Save/preview pre-validation failed → 422 (Section 13.5 Step 1).
+    PreValidation(Vec<ValidationDetail>),
     /// Unexpected server-side failure → 500.
     Internal(String),
 }
@@ -131,13 +140,28 @@ pub(crate) enum SetupError {
 impl IntoResponse for SetupError {
     fn into_response(self) -> Response {
         use axum::http::StatusCode;
-        let (status, code, message) = match self {
-            SetupError::BadRequest(m) => (StatusCode::BAD_REQUEST, "invalid_request", m),
-            SetupError::Forbidden(m) => (StatusCode::FORBIDDEN, "forbidden", m),
-            SetupError::Conflict(m) => (StatusCode::CONFLICT, "conflict", m),
-            SetupError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error", m),
+        let (status, mut body) = match self {
+            SetupError::BadRequest(m) => {
+                (StatusCode::BAD_REQUEST, json!({ "error": "invalid_request", "message": m }))
+            }
+            SetupError::Forbidden(m) => {
+                (StatusCode::FORBIDDEN, json!({ "error": "forbidden", "message": m }))
+            }
+            SetupError::Conflict(m) => {
+                (StatusCode::CONFLICT, json!({ "error": "conflict", "message": m }))
+            }
+            SetupError::PreValidation(details) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                json!({ "error": "pre_validation_failed", "details": details }),
+            ),
+            SetupError::Internal(m) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "error": "internal_error", "message": m }),
+            ),
         };
-        (status, Json(json!({ "version": SETUP_API_VERSION, "error": code, "message": message })))
-            .into_response()
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("version".to_string(), json!(SETUP_API_VERSION));
+        }
+        (status, Json(body)).into_response()
     }
 }
