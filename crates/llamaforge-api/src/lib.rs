@@ -28,7 +28,10 @@ pub mod transport;
 // These are the symbols `llamaforge::build::*` and `llamaforge-e2e`
 // import; surfacing them at the crate root is convenience, not policy.
 pub use transport::streaming::StreamingInferenceService;
-pub use transport::{start_servers, InferenceEngine, TransportDeps, TransportHandles};
+pub use transport::{
+    start_servers, start_servers_with_setup, InferenceEngine, SetupMount, TransportDeps,
+    TransportHandles,
+};
 
 pub use dispatch::client::ReqwestClientStore;
 pub use dispatch::dispatcher::Dispatcher;
