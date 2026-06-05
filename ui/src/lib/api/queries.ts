@@ -276,8 +276,7 @@ export function createBinaryScanMutation(sessionId: string) {
 				body: JSON.stringify({ directories }),
 				headers: setupHeaders(sessionId)
 			}),
-		onSuccess: (data: BinaryScanResult) =>
-			queryClient.setQueryData(['setup', 'scan-binary'], data)
+		onSuccess: (data: BinaryScanResult) => queryClient.setQueryData(['setup', 'scan-binary'], data)
 	}));
 }
 
@@ -289,8 +288,7 @@ export function createModelScanMutation(sessionId: string) {
 				body: JSON.stringify(request),
 				headers: setupHeaders(sessionId)
 			}),
-		onSuccess: (data: ModelScanResult) =>
-			queryClient.setQueryData(['setup', 'scan-models'], data)
+		onSuccess: (data: ModelScanResult) => queryClient.setQueryData(['setup', 'scan-models'], data)
 	}));
 }
 

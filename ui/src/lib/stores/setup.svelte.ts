@@ -9,6 +9,7 @@
  */
 
 import { getContext, setContext } from 'svelte';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { QueryClient } from '@tanstack/svelte-query';
 import type { BinaryScanResult, ServerConfigDraft, WizardStep } from '$lib/api/types';
 
@@ -24,9 +25,9 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
 
 export class SetupWizardStore {
 	/** Client-only model selections — not duplicated from any server response. */
-	selectedModelIds = $state<Set<string>>(new Set());
+	selectedModelIds = new SvelteSet<string>();
 	/** Per-model field overrides applied on top of the server recommendation. */
-	userOverrides = $state<Map<string, Partial<ServerConfigDraft>>>(new Map());
+	userOverrides = new SvelteMap<string, Partial<ServerConfigDraft>>();
 	/** Chosen config save path. */
 	savePath = $state<string>('');
 	/** Correlation id sent as `X-Setup-Session-Id` on every wizard API call. */
@@ -108,6 +109,8 @@ const STEP_QUERY_KEYS: Partial<Record<WizardStep, string[]>> = {
  * independently (Section 5.3). A step is complete iff its `canAdvance` holds.
  */
 export function completedSteps(qc: QueryClient, store: SetupWizardStore): Set<WizardStep> {
+	// Transient return value, not reactive state — a plain Set is correct here.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const done = new Set<WizardStep>();
 	for (const step of WIZARD_STEPS) {
 		if (STEP_TRANSITIONS[step].canAdvance(qc, store)) done.add(step);
@@ -133,6 +136,6 @@ export function invalidateDownstream(
 	// is re-entered, the per-model overrides built on the old recommendation are
 	// stale and must be dropped.
 	if (downstream.includes('configure')) {
-		store.userOverrides = new Map();
+		store.userOverrides.clear();
 	}
 }
