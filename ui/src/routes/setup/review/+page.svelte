@@ -72,12 +72,21 @@
 		preview.mutate({ path: effectivePath, force, servers });
 	});
 
+	// Set on unmount so an in-flight poll loop stops issuing /api/status GETs
+	// (and stops writing completionState) after the user navigates away.
+	let cancelled = false;
+	$effect(() => () => {
+		cancelled = true;
+	});
+
 	async function pollStatus() {
 		completionState = 'polling';
 		for (let i = 0; i < 5; i++) {
 			await new Promise((resolve) => setTimeout(resolve, 2000));
+			if (cancelled) return;
 			try {
 				const status = await fetchSetupStatus();
+				if (cancelled) return;
 				if (!status.setup_required) {
 					completionState = 'success';
 					return;
@@ -86,7 +95,7 @@
 				// transient — keep polling
 			}
 		}
-		completionState = 'timeout';
+		if (!cancelled) completionState = 'timeout';
 	}
 
 	async function saveAndLaunch() {
