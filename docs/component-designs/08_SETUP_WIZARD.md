@@ -1301,6 +1301,8 @@ The setup endpoints remain mounted in `Running` mode to support the reconfigure 
 
 The reconfigure flow does not change the mode to `Setup`. It operates entirely within `Running` mode -- the existing config remains active while the user configures new servers. The save-config endpoint in reconfigure mode merges new server entries into the existing config rather than replacing it (see Open Question #4 in Section 14).
 
+> **Known limitation (found during the PR14 first-run E2E; tracked follow-up).** `save-config` pre-validation runs `is_port_available` (a `TcpListener::bind`) over *every* server port in the request, with no exemption for ports already held by the **active** running config. So a running-mode reconfigure save that re-submits the active server(s) fails pre-validation with `422` — it reports the instance's own in-use ports as unavailable. This is latent in v1: the reconfigure flow is **not yet wired into the frontend** (no `X-Setup-Reconfigure` caller in `ui/src/**`), so it is unreachable from the UI. **Fix when the flow ships:** skip ports bound by the current active config (or validate only new/changed servers) rather than the full request set.
+
 ---
 
 ## 14. Open Questions
@@ -1326,7 +1328,7 @@ _All five resolved during implementation (Phase 1–4). Each was implemented as 
 
 `ui/src/lib/api/types.ts` (frontend, `frontend`/`main`) was audited against the backend response structs (`main`). They are in sync on the **flat** `Versioned<T>` envelope: every `/api/setup/*` response serializes as `{ "version": 1, ...fields }`, and the TS types model that inner shape directly.
 
-> **Doc discrepancy flagged, not code:** the "Appendix: New TypeScript Types" below still shows a *nested* `SetupApiResponse<T> { version, data }` envelope. That appendix is illustrative and **predates the implementation** — it does not match the shipped flat envelope. The **source of truth** for the contract is the backend structs plus the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12), each annotated `// pins ui types.ts: <Type>`. The appendix should be regenerated from those; left as-is here to avoid an unscoped doc rewrite in this PR.
+> **Doc correction:** the "Appendix: New TypeScript Types" below originally showed a *nested* `SetupApiResponse<T> { version, data }` envelope, which never matched the shipped flat envelope. The **envelope type has been corrected** to the flat `Versioned<T> = T & { version: 1 }`. The rest of that appendix still predates the implementation and should be regenerated wholesale — the **source of truth** for the contract is the backend structs plus the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12), each annotated `// pins ui types.ts: <Type>`. Full appendix regeneration is a tracked follow-up, out of scope for this PR.
 
 ---
 
@@ -1381,11 +1383,13 @@ _All five resolved during implementation (Phase 1–4). Each was implemented as 
 ```typescript
 // $lib/api/types.ts additions
 
-/** All /api/setup/* responses include this envelope. */
-export interface SetupApiResponse<T> {
-  version: 1;
-  data: T;
-}
+/**
+ * All /api/setup/* responses use a FLAT version envelope: `version` sits
+ * alongside the payload fields, NOT nested under `data`. (Corrected to match the
+ * shipped backend `Versioned<T>` — see §14a. The rest of this appendix predates
+ * implementation and should be regenerated from the PR12 contract tests.)
+ */
+export type Versioned<T> = T & { version: 1 };
 
 // --- Hardware Detection ---
 export interface GpuInfo {
