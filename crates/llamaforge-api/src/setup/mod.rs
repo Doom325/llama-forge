@@ -17,7 +17,9 @@ mod config_assembly;
 mod handlers;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -52,6 +54,12 @@ pub struct SetupState {
     build_commands: BuildCommands,
     /// Per-phase build timeouts (overridable for tests).
     build_timeouts: PhaseTimeouts,
+    /// Directory for persisted build logs; `None` → the default XDG location.
+    build_log_dir: Option<PathBuf>,
+    /// SSE-disconnect grace before an abandoned build is killed; `None` → 2 min.
+    build_disconnect_grace: Option<Duration>,
+    /// Minimum free disk (GB) required to start a build; `None` → `MIN_DISK_GB`.
+    build_min_disk_gb: Option<u64>,
 }
 
 impl SetupState {
@@ -64,6 +72,22 @@ impl SetupState {
     pub fn with_build_config(mut self, commands: BuildCommands, timeouts: PhaseTimeouts) -> Self {
         self.build_commands = commands;
         self.build_timeouts = timeouts;
+        self
+    }
+
+    /// Override build log directory, disconnect grace, and min-disk threshold
+    /// (test seam — keeps logs out of the real XDG dir and lets tests exercise
+    /// the grace-kill and insufficient-disk paths).
+    #[doc(hidden)]
+    pub fn with_build_overrides(
+        mut self,
+        log_dir: PathBuf,
+        disconnect_grace: Duration,
+        min_disk_gb: u64,
+    ) -> Self {
+        self.build_log_dir = Some(log_dir);
+        self.build_disconnect_grace = Some(disconnect_grace);
+        self.build_min_disk_gb = Some(min_disk_gb);
         self
     }
 }

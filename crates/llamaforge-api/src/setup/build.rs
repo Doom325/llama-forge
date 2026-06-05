@@ -7,8 +7,9 @@
 //! terminal event), `DELETE` cancels.
 
 use std::convert::Infallible;
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -22,7 +23,9 @@ use llamaforge_server::{
 };
 use serde::Serialize;
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -32,6 +35,10 @@ use super::{SetupError, SetupState, SETUP_API_VERSION};
 const STATUS_TAIL: usize = 20;
 /// Broadcast channel capacity (live SSE fan-out).
 const BROADCAST_CAPACITY: usize = 1024;
+/// Default SSE-disconnect grace before an abandoned build is killed (§11.4).
+const DEFAULT_DISCONNECT_GRACE: Duration = Duration::from_secs(120);
+/// Persisted build logs retained (newest-first); older ones are pruned.
+const MAX_BUILD_LOGS: usize = 5;
 
 /// Lifecycle status of a build job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -84,61 +91,98 @@ pub(super) async fn build_create_handler(
 ) -> Result<Response, SetupError> {
     // Disk-space gate (Section 11.4): refuse before opening a stream.
     let temp_base = std::env::temp_dir();
+    let min_disk_gb = state.build_min_disk_gb.unwrap_or(MIN_DISK_GB);
     if let Some(available_gb) = available_disk_gb(&temp_base) {
-        if available_gb < MIN_DISK_GB {
+        if available_gb < min_disk_gb {
             return Ok((
                 StatusCode::CONFLICT,
                 Json(json!({
                     "version": SETUP_API_VERSION,
                     "error": "insufficient_disk",
                     "available_gb": available_gb,
-                    "required_gb": MIN_DISK_GB,
+                    "required_gb": min_disk_gb,
                 })),
             )
                 .into_response());
         }
     }
 
-    // Idempotent: reuse a running build for the same backend.
-    {
-        let builds = state.builds.read().await;
-        for (id, job) in builds.iter() {
-            if job.backend == request.backend && job.state.read().await.status == JobStatus::Running
-            {
-                return Ok(accepted(*id));
-            }
-        }
-    }
-
     let id = Uuid::new_v4();
     let temp_dir = temp_base.join(format!("llamaforge-build-{id}"));
-    tokio::fs::create_dir_all(&temp_dir)
-        .await
-        .map_err(|e| SetupError::Internal(format!("cannot create build dir: {e}")))?;
-
     let (events, _) = broadcast::channel(BROADCAST_CAPACITY);
     let job = Arc::new(BuildJob {
         backend: request.backend,
         state: RwLock::new(JobState::new()),
         events,
         cancel: CancellationToken::new(),
-        temp_dir,
+        temp_dir: temp_dir.clone(),
     });
-    state.builds.write().await.insert(id, job.clone());
+
+    // Idempotency: scan for a running same-backend build and insert atomically
+    // under one write lock so two concurrent POSTs cannot both create a build.
+    let existing = {
+        let mut builds = state.builds.write().await;
+        let mut found = None;
+        for (eid, ejob) in builds.iter() {
+            if ejob.backend == request.backend
+                && ejob.state.read().await.status == JobStatus::Running
+            {
+                found = Some(*eid);
+                break;
+            }
+        }
+        if found.is_none() {
+            builds.insert(id, job.clone());
+        }
+        found
+    };
+    if let Some(existing_id) = existing {
+        return Ok(accepted(existing_id));
+    }
+
+    if let Err(e) = tokio::fs::create_dir_all(&temp_dir).await {
+        state.builds.write().await.remove(&id);
+        return Err(SetupError::Internal(format!("cannot create build dir: {e}")));
+    }
 
     spawn_build(job, request, state.clone());
     Ok(accepted(id))
 }
 
-/// Spawn the background task that runs the build and forwards its events into
-/// the job's state + broadcast channel, cleaning up the temp dir at the end.
+/// Spawn the background task that runs the build, persists its logs, forwards
+/// events into the job state + broadcast channel, watches for SSE-disconnect
+/// abandonment, and cleans up the temp dir at the end.
 fn spawn_build(job: Arc<BuildJob>, request: BuildRequest, state: SetupState) {
-    tokio::spawn(async move {
-        let (tx, mut rx) = mpsc::channel::<BuildEvent>(256);
+    let log_dir = state.build_log_dir.clone().unwrap_or_else(default_build_log_dir);
+    let grace = state.build_disconnect_grace.unwrap_or(DEFAULT_DISCONNECT_GRACE);
 
+    tokio::spawn(async move {
+        // Build logs are always persisted (§11.7), even at RUST_LOG=warn.
+        let log_path = prepare_log_file(&log_dir).await;
+        let mut writer = match &log_path {
+            Some(path) => tokio::fs::File::create(path).await.ok(),
+            None => None,
+        };
+
+        let (tx, mut rx) = mpsc::channel::<BuildEvent>(256);
         let forward_job = job.clone();
+        let log_path_str = log_path.as_ref().map(|p| p.to_string_lossy().into_owned());
         let forwarder = tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
+            while let Some(mut event) = rx.recv().await {
+                // Persist log lines and stamp the terminal events with log_path.
+                match &mut event {
+                    BuildEvent::Log { lines } => {
+                        if let Some(file) = writer.as_mut() {
+                            for line in lines.iter() {
+                                let _ = file.write_all(line.as_bytes()).await;
+                                let _ = file.write_all(b"\n").await;
+                            }
+                        }
+                    }
+                    BuildEvent::Complete(complete) => complete.log_path = log_path_str.clone(),
+                    BuildEvent::Failed(failed) => failed.log_path = log_path_str.clone(),
+                    _ => {}
+                }
                 // Hold the write lock across state-update + broadcast so a
                 // reconnecting stream (which snapshots the backlog under the
                 // read lock before subscribing) never loses or duplicates an
@@ -147,7 +191,12 @@ fn spawn_build(job: Arc<BuildJob>, request: BuildRequest, state: SetupState) {
                 apply_event(&mut s, &event);
                 let _ = forward_job.events.send(event);
             }
+            if let Some(file) = writer.as_mut() {
+                let _ = file.flush().await;
+            }
         });
+
+        let monitor = spawn_disconnect_monitor(job.clone(), grace);
 
         let outcome = run_build(
             &request,
@@ -159,6 +208,7 @@ fn spawn_build(job: Arc<BuildJob>, request: BuildRequest, state: SetupState) {
         )
         .await;
         let _ = forwarder.await;
+        monitor.abort();
 
         // Finalize status (the terminal event already set Complete/Failed; a
         // cancellation produces no terminal event, so record it here).
@@ -169,6 +219,39 @@ fn spawn_build(job: Arc<BuildJob>, request: BuildRequest, state: SetupState) {
         // Temp dir is cleaned up on every terminal path (success/failure/cancel).
         let _ = tokio::fs::remove_dir_all(&job.temp_dir).await;
     });
+}
+
+/// Watch SSE subscriber count; once a client has connected and then all
+/// disconnect, cancel the build after `grace` unless someone reconnects
+/// (§11.4 — abandoned builds must not run unwatched).
+fn spawn_disconnect_monitor(job: Arc<BuildJob>, grace: Duration) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let poll = (grace / 4).clamp(Duration::from_millis(50), Duration::from_secs(5));
+        let mut ever_connected = false;
+        let mut deadline: Option<Instant> = None;
+        loop {
+            tokio::select! {
+                _ = job.cancel.cancelled() => break,
+                _ = tokio::time::sleep(poll) => {}
+            }
+            if job.state.read().await.status != JobStatus::Running {
+                break;
+            }
+            if job.events.receiver_count() > 0 {
+                ever_connected = true;
+                deadline = None;
+            } else if ever_connected {
+                match deadline {
+                    None => deadline = Some(Instant::now() + grace),
+                    Some(at) if Instant::now() >= at => {
+                        job.cancel.cancel();
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+    })
 }
 
 /// Fold one event into the job state.
@@ -297,4 +380,49 @@ async fn lookup(state: &SetupState, id: Uuid) -> Result<Arc<BuildJob>, SetupErro
 fn accepted(id: Uuid) -> Response {
     (StatusCode::ACCEPTED, Json(json!({ "version": SETUP_API_VERSION, "build_id": id })))
         .into_response()
+}
+
+/// Default persisted-log directory: `$XDG_DATA_HOME/llamaforge/build-logs`
+/// (falling back to `~/.local/share`, then the temp dir).
+fn default_build_log_dir() -> PathBuf {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("llamaforge").join("build-logs")
+}
+
+/// Ensure the log directory exists, prune old logs, and return the path for
+/// this build's log file. `None` if the directory cannot be created (logging
+/// is best-effort and never fails the build).
+async fn prepare_log_file(log_dir: &FsPath) -> Option<PathBuf> {
+    if tokio::fs::create_dir_all(log_dir).await.is_err() {
+        return None;
+    }
+    prune_build_logs(log_dir).await;
+    let stamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S");
+    Some(log_dir.join(format!("build-{stamp}.log")))
+}
+
+/// Keep only the newest `MAX_BUILD_LOGS - 1` `build-*.log` files so adding this
+/// build's log stays within the retention cap.
+async fn prune_build_logs(log_dir: &FsPath) {
+    let Ok(mut entries) = tokio::fs::read_dir(log_dir).await else {
+        return;
+    };
+    let mut logs: Vec<PathBuf> = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("build-") && name.ends_with(".log") {
+            logs.push(entry.path());
+        }
+    }
+    logs.sort(); // timestamped names sort oldest-first
+    let keep = MAX_BUILD_LOGS.saturating_sub(1);
+    if logs.len() > keep {
+        for old in &logs[..logs.len() - keep] {
+            let _ = tokio::fs::remove_file(old).await;
+        }
+    }
 }
