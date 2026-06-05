@@ -14,6 +14,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use llamaforge_api::{setup_router, SetupState};
 use serde_json::{json, Value};
+use serial_test::serial;
 use tower::ServiceExt;
 
 const CSRF: (&str, &str) = ("x-llamaforge-request", "1");
@@ -202,6 +203,7 @@ async fn validation_rejects_bad_input() {
 // --- 5.19: preview-config + save-config ------------------------------------
 
 #[tokio::test]
+#[serial]
 async fn preview_and_save_config_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("llamaforge.toml");
@@ -233,6 +235,7 @@ async fn preview_and_save_config_roundtrip() {
 }
 
 #[tokio::test]
+#[serial]
 async fn save_config_unwritable_path_is_forbidden() {
     let dir = tempfile::tempdir().unwrap();
     let (model, binary) = real_paths(dir.path());
@@ -260,6 +263,7 @@ async fn save_config_unwritable_path_is_forbidden() {
 // --- 5.19b: pre-validation failure → 422 with details ---------------------
 
 #[tokio::test]
+#[serial]
 async fn save_config_pre_validation_returns_422_with_details() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("llamaforge.toml");
@@ -295,4 +299,57 @@ async fn session_id_header_is_accepted() {
         .unwrap();
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+// --- #273: reconfigure exempts the active config's own ports ----------------
+
+#[tokio::test]
+#[serial]
+async fn reconfigure_save_exempts_active_config_ports() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("llamaforge.toml");
+    let (model, binary) = real_paths(dir.path());
+    let port = free_port();
+    let app = setup_router(SetupState::new());
+
+    let request = json!({
+        "path": config_path,
+        "force": true,
+        "servers": [draft(&model, &binary, port)],
+    });
+
+    // First save while the port is free → writes the active config.
+    let res = app.clone().oneshot(post("/api/setup/save-config", &request, true)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Hold the port the way the running server would, so is_port_available == false.
+    let _held = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+
+    // Re-saving the same active server must NOT 422 on its own in-use port (#273).
+    let res = app.oneshot(post("/api/setup/save-config", &request, true)).await.unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "a port held by the active config must be exempt from the availability probe"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn save_config_still_rejects_in_use_port_for_a_new_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("llamaforge.toml");
+    let (model, binary) = real_paths(dir.path());
+    // Hold the listener for the whole test (rather than free_port()'s bind-then-
+    // release) so the port is *continuously* taken — no TOCTOU window for another
+    // test/process to grab the just-freed ephemeral port. No existing config on
+    // disk → the port is genuinely unavailable → 422.
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port();
+    let app = setup_router(SetupState::new());
+
+    let request =
+        json!({ "path": config_path, "force": false, "servers": [draft(&model, &binary, port)] });
+    let res = app.oneshot(post("/api/setup/save-config", &request, true)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
