@@ -1305,15 +1305,28 @@ The reconfigure flow does not change the mode to `Setup`. It operates entirely w
 
 ## 14. Open Questions
 
+_All five resolved during implementation (Phase 1–4). Each was implemented as the original recommendation except #2 and #5, which shipped a narrower v1 behavior — noted inline._
+
 1. **GGUF header parser timeline.** The `sync_parse` function in `vram_estimate.rs` is stubbed. Model scanning currently infers metadata from filenames. Should we implement the real GGUF KV header parser as part of this feature, or ship with filename heuristics first? (Recommendation: filename heuristics for v1, real parser as fast-follow.)
+   - **Resolved (PR2) as recommended:** filename heuristics shipped (`model_scanner.rs::quantization_hint`); the real GGUF KV-header parser remains a fast-follow. The module header documents the deferral.
 
 2. **Build directory cleanup.** After a successful build, should the cloned llama.cpp source be deleted, or kept for future rebuilds? Keeping it allows `git pull && rebuild` for updates; deleting it saves disk space. (Recommendation: keep it in `$XDG_DATA_HOME/llamaforge/llama.cpp/`, with a "Clean up build files" option in the wizard completion screen.)
+   - **Resolved (PR6) — narrower than recommended:** v1 builds in a temp directory that is removed after the binary is copied to `install_dir` (favoring disk hygiene; see §11.5). Preserving the source for `git pull && rebuild` is a tracked future enhancement.
 
 3. **Multi-GPU support.** The recommendation engine needs to handle multi-GPU systems (e.g., 2× RTX 3090). Should it recommend splitting models across GPUs, or assign one model per GPU? (Recommendation: one model per GPU for v1 — multi-GPU tensor parallelism is a llama.cpp-level feature that's complex to configure.)
+   - **Resolved (PR4) as recommended:** the recommendation engine assigns one model per GPU for v1; tensor-parallel split is out of scope.
 
 4. **Existing config preservation.** In "reconfigure" mode (Flow 4), should the wizard merge new servers into the existing config, or replace the entire config? (Recommendation: merge — add new `[servers.*]` entries, preserve existing global settings and priority rules.)
+   - **Resolved (PR5/PR7) as recommended:** reconfigure merges new `[servers.*]` entries while preserving global settings + priority rules; it stays in `Running` mode (§13.8).
 
 5. **Build prerequisites check.** Before attempting the build, should the wizard verify that `git`, `cmake`, and a C++ compiler are installed? (Recommendation: yes — check prerequisites first and show a clear "Install these first" message with platform-specific instructions rather than letting cmake fail with cryptic errors.)
+   - **Resolved (PR6) — narrower than recommended:** the build uses injectable `git`/`cmake` paths and surfaces a missing-tool spawn failure as a `failed` build event with the underlying error. A dedicated pre-flight prerequisites check with platform-specific install instructions is a tracked follow-up.
+
+### 14a. Cross-branch type-sync audit (PR14, task 14.8)
+
+`ui/src/lib/api/types.ts` (frontend, `frontend`/`main`) was audited against the backend response structs (`main`). They are in sync on the **flat** `Versioned<T>` envelope: every `/api/setup/*` response serializes as `{ "version": 1, ...fields }`, and the TS types model that inner shape directly.
+
+> **Doc discrepancy flagged, not code:** the "Appendix: New TypeScript Types" below still shows a *nested* `SetupApiResponse<T> { version, data }` envelope. That appendix is illustrative and **predates the implementation** — it does not match the shipped flat envelope. The **source of truth** for the contract is the backend structs plus the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12), each annotated `// pins ui types.ts: <Type>`. The appendix should be regenerated from those; left as-is here to avoid an unscoped doc rewrite in this PR.
 
 ---
 
@@ -1355,6 +1368,11 @@ The reconfigure flow does not change the mode to `Setup`. It operates entirely w
 | Step navigation | Linear with back-navigation + completed-step click | Simple mental model; prerequisite data always available | 2026-06-03 |
 | TOML preview rendering | `renderMarkdown()` with code block | No `{@html}`; consistent with existing security convention | 2026-06-03 |
 | Build log streaming | SSE via `EventSource` | Same pattern as main UI's `LiveDataStore`; native browser API | 2026-06-03 |
+| Setup API envelope | **Flat** `Versioned<T>` (`{version, ...fields}`) | Matches the existing typed-response convention; simpler TS types than a nested `{version, data}` wrapper | 2026-06-05 |
+| Setup→running transition | Hot-reload via `ArcSwap` (`ConfigHandle::reload`), no process restart | The wizard writes the config and the running process picks it up in place (§13.5); a restart would drop the HTTP/gRPC listeners mid-setup | 2026-06-05 |
+| Build cancellation | Spawn the build in its own process group; cancel/SIGINT kills the whole tree | Prevents orphaned `git`/`cmake`/compiler children on Ctrl-C (exit 130) | 2026-06-05 |
+| Contract typing (backend↔frontend) | Shape-pinning contract tests annotated `// pins ui types.ts: <Type>`, not `ts-rs` | Pins field names/types/nesting without a build-time codegen dependency; the setup types are small and stable | 2026-06-05 |
+| Wizard step guards | Derive `canAdvance` from the TanStack cache via a `cacheVersion` counter bumped on `type==='updated'` events | `getQueryData()` is not a Svelte-reactive source; subscribing to all cache events instead loops (`effect_update_depth_exceeded`) | 2026-06-05 |
 
 ---
 
