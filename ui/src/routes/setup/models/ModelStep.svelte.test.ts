@@ -31,6 +31,17 @@ describe('ModelStep', () => {
 		expect(screen.queryByText('a.gguf')).toBeNull();
 	});
 
+	it('scans non-empty default directories on entry (never empty → no 400)', () => {
+		const mutate = vi.fn();
+		mocks.scan = { isPending: true, mutate };
+		render(ModelStep);
+		expect(mutate).toHaveBeenCalledOnce();
+		const [arg] = mutate.mock.calls[0]!;
+		const req = arg as { source: string; directories: string[] };
+		expect(req.source).toBe('local');
+		expect(req.directories.length).toBeGreaterThan(0);
+	});
+
 	it('shows the model table + a truncation warning', () => {
 		mocks.scan = {
 			isPending: false,

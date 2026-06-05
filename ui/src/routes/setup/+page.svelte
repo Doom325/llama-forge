@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 
 	function start() {
-		goto('/setup/hardware');
+		goto(`${base}/setup/hardware`);
 	}
 </script>
 
