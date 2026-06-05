@@ -15,8 +15,9 @@
 	// Common model locations seeded on entry. The backend rejects an *empty*
 	// directory list (NoDirectories → 400) but silently skips ones that don't
 	// exist, so a non-empty default scans cleanly (200, possibly empty) instead
-	// of erroring before the user has added anything.
-	const DEFAULT_SCAN_DIRS = ['~/.cache/huggingface', '~/models', './models'];
+	// of erroring before the user has added anything. No `~` entries — the backend
+	// does not expand the home shorthand, so they would never match.
+	const DEFAULT_SCAN_DIRS = ['./models'];
 
 	let directories = $state<string[]>([...DEFAULT_SCAN_DIRS]);
 	let dirInput = $state('');

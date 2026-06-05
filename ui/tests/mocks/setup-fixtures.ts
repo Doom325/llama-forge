@@ -85,12 +85,22 @@ export const validateResult = {
  * Register `/api/setup/*` + `/api/status` route handlers driving the happy path:
  * binary found, one model, a valid recommendation, save + validate succeed, and
  * status already reports running so the completion screen resolves.
+ *
+ * `opts.hardwareError` makes `/api/setup/hardware` return 500 to exercise the
+ * detection-failure → manual-entry fallback.
  */
-export async function mockSetupApi(page: Page): Promise<void> {
+export async function mockSetupApi(
+	page: Page,
+	opts: { hardwareError?: boolean } = {}
+): Promise<void> {
 	await page.route('**/api/status', (route) =>
 		json(route, { setup_required: false, version: '0.1.0' })
 	);
-	await page.route('**/api/setup/hardware', (route) => json(route, hardware));
+	await page.route('**/api/setup/hardware', (route) =>
+		opts.hardwareError
+			? json(route, { error: 'detect_failed', message: 'no probe available' }, 500)
+			: json(route, hardware)
+	);
 	await page.route('**/api/setup/scan-binary', (route) => json(route, binaryFound));
 	await page.route('**/api/setup/scan-models', (route) => json(route, models));
 	await page.route('**/api/setup/recommend', (route) => json(route, recommendation));

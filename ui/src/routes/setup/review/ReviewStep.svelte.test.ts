@@ -113,4 +113,30 @@ describe('ReviewStep', () => {
 		await tick();
 		expect(screen.getByRole('button', { name: 'Go to Dashboard anyway' })).toBeInTheDocument();
 	});
+
+	// 13.19 — standalone save fails, the error is shown and the user stays on the
+	// review step, then a retry succeeds through to completion.
+	it('save failure → retry → success', async () => {
+		mocks.saveMutateAsync = vi
+			.fn()
+			.mockRejectedValueOnce(new Error('permission denied'))
+			.mockResolvedValue({ path: '/x', replaced_existing: false });
+		vi.useFakeTimers();
+		render(ReviewStep);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save & Launch' }));
+		await vi.advanceTimersByTimeAsync(0);
+		await tick();
+		// Error surfaced; still on the review step (Save & Launch present, no poll).
+		expect(screen.getByText(/permission denied/)).toBeInTheDocument();
+		expect(mocks.validateMutateAsync).not.toHaveBeenCalled();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save & Launch' }));
+		await vi.advanceTimersByTimeAsync(0);
+		await tick();
+		await vi.advanceTimersByTimeAsync(2000);
+		await tick();
+		expect(screen.getByRole('button', { name: 'Go to Dashboard' })).toBeInTheDocument();
+		vi.useRealTimers();
+	});
 });

@@ -168,4 +168,46 @@ describe('BinaryStep', () => {
 		expect(text).toContain('LINE-1');
 		expect(text).toContain('LINE-2');
 	});
+
+	// 13.8 — build fails, user retries, the second attempt succeeds.
+	it('build failure → retry → success shows the built binary', async () => {
+		await startBuildStream();
+		MockEventSource.instances
+			.at(-1)!
+			.emit('failed', { phase: 'building', error: 'compile error', last_lines: ['boom'] });
+		await tick();
+		expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+		await tick();
+		await Promise.resolve();
+		await tick();
+		MockEventSource.instances.at(-1)!.emit('complete', {
+			binary_path: '/opt/llama-server',
+			duration_secs: 12,
+			replaced_existing: false
+		});
+		await tick();
+
+		expect(screen.getByText('Build complete')).toBeInTheDocument();
+		expect(screen.getByText('/opt/llama-server')).toBeInTheDocument();
+	});
+
+	// 13.9 — build fails, user skips to point at an existing binary directory.
+	it('build failure → skip → manual path search', async () => {
+		await startBuildStream();
+		MockEventSource.instances
+			.at(-1)!
+			.emit('failed', { phase: 'cloning', error: 'network', last_lines: [] });
+		await tick();
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+		await tick();
+
+		await fireEvent.input(screen.getByPlaceholderText('/opt/llama.cpp/build/bin'), {
+			target: { value: '/custom/bin' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+		expect(mocks.scan.mutate).toHaveBeenCalledWith(['/custom/bin']);
+	});
 });
