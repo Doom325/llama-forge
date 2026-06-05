@@ -24,7 +24,13 @@ impl TomlFileConfigSource {
         Self { paths }
     }
 
-    fn validate(config: &mut AppConfig) -> Result<(), ConfigLoadError> {
+    /// Semantic validation applied at config load time — unique server ports,
+    /// non-empty binary/model paths, `parallel_slots > 0`, unique device GPU
+    /// ids, and `queue_default_timeout_secs > 0` — plus fair-share weight
+    /// normalization. Exposed (beyond the load path) so the Setup Wizard's
+    /// save/preview pre-validation runs the same pipeline (design doc §11.6)
+    /// rather than re-implementing the rules.
+    pub fn validate(config: &mut AppConfig) -> Result<(), ConfigLoadError> {
         let mut ports = HashSet::new();
 
         // 1. Fair share weights normalization (Soft validation)

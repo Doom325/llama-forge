@@ -46,6 +46,7 @@ chrono.workspace = true
 # direct deps despite the hexagonal port-trait convention because the
 # composition root needs access to their concrete reader/store types,
 # and the merged api crate is now a composition-root neighbour itself.
+toml.workspace = true
 llamaforge-core.workspace = true
 llamaforge-metrics.workspace = true
 llamaforge-server.workspace = true
