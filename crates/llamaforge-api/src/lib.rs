@@ -38,3 +38,10 @@ pub use adapters::queue::QueueSubmitterAdapter;
 pub use adapters::server_control::ServerControlAdapter;
 
 pub use setup::{setup_router, SetupState};
+
+/// Router for the standalone setup wizard (08_SETUP_WIZARD.md Section 12): the
+/// embedded web UI plus the `/api/setup/*` surface, with no inference, gRPC, or
+/// config handle. Used by `llamaforge init --interactive`.
+pub fn wizard_router(state: SetupState) -> axum::Router {
+    transport::ui::ui_router().merge(setup_router(state))
+}

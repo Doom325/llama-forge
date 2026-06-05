@@ -47,6 +47,15 @@ enum Commands {
         /// Overwrite existing files
         #[arg(long)]
         force: bool,
+
+        /// Launch the browser-based setup wizard instead of writing a template
+        /// config (08_SETUP_WIZARD.md Section 12).
+        #[arg(long)]
+        interactive: bool,
+
+        /// Idle timeout for the interactive wizard before it exits (e.g. 30m).
+        #[arg(long, default_value = "30m")]
+        timeout: humantime::Duration,
     },
     /// Validate configuration without starting the server
     Validate {
@@ -231,7 +240,11 @@ fn main() {
     let cli_priority_rules = cli.priority_rules.clone();
 
     match cli.command {
-        Some(Commands::Init { out, rules, state_dir, force }) => {
+        Some(Commands::Init { out, rules, state_dir, force, interactive, timeout }) => {
+            if interactive {
+                // Browser-based setup wizard (Section 12); never returns.
+                init::run_interactive(timeout.into());
+            }
             let out_path =
                 out.unwrap_or_else(|| xdg_config_home().join("llamaforge").join("llamaforge.toml"));
             let rules_path =

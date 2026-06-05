@@ -60,6 +60,9 @@ pub struct SetupState {
     build_disconnect_grace: Option<Duration>,
     /// Minimum free disk (GB) required to start a build; `None` → `MIN_DISK_GB`.
     build_min_disk_gb: Option<u64>,
+    /// Fired by `validate-launch` on success so the standalone wizard server can
+    /// shut down after a completed setup (Section 12.2). `None` outside it.
+    completion: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl SetupState {
@@ -89,6 +92,20 @@ impl SetupState {
         self.build_disconnect_grace = Some(disconnect_grace);
         self.build_min_disk_gb = Some(min_disk_gb);
         self
+    }
+
+    /// Set the token fired when a setup completes (`validate-launch` succeeds),
+    /// so the standalone wizard server can shut itself down (Section 12.2).
+    pub fn with_completion(mut self, token: tokio_util::sync::CancellationToken) -> Self {
+        self.completion = Some(token);
+        self
+    }
+
+    /// Signal that setup completed successfully.
+    pub(crate) fn signal_complete(&self) {
+        if let Some(token) = &self.completion {
+            token.cancel();
+        }
     }
 }
 

@@ -211,6 +211,7 @@ pub(super) struct ValidateResponse {
 const VALIDATE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) async fn validate_launch_handler(
+    State(state): State<SetupState>,
     Json(request): Json<ValidateLaunchRequest>,
 ) -> Result<Versioned<ValidateResponse>, SetupError> {
     let server = request
@@ -266,6 +267,8 @@ pub(super) async fn validate_launch_handler(
         .filter(|s| !s.trim().is_empty());
 
     let response = if healthy {
+        // Setup is complete — let a standalone wizard server shut itself down.
+        state.signal_complete();
         ValidateResponse {
             success: true,
             message: "server started and passed its health check".to_string(),
