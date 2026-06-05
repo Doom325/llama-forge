@@ -22,6 +22,7 @@ pub(crate) mod manager;
 pub mod model_scanner;
 pub(crate) mod observability;
 pub(crate) mod process;
+pub mod recommendation;
 pub(crate) mod state;
 pub(crate) mod task;
 pub(crate) mod telemetry;
@@ -44,6 +45,10 @@ pub use model_scanner::{
     ModelScanResult, ModelSource, TruncationReason,
 };
 pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
+pub use recommendation::{
+    recommend, ConfigRecommendation, ModelInput, RecommendationRequest, RecommendationResult,
+    ServerRecommendation,
+};
 pub use state::ServerStateSnapshot;
 pub use telemetry::{create_telemetry, GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
 pub use types::{
