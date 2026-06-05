@@ -14,6 +14,7 @@
 //! (`llama-server` Control Surfaces). Component spec:
 //! `docs/component-designs/03_SERVER_MANAGER.md`.
 
+pub mod binary_scanner;
 pub(crate) mod error;
 pub mod hardware;
 pub(crate) mod health;
@@ -33,6 +34,9 @@ pub mod telemetry_nvml;
 pub(crate) mod types;
 pub(crate) mod vram_estimate;
 
+pub use binary_scanner::{
+    scan_binary, BinaryFoundFlag, BinaryScanError, BinaryScanRequest, BinaryScanResult,
+};
 pub use error::ServerManagerError;
 pub use hardware::{
     detect_hardware, detect_hardware_with, CommandRunner, CpuInfo, GpuInfo, HardwareInfo,
