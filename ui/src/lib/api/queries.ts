@@ -15,7 +15,8 @@ import type {
 	ModelScanResult,
 	RecommendationRequest,
 	RecommendationResult,
-	SaveConfigRequest
+	SaveConfigRequest,
+	SetupBackend
 } from './types';
 
 // Queries
@@ -331,6 +332,27 @@ export function createSetupSaveConfigMutation(sessionId: string) {
 	return createMutation(() => ({
 		mutationFn: (request: SaveConfigRequest) =>
 			apiFetch<SaveConfigResponse>('/api/setup/save-config', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface BuildCreateRequest {
+	backend: SetupBackend;
+	install_dir: string;
+	jobs: number;
+}
+
+export interface BuildCreateResponse {
+	build_id: string;
+}
+
+export function createBuildMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: BuildCreateRequest) =>
+			apiFetch<BuildCreateResponse>('/api/setup/build', {
 				method: 'POST',
 				body: JSON.stringify(request),
 				headers: setupHeaders(sessionId)
