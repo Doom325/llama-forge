@@ -15,6 +15,7 @@
 //! `docs/component-designs/03_SERVER_MANAGER.md`.
 
 pub(crate) mod error;
+pub mod hardware;
 pub(crate) mod health;
 pub(crate) mod instrumented;
 pub(crate) mod manager;
@@ -31,6 +32,10 @@ pub(crate) mod types;
 pub(crate) mod vram_estimate;
 
 pub use error::ServerManagerError;
+pub use hardware::{
+    detect_hardware, detect_hardware_with, CommandRunner, CpuInfo, GpuInfo, HardwareInfo,
+    HardwareProbeResult, HardwareWarning, ProbeError, RecommendedBackend, SystemCommandRunner,
+};
 pub use instrumented::InstrumentedServerManager;
 pub use manager::ServerManager;
 pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
