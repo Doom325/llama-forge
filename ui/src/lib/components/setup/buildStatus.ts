@@ -16,12 +16,18 @@ export type BuildEventInput =
 				duration_secs: number;
 				replaced_existing: boolean;
 				backup_path?: string | null;
-				log_path?: string;
+				// Input is permissive (parsed JSON); the reducer omits it when absent.
+				log_path?: string | undefined;
 			};
 	  }
 	| {
 			event: 'failed';
-			data: { phase: BuildPhase; error: string; last_lines: string[]; log_path?: string };
+			data: {
+				phase: BuildPhase;
+				error: string;
+				last_lines: string[];
+				log_path?: string | undefined;
+			};
 	  };
 
 function asRunning(
