@@ -12,12 +12,13 @@ pub(crate) mod http;
 pub(crate) mod management;
 pub(crate) mod middleware;
 pub(crate) mod openai;
+pub(crate) mod status;
 pub mod streaming;
 pub(crate) mod ui;
 
 pub use error::{AnthropicProtocolError, ApiError, TransportError};
 pub use grpc::start_grpc_server;
-pub use http::{start_http_server, HttpAppState};
+pub use http::{start_http_server, HttpAppState, SetupMount};
 pub use llamaforge_core::types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
@@ -98,6 +99,22 @@ where
     RMS: RequestMetricsStore + Send + Sync + 'static,
     SM: StoreMaintenance + Send + Sync + 'static,
 {
+    start_servers_with_setup(deps, None).await
+}
+
+/// Like [`start_servers`] but mounts an optional first-run wizard integration
+/// (the `/api/setup/*` router + mode guard) onto the HTTP app. Used by
+/// `llamaforge serve` when it boots into setup mode (08_SETUP_WIZARD.md
+/// Section 13.4).
+pub async fn start_servers_with_setup<CW, RMS, SM>(
+    deps: TransportDeps<CW, RMS, SM>,
+    setup: Option<http::SetupMount>,
+) -> Result<TransportHandles, TransportError>
+where
+    CW: ConfigWriter + Send + Sync + 'static,
+    RMS: RequestMetricsStore + Send + Sync + 'static,
+    SM: StoreMaintenance + Send + Sync + 'static,
+{
     // Configure gracefully shutdown channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(());
 
@@ -159,7 +176,9 @@ where
     // Start HTTP server
     let http_shutdown_rx = shutdown_rx.clone();
     let http_handle = tokio::spawn(async move {
-        if let Err(e) = http::start_http_server(http_state, http_listener, http_shutdown_rx).await {
+        if let Err(e) =
+            http::start_http_server(http_state, http_listener, http_shutdown_rx, setup).await
+        {
             tracing::error!(
                 error = %e,
                 "transport.http_server_failed"

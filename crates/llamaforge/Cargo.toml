@@ -19,6 +19,8 @@ chrono.workspace = true
 clap = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-util = { workspace = true }
+humantime = { workspace = true }
+axum = { workspace = true }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 async-trait.workspace = true
@@ -39,3 +41,4 @@ telemetry-amdgpu = ["llamaforge-server/telemetry-amdgpu"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+nix = { workspace = true, features = ["signal"] }

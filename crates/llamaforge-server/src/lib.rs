@@ -14,12 +14,17 @@
 //! (`llama-server` Control Surfaces). Component spec:
 //! `docs/component-designs/03_SERVER_MANAGER.md`.
 
+pub mod binary_scanner;
+pub mod build;
 pub(crate) mod error;
+pub mod hardware;
 pub(crate) mod health;
 pub(crate) mod instrumented;
 pub(crate) mod manager;
+pub mod model_scanner;
 pub(crate) mod observability;
 pub(crate) mod process;
+pub mod recommendation;
 pub(crate) mod state;
 pub(crate) mod task;
 pub(crate) mod telemetry;
@@ -30,10 +35,29 @@ pub mod telemetry_nvml;
 pub(crate) mod types;
 pub(crate) mod vram_estimate;
 
+pub use binary_scanner::{
+    scan_binary, BinaryFoundFlag, BinaryScanError, BinaryScanRequest, BinaryScanResult,
+};
+pub use build::{
+    available_disk_gb, effective_jobs, run_build, BuildBackend, BuildCommands, BuildComplete,
+    BuildEvent, BuildFailed, BuildOutcome, BuildPhase, BuildRequest, PhaseTimeouts, MIN_DISK_GB,
+};
 pub use error::ServerManagerError;
+pub use hardware::{
+    detect_hardware, detect_hardware_with, CommandRunner, CpuInfo, GpuInfo, HardwareInfo,
+    HardwareProbeResult, HardwareWarning, ProbeError, RecommendedBackend, SystemCommandRunner,
+};
 pub use instrumented::InstrumentedServerManager;
 pub use manager::ServerManager;
+pub use model_scanner::{
+    scan_models, scan_models_with_deadline, DiscoveredModel, ModelScanError, ModelScanRequest,
+    ModelScanResult, ModelSource, TruncationReason,
+};
 pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
+pub use recommendation::{
+    recommend, ConfigRecommendation, ModelInput, RecommendationRequest, RecommendationResult,
+    ServerRecommendation,
+};
 pub use state::ServerStateSnapshot;
 pub use telemetry::{create_telemetry, GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
 pub use types::{

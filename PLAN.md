@@ -1,30 +1,52 @@
-# LlamaForge Web UI — Implementation Plan
+# LlamaForge Setup Wizard — Implementation Plan
 
-**Component:** Frontend Web Interface (`FRONTEND_ARCHITECTURE.md`)  
-**Estimated LOC:** ~6,500 (~4,800 production + ~1,700 tests)  
-**Estimated Duration:** 14–17 working days (single engineer) / 9–11 days (two engineers, PR3/PR4 and PR8/PR9 parallelizable)  
-**Design Document:** `FRONTEND_ARCHITECTURE.md` (4th-pass CLEAN PASS — 0 findings across 28 rules)  
-**Branch Prefix:** `ui/`  
-**Integration Branch:** `frontend` (long-lived feature branch off `main`)  
-**Final Target:** `main` (single merge after all PRs pass end-to-end testing)  
-**Upstream Dependency:** Rust backend must serve `/api/*` endpoints and `GET /api/events` (SSE). `build.rs` must support `rust-embed` for static asset embedding.  
-**Visual Design Reference:** `design_reference/v1/` — Claude Design prototypes (HTML). Open in any browser to see the visual target for each screen.  
-**Agent Model:** Coder agent (Gemini or any LLM agent) implements; Reviewer agent (Claude) reviews PRs against this plan, `FRONTEND_ARCHITECTURE.md`, and the design reference.
+**Component:** Setup Wizard (`docs/component-designs/08_SETUP_WIZARD.md`)  
+**Estimated LOC:** ~8,200 (~5,600 production + ~2,600 tests)  
+**Estimated Duration:** 20–25 working days (single engineer) / 13–16 days (two engineers, backend/frontend parallelizable after Phase 2)  
+**Design Document:** `docs/component-designs/08_SETUP_WIZARD.md` (2nd-pass CLEAN PASS — 0 findings)  
+**Backend Branch Prefix:** `setup/`  
+**Frontend Branch Prefix:** `ui/setup-`  
+**Backend Merge Target:** `main`  
+**Frontend Merge Target:** `frontend`  
+**Final Target:** `main` (frontend branch merged after all frontend PRs pass end-to-end testing)  
+**Upstream Dependencies:**  
+- Backend PRs (Phase 1–2) have no frontend dependency and merge directly to `main`.  
+- Frontend PRs (Phase 3) depend on Phase 1 and Phase 2 backend APIs being merged to `main`.  
+- The existing frontend `frontend` branch must be up-to-date with `main` before Phase 3 begins.  
+**Visual Design Reference:** None — the wizard has no static design reference files. The design doc (Section 2.2, Section 4) defines all screen states and component hierarchy.  
+**Agent Model:** Coder agent (Gemini or any LLM agent) implements; Reviewer agent (Claude) reviews PRs against this plan, `docs/component-designs/08_SETUP_WIZARD.md`, and `docs/design.md`.
 
-> **Branching workflow:** A long-lived `frontend` branch is created from `main` at the start. Each PR branches from `frontend` and merges back into `frontend` via squash-merge. The "Depends on" field on each PR indicates which predecessor(s) must be merged to `frontend` before that PR's branch is created. Do NOT branch from a predecessor's feature branch — always branch from `frontend` after the predecessor is merged. Once all 14 PRs are merged and end-to-end testing passes, `frontend` is merged to `main` as a single integration.
+> **Branching workflow:**
+>
+> **Backend PRs (Phase 1–2):** Each PR branches from `main` and merges back into `main` via squash-merge. The "Depends on" field indicates which predecessor(s) must be merged before the branch is created. Always branch from `main` after predecessors merge.
+>
+> **Frontend PRs (Phase 3):** Each PR branches from `frontend` and merges into `frontend` via squash-merge, identical to the main UI workflow. The `frontend` branch must be rebased onto `main` after Phase 2 completes (to pick up the backend setup endpoints) before any Phase 3 PR begins.
 >
 > **Setup (run once before PR1):**
 > ```bash
 > git checkout main && git pull
-> git checkout -b frontend
-> git push -u origin frontend
 > ```
 
 ---
 
 ## Ground Rules for CoderAgents
 
-1. **Read the design doc first.** Every PR description must reference the specific `FRONTEND_ARCHITECTURE.md` sections it implements. Open the corresponding `design_reference/v1/*.html` file(s) in a browser to see the visual target before writing any component.
+### Rust (Backend — Phase 1, 2, 4)
+
+1. **Read the design doc first.** Every PR description must reference the specific `08_SETUP_WIZARD.md` sections it implements.
+2. **Workspace deps only.** New dependencies belong in `[workspace.dependencies]`; member crates use `workspace = true`. A versioned dep added directly to a member `Cargo.toml` is a finding.
+3. **No unwrap/expect on production paths.** `unwrap()` and `expect()` are permitted only in tests and `build.rs`. All production error paths must use `?` or explicit matching.
+4. **No blocking in async.** Filesystem I/O, subprocess spawning, and GGUF parsing must use `tokio::task::spawn_blocking` or `tokio::process::Command`. Direct `std::fs` or `std::process::Command` in async functions is a finding.
+5. **Telemetry stays at adapter boundaries.** `#[instrument]` and `tracing::info!` belong on axum handlers, not in domain logic (hardware detection, model scanning, recommendation engine). Rule R26.
+6. **Tests use `mock-llama` or fixture data.** No tests against real `llama-server` binaries in default CI. Subprocess tests use shell script mocks or fixture stdout/stderr files.
+7. **Commit messages:** `setup: <imperative summary>` for backend PRs (e.g., `setup: add hardware detection module with nvidia-smi parsing`).
+8. **SQLite is behind traits.** No direct `rusqlite` use outside trait implementations.
+9. **gRPC is canonical.** New types that cross crate boundaries should originate in `.proto` where applicable. The setup wizard's HTTP-only API contract (Section 11) is an exception — setup endpoints are axum-only, not gRPC.
+10. **Hot-reload contract.** Config readers `.load()` from `ArcSwap` once per request and treat the snapshot as immutable for the request's lifetime.
+
+### Svelte (Frontend — Phase 3)
+
+1. **Read the design doc first.** Every PR description must reference the specific `08_SETUP_WIZARD.md` sections it implements. Open the design doc's Section 2.2 and Section 4 to understand all screen states before writing any component.
 2. **Svelte 5 runes only.** Use `$state`, `$derived`, `$effect` — never `onMount`, `onDestroy`, `writable`, `readable`, or any Svelte 4 API.
 3. **No raw `{@html}` outside `renderMarkdown()`.** The ESLint rule `no-raw-html-without-sanitize` enforces this. The only legal usage is `{@html renderMarkdown(untrustedContent)}`.
 4. **Presentational components receive data via props, emit events via callbacks.** No `fetch()` calls, no store subscriptions, no `$effect` side effects in presentational components. Only orchestrator (page-level) components do I/O.
@@ -34,943 +56,1088 @@
 8. **Tailwind CSS 4 only.** No inline `style` attributes except where Svelte scoped styles are required. No external CSS files per component.
 9. **Accessibility from day one.** Every interactive element must be keyboard-navigable with visible focus indicator. Every status indicator uses `StatusBadge` (triple-redundancy). axe-core must pass in CI.
 10. **Tests run with `npm run test`.** Every PR must pass `npm run check && npm run lint && npm run test:unit` before merge.
-11. **Commit messages:** `ui: <imperative summary>` (e.g., `ui: add ServerCard with availableActions prop pattern`).
+11. **Commit messages:** `ui: <imperative summary>` for frontend PRs (e.g., `ui: add wizard scaffold with StepIndicator and step state machine`).
+
+---
+
+## Pre-Implementation Decisions
+
+These Open Questions from the design doc (Section 14) must be resolved before Phase 1 begins:
+
+| # | Question | Decision | Rationale |
+|---|----------|----------|-----------|
+| OQ#1 | GGUF header parser timeline | **Filename heuristics for v1.** Real GGUF KV parser is a fast-follow. | Scanning speed > metadata accuracy for initial setup. Users can verify model details post-setup. |
+| OQ#2 | Build directory cleanup | **Keep source in `$XDG_DATA_HOME/llamaforge/llama.cpp/`.** "Clean up build files" option on completion screen. | Enables `git pull && rebuild` for updates without re-cloning. |
+| OQ#3 | Multi-GPU support | **One model per GPU for v1.** | Multi-GPU tensor parallelism is a llama.cpp-level feature that adds significant configuration complexity. |
+| OQ#4 | Existing config preservation | **Merge by design.** The save-config endpoint accepts `servers[]` + `global_overrides` and merges into existing config. | Already resolved by the API contract redesign (design review finding #6). |
+| OQ#5 | Build prerequisites check | **Yes — check before build.** Verify `git`, `cmake`, and a C++ compiler are installed. Show platform-specific install instructions if missing. | Better UX than letting cmake fail with cryptic errors. |
 
 ---
 
 ## Dependency Graph (PR merge order)
 
 ```
-PR1 ─── PR2 ─── PR3 ──┬── PR4 ──┬── PR5 ─── PR6
-                       └── PR7 ──┤
-                                 ├── PR8
-                                 ├── PR9
-                                 └── PR10 ─── PR11 ─── PR12 ─── PR13
+                     Phase 1: Backend Foundation
+    PR1 ──┐
+    PR2 ──┼── PR4 ──── PR5
+    PR3 ──┘
+
+                     Phase 2: Build System + CLI
+                           PR5 ──── PR6 ──── PR7
+
+                     Phase 3: Frontend Wizard (depends on Phase 1 + Phase 2)
+                           PR8 ──── PR9 ──── PR10 ──── PR11
+
+                     Phase 4: Integration & Testing (depends on Phase 3)
+                           PR12 ──── PR13 ──── PR14
 ```
 
-PR4 (Dashboard) and PR7 (Server Detail) can be developed concurrently after PR3 merges. PR5 (ECharts) depends on PR4. PR6 (Queue) depends on PR5. PR8 (Config), PR9 (Explorer), and PR10 (Playground Core) can begin after PR7 merges (they need the full app shell + shared components proven). PR11 (Playground Comparison + Model Registry) depends on PR10. PR12 (Security Hardening + Build Integration) depends on PR11. PR13 (Test Suite + CI) depends on PR12.
+**Parallelism opportunities:**
+- PR1 (hardware), PR2 (models), and PR3 (binary) are fully independent — all three can be developed concurrently after branching from `main`.
+- PR4 (recommendation) depends on PR1 and PR2 (needs hardware + model types).
+- PR3 (binary) is independent of PR4 — it is only needed by PR5.
+- PR5 (setup API) depends on PR1–PR4 (mounts all endpoints).
+- PR6 (build orchestrator) depends on PR5 (needs the setup router to mount build endpoints).
+- PR7 (CLI changes) depends on PR6 (needs build + setup endpoints for the interactive wizard server).
+- Phase 3 (frontend) depends on Phase 1 + Phase 2 being merged — all backend APIs must be available.
+- PR9 depends on PR8 (wizard scaffold must exist).
+- PR10 depends on PR9 (needs hardware/binary steps wired).
+- PR11 depends on PR10 (needs model/config steps wired).
+- Phase 4 PRs are sequential and depend on all of Phase 3.
 
 ---
 
-## PR1: Project Scaffold & Toolchain Setup
+## Phase 1: Backend Foundation
 
-**Branch:** `ui/01-scaffold`  
-**Merge Target:** `frontend`  
-**Size:** Small (~150 lines of config + stubs)  
-**Estimated Time:** 3–4 hours  
-**Design Reference:** `design_reference/v1/App Shell.html` — reference for the `app.html` skeleton structure and system font stack
+---
+
+## PR1: Hardware Detection Module
+
+**Branch:** `setup/01-hardware-detection`  
+**Merge Target:** `main`  
+**Depends on:** None  
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 6–8 hours  
 
 ### Purpose
 
-Create the SvelteKit 5 project with all toolchain configuration: TypeScript strict mode, Tailwind CSS 4, ESLint + Prettier, Vitest, Playwright, `adapter-static` for CSR, and the correct `package.json` scripts. No components — just a buildable, lintable, testable empty project.
+Implement the hardware detection module in `llamaforge-server` that executes shell commands (`nvidia-smi`, `system_profiler`, `rocm-smi`, `vulkaninfo`, `/proc/cpuinfo`, `sysctl`) to discover GPUs, CPU, and RAM. Each command has an independent timeout. The module returns partial results on failure — a timed-out probe reports `"detection timed out"`, not `null`. The overall detection has a 30-second hard timeout. This module is pure domain logic with no HTTP/axum dependency — it will be called by the setup API handler in PR5.
+
+Design doc references: Section 11.1 (Hardware Detection API contract), Section 11.7 (Backend Observability — hardware detection logging), Appendix: Implementation Notes (Hardware Detection).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 1.1 | Initialize SvelteKit project | `npx sv create ui` with TypeScript, ESLint, Prettier, Playwright. Select SvelteKit skeleton project. | `ui/` |
-| 1.2 | Configure `adapter-static` | Install `@sveltejs/adapter-static`. Set `fallback: 'index.html'` for CSR SPA routing. Set `paths.base: '/ui'` in `svelte.config.js`. Disable SSR: `export const ssr = false` in root `+layout.ts`. | `ui/svelte.config.js`, `ui/src/routes/+layout.ts` |
-| 1.3 | Configure TypeScript strict mode | `"strict": true`, `"noUncheckedIndexedAccess": true`, `"exactOptionalPropertyTypes": true` in `tsconfig.json`. | `ui/tsconfig.json` |
-| 1.4 | Install and configure Tailwind CSS 4 | Install `tailwindcss`, `@tailwindcss/vite`. Configure `vite.config.ts` plugin. Add `@import "tailwindcss"` to `app.css`. | `ui/vite.config.ts`, `ui/src/app.css` |
-| 1.5 | Install production dependencies | `@tanstack/svelte-query`, `@tanstack/svelte-table`, `bits-ui`, `marked`, `dompurify`, `echarts` (lazy-loaded at runtime but installed at build time), `highlight.js`. | `ui/package.json` |
-| 1.6 | Install dev dependencies | `vitest`, `@testing-library/svelte`, `jsdom`, `@playwright/test`, `@axe-core/playwright`, `eslint-plugin-svelte`, `vite-plugin-compression`. | `ui/package.json` |
-| 1.7 | Configure Vitest | `vitest.config.ts` with `environment: 'jsdom'`, Svelte transform, coverage thresholds (`statements: 80, branches: 75, functions: 80, lines: 80`). | `ui/vitest.config.ts` |
-| 1.8 | Configure ESLint | Enable `eslint-plugin-svelte`. Add custom rule stub for `no-raw-html-without-sanitize` (placeholder — full rule in PR10). | `ui/eslint.config.js` |
-| 1.9 | Add package.json scripts | `dev`, `build`, `preview`, `check` (svelte-check), `lint`, `format`, `test:unit` (vitest), `test:e2e` (playwright), `test` (check + lint + test:unit). | `ui/package.json` |
-| 1.10 | Create module directory structure | Create all directories from Appendix B: `lib/api/`, `lib/stores/`, `lib/components/{layout,dashboard,server,queue,explorer,config,playground,models,shared}/`, `lib/utils/`, `routes/`. Stub each with empty `index.ts` barrel files where appropriate. | `ui/src/` |
-| 1.11 | Create `app.html` shell | Hardcoded HTML with inline critical CSS for skeleton layout (sidebar placeholder, header bar, content area). System font stack. `<noscript>` fallback. `<div id="app">` mount point. `<link rel="modulepreload">` placeholder. Design doc Section 4.2. | `ui/src/app.html` |
-| 1.12 | Verify build | `npm run build` produces `ui/build/` with `index.html`. `npm run check` passes. `npm run lint` passes. | — |
+| 1.1 | Define hardware detection types | `GpuInfo`, `CpuInfo`, `HardwareInfo`, `HardwareProbeResult`, `HardwareWarning`. Use `serde::Serialize` for JSON responses. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.2 | Implement shell command executor | Generic `run_command(cmd, args, timeout) -> Result<String, ProbeError>` using `tokio::process::Command` with `tokio::time::timeout`. On timeout, kill the child process (`SIGKILL`) and return `ProbeError::Timeout`. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.3 | Implement NVIDIA GPU detection | Parse `nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader`. Handle multi-GPU output (multiple CSV lines). 10-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.4 | Implement AMD GPU detection | Parse `rocm-smi --showproductname --showmeminfo vram --csv`. 10-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.5 | Implement Vulkan detection | Parse `vulkaninfo --summary`. Extract device name and memory. 10-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.6 | Implement macOS GPU detection | Parse `system_profiler SPDisplaysDataType -json`. Extract GPU name and VRAM. Handle Apple Silicon unified memory. 15-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.7 | Implement CPU detection (Linux) | Parse `/proc/cpuinfo` for model name, physical cores, logical cores. 5-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.8 | Implement CPU detection (macOS) | Parse `sysctl -n machdep.cpu.brand_string`, `hw.physicalcpu`, `hw.logicalcpu`. 5-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.9 | Implement RAM detection | Linux: `/proc/meminfo` (MemTotal). macOS: `sysctl hw.memsize`. 5-second timeout. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.10 | Implement `detect_hardware()` orchestrator | Run all probes concurrently via `tokio::join!`. Collect results into `HardwareInfo`. Compute `recommended_backend` (cuda > metal > vulkan > cpu). Overall 30-second timeout — return partial results if it fires. Populate `warnings` for timed-out probes. | `crates/llamaforge-server/src/hardware.rs` |
+| 1.11 | Export module from lib.rs | Add `pub mod hardware;` to `llamaforge-server/src/lib.rs`. | `crates/llamaforge-server/src/lib.rs` |
+| 1.12 | Unit tests: nvidia-smi parsing | Fixture: real `nvidia-smi` CSV output (single GPU, multi-GPU). Assert correct `GpuInfo` structs. | `crates/llamaforge-server/tests/hardware_tests.rs` |
+| 1.13 | Unit tests: system_profiler parsing | Fixture: real `system_profiler -json` output (Apple Silicon, Intel discrete GPU). Assert correct parsing. | `crates/llamaforge-server/tests/hardware_tests.rs` |
+| 1.14 | Unit tests: rocm-smi parsing | Fixture: real `rocm-smi` CSV output. Assert correct parsing. | `crates/llamaforge-server/tests/hardware_tests.rs` |
+| 1.15 | Unit tests: partial failure | Mock one probe timing out. Assert `HardwareInfo` contains partial results + warning. | `crates/llamaforge-server/tests/hardware_tests.rs` |
+| 1.16 | Unit tests: all probes fail | Mock all probes failing. Assert CPU-only fallback with `recommended_backend: "cpu"`. | `crates/llamaforge-server/tests/hardware_tests.rs` |
+| 1.17 | Unit tests: gibberish output | Mock `nvidia-smi` returning garbage. Assert error, not a parsed `GpuInfo` with `vram_mb: 0`. | `crates/llamaforge-server/tests/hardware_tests.rs` |
 
 ### PR1 Acceptance Criteria
 
-- [ ] `npm run build` produces static output in `ui/build/`
-- [ ] `npm run check` (svelte-check) passes with zero errors
-- [ ] `npm run lint` passes with zero warnings
-- [ ] `npm run test:unit` runs (no tests yet, but Vitest initializes)
-- [ ] TypeScript strict mode active — `any` types cause compile errors
-- [ ] `adapter-static` configured with `fallback: 'index.html'`
-- [ ] All directories from Appendix B exist
-- [ ] `app.html` contains skeleton CSS, `<noscript>` fallback, and system font stack
+- [ ] `detect_hardware()` returns `HardwareInfo` with correct GPU/CPU/RAM on the test machine
+- [ ] Each probe has an independent timeout (nvidia-smi 10s, system_profiler 15s, /proc 5s, sysctl 5s, rocm-smi 10s, vulkaninfo 10s)
+- [ ] Overall 30-second hard timeout returns partial results
+- [ ] Timed-out probes report `"detection timed out"` in warnings, not null fields
+- [ ] Multi-GPU nvidia-smi output parses all GPUs
+- [ ] Apple Silicon unified memory parses correctly
+- [ ] `recommended_backend` follows priority: cuda > metal > vulkan > cpu
+- [ ] All 6 test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
+- [ ] No `tracing` calls inside domain logic — only in the types/orchestrator boundary
 
 ### PR1 Creation Steps
 
 ```bash
-git checkout -b ui/01-scaffold frontend
-# ... implement tasks 1.1–1.12 ...
-git add -A && git commit -m "ui: bootstrap SvelteKit 5 project with Tailwind, TypeScript strict, and test toolchain"
-git push -u origin ui/01-scaffold
-# Open PR: "Web UI PR1: Project Scaffold & Toolchain Setup"
-# Description: "Creates the SvelteKit 5 CSR project (FRONTEND_ARCHITECTURE.md Sections 3, 4.1,
-# Appendix B, Appendix C). adapter-static for single-binary embedding. TypeScript strict mode.
-# Tailwind CSS 4. Vitest + Playwright configured. All directory structure from Appendix B stubbed."
+git checkout -b setup/01-hardware-detection main
+# ... implement tasks 1.1–1.17 ...
+git add -A && git commit -m "setup: add hardware detection module with per-command timeouts and partial failure handling"
+git push -u origin setup/01-hardware-detection
+# Open PR: "Setup Wizard PR1: Hardware Detection Module"
+# Description: "Implements hardware detection (08_SETUP_WIZARD.md Section 11.1, Appendix: Hardware Detection).
+# Shell-command based GPU/CPU/RAM detection with per-command timeouts (nvidia-smi 10s, system_profiler 15s,
+# /proc 5s, sysctl 5s). Concurrent probe execution. Partial results on timeout. recommended_backend
+# priority: cuda > metal > vulkan > cpu. 6 test suites with fixture data."
 ```
 
 ---
 
-## PR2: Design Tokens, Theme System & Shared Primitives
+## PR2: Model Scanner Module
 
-**Branch:** `ui/02-design-system`  
-**Depends on:** PR1 merged to `frontend`  
-**Size:** Medium (~400 lines)  
+**Branch:** `setup/02-model-scanner`  
+**Merge Target:** `main`  
+**Depends on:** None (can be developed concurrently with PR1)  
+**Size:** Medium (~350 lines)  
 **Estimated Time:** 5–7 hours  
-**Design Reference:** `design_reference/v1/Component Library.html` — all StatusBadge variants, button states, type scale, spacing. `design_reference/v1/styles.css` — design token values (colors, spacing, typography). `design_reference/v1/All Screens Dark.html` — dark theme targets
 
 ### Purpose
 
-Implement the design token system (CSS custom properties for light/dark themes), the theme store, and the foundational shared components that every page depends on: `StatusBadge`, `DynamicHeading`, `Skeleton`, `Toast`, `ErrorBanner`, `EmptyState`, `ConfirmDialog`. These are the building blocks — no page-specific components yet.
+Implement the model scanner that recursively walks directories to discover `.gguf` files. The scanner respects `max_depth`, `max_results`, and a 30-second timeout, returning partial results when any limit fires. Metadata (quantization, architecture) is parsed from filenames using heuristics — not GGUF header parsing (per Open Question #1: filename heuristics for v1). The module reports permission errors and symlink cycles as warnings in the response, not as fatal errors.
+
+Design doc references: Section 11.3 (Model Scanner API contract), Section 11.7 (Backend Observability — model scan logging), Appendix: Implementation Notes (Model Scanner).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 2.1 | Implement CSS custom properties | Define color pairs for light and dark themes. `--color-text-primary`, `--color-bg-primary`, `--color-status-healthy`, `--color-status-degraded`, `--color-status-failed`, focus ring colors. Both variants must meet WCAG AA (4.5:1 text, 3:1 large text). Design doc Section 9.5. | `ui/src/app.css` |
-| 2.2 | Implement theme store | `preferences.ts`: Svelte 5 rune-based store wrapping `localStorage`. Read `prefers-color-scheme` on init. Toggle function. Persist to `localStorage`. | `ui/src/lib/stores/preferences.ts` |
-| 2.3 | Implement theme application | `theme.ts`: `$effect` that applies `data-theme="light"` or `data-theme="dark"` to `<html>`. CSS custom properties switch via `[data-theme="dark"]` selector. | `ui/src/lib/stores/theme.ts` |
-| 2.4 | Implement focus indicator base styles | Tailwind `@layer base` override: `focus-visible:ring-2 focus-visible:ring-offset-2` with theme-adaptive ring color (blue-600 light, blue-400 dark via CSS custom property). Design doc Section 9.2. | `ui/src/app.css` |
-| 2.5 | Implement `prefers-reduced-motion` | `@media (prefers-reduced-motion: reduce)` disabling transitions, animations, `animate:flip`, skeleton pulse. Design doc Section 9.5. | `ui/src/app.css` |
-| 2.6 | Implement `StatusBadge.svelte` | Props: `status: 'healthy' \| 'degraded' \| 'failed' \| 'pending' \| ...`, optional `size`. Renders icon + text label + color. Triple-redundancy enforced by component structure. Maps status to icon (✓/⚠/✕/⟳), label, and color class. Design doc Section 9.5. | `ui/src/lib/components/shared/StatusBadge.svelte` |
-| 2.7 | Implement `DynamicHeading.svelte` | Props: `level: 1 \| 2 \| 3 \| 4 \| 5 \| 6`. Renders `<h1>` through `<h6>` dynamically. Prevents heading hierarchy violations in composed views. Design doc Section 4.3. | `ui/src/lib/components/shared/DynamicHeading.svelte` |
-| 2.8 | Implement `Skeleton.svelte` | Props: `width`, `height`, `variant: 'text' \| 'rect' \| 'circle'`. `aria-busy="true"`, `aria-label="Loading"`. Pulse animation (disabled under `prefers-reduced-motion`). | `ui/src/lib/components/shared/Skeleton.svelte` |
-| 2.9 | Implement `Toast.svelte` + toast store | Global toast queue in `$state` array. `role="status"`, `aria-live="polite"`. Auto-dismiss after 5s. Types: `success`, `error`, `warning`, `info`. Max 3 visible. | `ui/src/lib/components/shared/Toast.svelte`, `ui/src/lib/stores/toast.ts` |
-| 2.10 | Implement `ErrorBanner.svelte` | Props: `message`, `variant: 'error' \| 'warning' \| 'info'`, `dismissible`, `action?: { label, onClick }`. `role="alert"` for errors, `role="status"` for info. Triple-redundancy (icon + text + color). Design doc Section 7.2. | `ui/src/lib/components/shared/ErrorBanner.svelte` |
-| 2.11 | Implement `EmptyState.svelte` | Props: `title`, `description`, `icon?`, `action?: { label, onClick }`. Used when tables/lists have no data. | `ui/src/lib/components/shared/EmptyState.svelte` |
-| 2.12 | Implement `ConfirmDialog.svelte` | Props: `open`, `title`, `message`, `confirmLabel`, `cancelLabel`, `variant: 'danger' \| 'default'`. Uses Bits UI dialog primitive. `role="dialog"`, `aria-modal="true"`, focus trap, `Escape` closes. Design doc Section 9.1. | `ui/src/lib/components/shared/ConfirmDialog.svelte` |
-| 2.13 | Implement `format.ts` utilities | `formatNumber()`, `formatDuration()`, `formatTimestamp()`, `formatBytes()`, `formatTokensPerSecond()`. All locale-aware. | `ui/src/lib/utils/format.ts` |
-| 2.14 | Implement `constants.ts` | API route constants (`API_BASE`, `SSE_ENDPOINT`, route paths), default parameter values (`DEFAULT_TEMPERATURE: 0.7`, `DEFAULT_MAX_TOKENS: 2048`), timeout constants. | `ui/src/lib/utils/constants.ts` |
-| 2.15 | Unit tests: StatusBadge | Render each status variant → assert icon, label, and color class present. Assert `aria-label` includes status text. | tests |
-| 2.16 | Unit tests: DynamicHeading | Render with `level={1}` through `level={6}` → assert correct HTML element. | tests |
-| 2.17 | Unit tests: Toast store | Add 4 toasts → assert only 3 visible (max). Wait 5s → assert auto-dismissed. | tests |
-| 2.18 | Unit tests: theme store | Toggle theme → assert `data-theme` attribute changes. Assert localStorage persistence. Assert `prefers-color-scheme` initial read. | tests |
-| 2.19 | Unit tests: format utilities | `formatDuration(125)` → `"2m 5s"`. `formatTokensPerSecond(42.7)` → `"42.7 tok/s"`. Edge cases: 0, negative, NaN. | tests |
+| 2.1 | Define model scanner types | `DiscoveredModel`, `ModelScanRequest`, `ModelScanResult`, `ScanWarning`. Use `serde::Serialize`/`Deserialize`. `id` is SHA-256 prefix of the canonical path. `ModelScanRequest` includes `source: "local"` discriminator field (only `"local"` implemented; future values documented in design doc Section 11.3). | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.2 | Implement filename heuristic parser | Extract `quantization_hint` and `architecture_hint` from GGUF filenames. Common patterns: `llama-3-8b-Q4_K_M.gguf`, `mistral-7b-instruct-v0.3-Q5_K_S.gguf`. Handle uppercase/lowercase variants. | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.3 | Implement recursive directory walker | `tokio::task::spawn_blocking` wrapping a synchronous `walkdir::WalkDir` with `max_depth`. Filter `.gguf` extension. Skip hidden directories (names starting with `.`). Follow symlinks but detect cycles (via canonical path set). | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.4 | Implement bounded scanning | Enforce `max_results` (default 100). Enforce 30-second timeout via `tokio::time::timeout`. When any limit fires, return models found so far with `truncated: true` and `truncation_reason`. | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.5 | Implement warning collection | Collect permission errors (`std::io::ErrorKind::PermissionDenied`) and symlink cycle detections as `warnings` strings. Continue scanning after non-fatal errors. | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.6 | Implement `scan_models()` public API | Takes `ModelScanRequest`, returns `ModelScanResult`. Validates inputs: directories non-empty, max 10 directories, paths resolved via `canonicalize`. | `crates/llamaforge-server/src/model_scanner.rs` |
+| 2.7 | Export module from lib.rs | Add `pub mod model_scanner;` to `llamaforge-server/src/lib.rs`. | `crates/llamaforge-server/src/lib.rs` |
+| 2.8 | Add `walkdir` to workspace dependencies | Add `walkdir = "2"` to `[workspace.dependencies]` in root `Cargo.toml`. Add `walkdir = { workspace = true }` to `llamaforge-server/Cargo.toml`. | `Cargo.toml`, `crates/llamaforge-server/Cargo.toml` |
+| 2.9 | Unit tests: filename heuristic parsing | `"llama-3-8b-Q4_K_M.gguf"` -> quantization `Q4_K_M`, architecture `llama`. `"mistral-7b-instruct-v0.3-Q5_K_S.gguf"` -> quantization `Q5_K_S`, architecture `mistral`. Unknown patterns -> `"unknown"`. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.10 | Unit tests: tempdir scanning | Create tempdir with 5 `.gguf` files at varying depths. Assert all 5 found with correct metadata. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.11 | Unit tests: max_depth enforcement | Create tempdir with files at depth 3 and 7. Set `max_depth: 5`. Assert depth-3 found, depth-7 not found. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.12 | Unit tests: max_results enforcement | Create tempdir with 20 `.gguf` files. Set `max_results: 10`. Assert `truncated: true`, `truncation_reason: "max_results"`, exactly 10 models returned. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.13 | Unit tests: permission errors | Create a directory with restricted permissions (if running as non-root). Assert warning in response, scan continues for other directories. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.14 | Unit tests: empty directories | Scan a tempdir with no `.gguf` files. Assert `models: []`, `truncated: false`. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
+| 2.15 | Unit tests: hidden directory skipping | Create `.hidden/model.gguf`. Assert not found. | `crates/llamaforge-server/tests/model_scanner_tests.rs` |
 
 ### PR2 Acceptance Criteria
 
-- [ ] Light and dark themes both meet WCAG AA contrast ratios
-- [ ] `StatusBadge` renders icon + text + color for every status variant
-- [ ] `DynamicHeading` produces correct heading element for each level
-- [ ] Focus indicators visible on all focusable elements via keyboard
-- [ ] `prefers-reduced-motion` disables all animations
-- [ ] Toast queue caps at 3 visible, auto-dismisses at 5s
-- [ ] `ConfirmDialog` traps focus and closes on `Escape`
-- [ ] All 5 unit test suites pass
-- [ ] `npm run check && npm run lint` clean
+- [ ] `scan_models()` discovers all `.gguf` files in specified directories recursively
+- [ ] Filename heuristic parser extracts quantization and architecture hints
+- [ ] `max_depth` (default 5) limits recursion
+- [ ] `max_results` (default 100) limits result count with `truncated: true`
+- [ ] 30-second timeout returns partial results with `truncation_reason: "timeout"`
+- [ ] Permission errors collected as warnings, not fatal
+- [ ] Symlink cycles detected and reported as warnings
+- [ ] Hidden directories (`.foo`) skipped
+- [ ] Empty directories return empty model list (not an error)
+- [ ] All 7 test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR2 Creation Steps
 
 ```bash
-git checkout -b ui/02-design-system frontend
-# ... implement tasks 2.1–2.19 ...
-git add -A && git commit -m "ui: add design tokens, theme system, and shared component primitives"
-git push -u origin ui/02-design-system
-# Open PR: "Web UI PR2: Design Tokens, Theme System & Shared Primitives"
-# Description: "Implements the design token system and foundational shared components
-# (FRONTEND_ARCHITECTURE.md Sections 4.3, 9.2, 9.5, Appendix B shared/).
-# StatusBadge (triple-redundancy), DynamicHeading, Skeleton, Toast, ErrorBanner,
-# EmptyState, ConfirmDialog. Light/dark theme with CSS custom properties.
-# Focus indicator strategy. prefers-reduced-motion support. 5 test suites."
+git checkout -b setup/02-model-scanner main
+# ... implement tasks 2.1–2.15 ...
+git add -A && git commit -m "setup: add model scanner with recursive walk, filename heuristics, and bounded results"
+git push -u origin setup/02-model-scanner
+# Open PR: "Setup Wizard PR2: Model Scanner Module"
+# Description: "Implements model scanning (08_SETUP_WIZARD.md Section 11.3, Appendix: Model Scanner).
+# Recursive directory walk with .gguf filter. Filename heuristic parsing for quantization/architecture.
+# Bounded by max_depth (5), max_results (100), and 30s timeout. Partial results on any limit.
+# Permission errors and symlink cycles as warnings. 7 test suites with tempdir fixtures."
 ```
 
 ---
 
-## PR3: API Client, SSE LiveDataStore & TanStack Query Setup
+## PR3: Binary Scanner Module
 
-**Branch:** `ui/03-data-layer`  
-**Depends on:** PR2 merged to `frontend`  
-**Size:** Medium–Large (~500 lines)  
-**Estimated Time:** 8–10 hours  
-**Design Reference:** `design_reference/v1/Connection States.html` — SSE connected/reconnecting/disconnected visual states
+**Branch:** `setup/03-binary-scanner`  
+**Merge Target:** `main`  
+**Depends on:** None (can be developed concurrently with PR1 and PR2)  
+**Size:** Small (~200 lines)  
+**Estimated Time:** 3–4 hours  
 
 ### Purpose
 
-Implement the entire data layer: the centralized API client with CSRF headers and timeouts, the SSE `LiveDataStore` with subscriber-count lifecycle and buffer compaction, TanStack Query configuration with all query definitions, and the error normalization pipeline. This is the nervous system — every page depends on it.
+Implement the binary scanner that searches `$PATH` plus common install locations for `llama-server`, then runs `llama-server --version` (5-second timeout) to extract version and supported backends. A found-but-unresponsive binary is reported as `"found but unresponsive to --version"`, not as "not found."
+
+Design doc references: Section 11.2 (Binary Scanner API contract), Section 11.7 (Backend Observability — binary scan logging), Appendix: Implementation Notes (Binary Scanner).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 3.1 | Implement `client.ts` — centralized API client | `apiFetch()` wrapping `fetch` with: base URL resolution, CSRF header (`X-LlamaForge-Request: 1`) on non-GET/HEAD, timeout via `AbortSignal.timeout()` (10s GET, 30s mutations), JSON response parsing, error normalization. Design doc Section 10.2. | `ui/src/lib/api/client.ts` |
-| 3.2 | Implement `types.ts` — API type definitions | TypeScript interfaces matching backend API: `ServerState`, `ServerMetricsSummary`, `ServerStatus`, `QueueItem`, `RequestRecord`, `ModelInfo`, `GenerationParams`, `ConfigSection`. Shared action types: `ServerAction = 'restart' \| 'stop' \| 'start'`, `DetailServerAction = ServerAction \| 'force_kill'`. Design doc Section 5.2. | `ui/src/lib/api/types.ts` |
-| 3.3 | Implement error normalization | `ApiError` class with `status`, `message`, `retryable` fields. Map HTTP status codes: 4xx → non-retryable, 5xx → retryable, network error → retryable, timeout → retryable. | `ui/src/lib/api/client.ts` |
-| 3.4 | Implement `liveData.ts` — SSE transport store | `LiveDataStore` with `connected: boolean` ($state), `subscriberCount` (internal), `subscribe()` / `unsubscribe()` (ref counting), `EventSource` management. Opens SSE on first subscriber, closes on last. Design doc Section 7.1. | `ui/src/lib/stores/liveData.ts` |
-| 3.5 | Implement SSE event parsing | Parse SSE event types (`server-update`, `metrics-update`, `queue-update`, `config-changed`, `model-update`) and route to `queryClient.setQueryData()` with correct query keys per the event type → query key mapping table in design doc Section 7.1. | `ui/src/lib/stores/liveData.ts` |
-| 3.6 | Implement SSE message batching | Buffer incoming SSE messages. Flush to TanStack Query at most once per 100ms via `requestAnimationFrame`. Design doc Section 7.1. | `ui/src/lib/stores/liveData.ts` |
-| 3.7 | Implement SSE background tab compaction | When `document.hidden === true`, pause message processing. Buffer uses last-write-wins per target query key (e.g., `['server', 'gpu0']`). On tab focus, apply bulk update — one `setQueryData()` per query key. Design doc Section 7.1. | `ui/src/lib/stores/liveData.ts` |
-| 3.8 | Implement SSE reconnection with jitter | On disconnect: exponential backoff with jitter `delay = min(1000 * 2^attempt + random(0, 1000), 30_000)`. Fall back to 5s polling via TanStack Query `refetchInterval`. Track `Last-Event-ID` for gap-free reconnection. Design doc Section 7.2. | `ui/src/lib/stores/liveData.ts` |
-| 3.9 | Implement SSE heartbeat detection | Backend sends heartbeat comments every 15s. If two consecutive heartbeats missed (30s), treat connection as dead → trigger reconnect. Design doc Section 7.2. | `ui/src/lib/stores/liveData.ts` |
-| 3.10 | Configure TanStack Query | `QueryClientProvider` in root `+layout.svelte`. Defaults: `staleTime: 5_000`, `gcTime: 300_000`, `refetchOnWindowFocus: true`, `retry: 3`, `retryDelay` with exponential backoff. Mutation defaults: `retry: 0`. Design doc Section 6.2. | `ui/src/lib/api/queries.ts`, `ui/src/routes/+layout.svelte` |
-| 3.11 | Implement query definitions | `createServersQuery()`, `createServerDetailQuery(id)`, `createServerMetricsQuery(id)`, `createQueueQuery()`, `createRequestsQuery(filters)`, `createAggregatedMetricsQuery(filters)`, `createConfigQuery(section)`, `createModelsQuery()`. Each returns a `createQuery()` call with correct key, fetch function via `client.ts`, and cache config per the Section 7.3 caching table. | `ui/src/lib/api/queries.ts` |
-| 3.12 | Implement mutation definitions | `createRestartServerMutation()`, `createStopServerMutation()`, `createStartServerMutation()`, `createForceKillServerMutation()`, `createCancelRequestMutation()`, `createSaveConfigMutation()`. Each with appropriate `onSuccess` invalidation and toast notifications. | `ui/src/lib/api/queries.ts` |
-| 3.13 | Implement prefetching helpers | `prefetchServerDetail(id)`, `prefetchRouteData(routeKey)`, `prefetchExplorerNextPage(filters, currentPage)`. Design doc Section 7.1 prefetching strategy. | `ui/src/lib/api/queries.ts` |
-| 3.14 | Implement `getAvailableActions()` | Shared utility function mapping `ServerStatus` → `Array<ServerAction>`. Used by `DashboardPage` and `ServerDetailPage` orchestrators. Design doc Section 5.2. | `ui/src/lib/api/types.ts` |
-| 3.15 | Unit tests: API client CSRF header | Non-GET requests include `X-LlamaForge-Request: 1`. GET requests do not. | tests |
-| 3.16 | Unit tests: API client timeouts | GET request times out at 10s. Mutation times out at 30s. Verify `AbortSignal.timeout()` usage. | tests |
-| 3.17 | Unit tests: error normalization | 404 → non-retryable. 500 → retryable. Network error → retryable. Timeout → retryable with correct message. | tests |
-| 3.18 | Unit tests: LiveDataStore lifecycle | Subscribe → connected. Unsubscribe → disconnected. Subscribe twice → one connection. Unsubscribe once → still connected. Unsubscribe twice → disconnected. | tests |
-| 3.19 | Unit tests: SSE buffer compaction | Simulate 10 messages for 3 servers while backgrounded → assert only 3 `setQueryData()` calls on focus (one per server query key). | tests |
-| 3.20 | Unit tests: SSE reconnection jitter | Assert reconnection delays include random jitter component. Assert max delay capped at 30s. | tests |
-| 3.21 | Unit tests: getAvailableActions | `running → ['restart', 'stop']`, `stopped → ['start']`, `failed → ['start']`, `restarting → []`. | tests |
-| 3.22 | Unit tests: query key mapping | Verify each SSE event type maps to correct TanStack Query key(s). | tests |
+| 3.1 | Define binary scanner types | `BinaryScanResult` (discriminated: found vs not-found), `BinaryScanRequest`. `serde::Serialize`/`Deserialize`. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.2 | Implement PATH + common location search | Search `$PATH` entries plus `/usr/local/bin`, `/opt/homebrew/bin`, `~/.local/bin`, `/usr/bin`. Check file existence and executability. Return first match. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.3 | Implement extra_paths support | Accept optional `extra_paths` from the request. Prepend to search list. Validate: no null bytes, paths are absolute or resolvable. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.4 | Implement version extraction | Run `llama-server --version` with 5-second `tokio::time::timeout`. Parse stdout for version string and backend list. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.5 | Implement unresponsive fallback | If `--version` times out or returns non-zero, report `found: true` with `version: "found but unresponsive to --version"`. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.6 | Implement `scan_binary()` public API | Takes `BinaryScanRequest`, returns `BinaryScanResult`. | `crates/llamaforge-server/src/binary_scanner.rs` |
+| 3.7 | Export module from lib.rs | Add `pub mod binary_scanner;` to `llamaforge-server/src/lib.rs`. | `crates/llamaforge-server/src/lib.rs` |
+| 3.8 | Unit tests: binary found | Create a mock shell script at a temp path that responds to `--version`. Assert `found: true` with parsed version. | `crates/llamaforge-server/tests/binary_scanner_tests.rs` |
+| 3.9 | Unit tests: binary not found | Search in empty temp directories. Assert `found: false` with `searched_paths`. | `crates/llamaforge-server/tests/binary_scanner_tests.rs` |
+| 3.10 | Unit tests: version timeout | Create a mock script that sleeps 10 seconds on `--version`. Assert `found: true` with `"found but unresponsive"`. | `crates/llamaforge-server/tests/binary_scanner_tests.rs` |
+| 3.11 | Unit tests: extra_paths searched first | Pass `extra_paths: ["/custom/path"]`. Assert it appears first in searched_paths. | `crates/llamaforge-server/tests/binary_scanner_tests.rs` |
 
 ### PR3 Acceptance Criteria
 
-- [ ] API client auto-attaches CSRF header on all non-GET requests
-- [ ] API client enforces 10s/30s timeouts via `AbortSignal.timeout()`
-- [ ] SSE connection opens on first subscriber, closes on last
-- [ ] SSE messages batch-flushed at ≤ 100ms via `requestAnimationFrame`
-- [ ] Background tab compaction uses per-query-key last-write-wins
-- [ ] Reconnection includes jitter to prevent thundering herd
-- [ ] Heartbeat timeout triggers reconnect after 30s silence
-- [ ] TanStack Query configured with correct defaults (no mutation retry)
-- [ ] All 8 unit test suites pass
-- [ ] No raw `fetch()` calls outside `client.ts`
+- [ ] `scan_binary()` searches `$PATH` plus 4 common locations
+- [ ] `extra_paths` are prepended to the search list
+- [ ] `llama-server --version` has a 5-second timeout
+- [ ] Timed-out binary reported as `found: true` with `"found but unresponsive"` (not `found: false`)
+- [ ] `searched_paths` list returned when binary not found
+- [ ] All 4 test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR3 Creation Steps
 
 ```bash
-git checkout -b ui/03-data-layer frontend
-# ... implement tasks 3.1–3.22 ...
-git add -A && git commit -m "ui: implement API client, SSE LiveDataStore, and TanStack Query data layer"
-git push -u origin ui/03-data-layer
-# Open PR: "Web UI PR3: API Client, SSE LiveDataStore & TanStack Query"
-# Description: "Implements the complete data layer (FRONTEND_ARCHITECTURE.md Sections 6.2, 7.1–7.3,
-# 10.2). Centralized API client with CSRF and timeouts. SSE transport-only store with subscriber-
-# count lifecycle, RAF batching, background compaction, jitter reconnection, and heartbeat
-# detection. TanStack Query with all query/mutation definitions and prefetching helpers.
-# 8 unit test suites."
+git checkout -b setup/03-binary-scanner main
+# ... implement tasks 3.1–3.11 ...
+git add -A && git commit -m "setup: add binary scanner with PATH search, version extraction, and timeout fallback"
+git push -u origin setup/03-binary-scanner
+# Open PR: "Setup Wizard PR3: Binary Scanner Module"
+# Description: "Implements binary scanning (08_SETUP_WIZARD.md Section 11.2, Appendix: Binary Scanner).
+# PATH + common location search. llama-server --version with 5s timeout. Found-but-unresponsive
+# fallback. extra_paths support. 4 test suites with mock shell scripts."
 ```
 
 ---
 
-## VC-1: Data Layer Verification Checkpoint
+## PR4: Config Recommendation Engine
 
-**Gate:** PR3 merged. The entire data pipeline works end-to-end.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-1.1 | CSRF header present | Intercept mutation request → inspect headers | `X-LlamaForge-Request: 1` present |
-| VC-1.2 | CSRF header absent on GET | Intercept GET request → inspect headers | Header NOT present |
-| VC-1.3 | SSE subscriber lifecycle | Subscribe → unsubscribe → subscribe → verify single connection (no leak) | EventSource created once per subscribe cycle |
-| VC-1.4 | Background compaction | Background tab, push 100 messages for 5 servers → focus → assert 5 setQueryData calls | Exactly 5 calls |
-| VC-1.5 | Reconnection jitter | Trigger 10 reconnections → measure delays → assert non-identical | Delays vary |
-| VC-1.6 | Query cache invalidation | Mutation succeeds → related query invalidated → refetch triggered | Fresh data in cache |
-
----
-
-## PR4: App Shell — Layout, Sidebar, Header & Routing
-
-**Branch:** `ui/04-app-shell`  
-**Depends on:** PR3 merged to `frontend`  
-**Size:** Medium (~450 lines)  
-**Estimated Time:** 6–8 hours  
-**Design Reference:** `design_reference/v1/App Shell.html` — sidebar, header, routing layout, collapse behavior. `design_reference/v1/Connection States.html` — header connection status indicator. `design_reference/v1/Responsive.html` — breakpoint behavior
+**Branch:** `setup/04-recommendation`  
+**Merge Target:** `main`  
+**Depends on:** PR1 (hardware types) and PR2 (model types) merged to `main`  
+**Size:** Medium (~350 lines)  
+**Estimated Time:** 5–7 hours  
 
 ### Purpose
 
-Build the application shell: root layout with sidebar navigation, header with breadcrumb and connection status, SvelteKit file-based routing for all pages, skip links, keyboard shortcuts overlay, and the `aria-live` status region. After this PR, navigating between page stubs works with proper transitions and focus management.
+Implement the recommendation engine that takes hardware detection results and selected models, then computes `gpu_layers`, `ctx_size`, `parallel_slots`, `cache_type_k/v`, `flash_attn`, and `estimated_vram_mb` per model. Leverages the existing `compute_vram_estimate` function from `llamaforge-server/src/vram_estimate.rs`. Includes rationale strings explaining each recommendation. Port assignment starts at 8080 and auto-increments.
+
+Design doc references: Section 11.5 (Config Recommendation API contract), Section 11.7 (Backend Observability — recommendation logging), Appendix: Implementation Notes (Config Recommendation).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 4.1 | Implement root `+layout.svelte` | App shell structure: `<nav>` + `<header>` + `<main>`. `QueryClientProvider` wrapper. SSE subscription via `$effect` (subscribe on mount, unsubscribe on cleanup). `aria-live="polite"` region for status announcements. Skip link: "Skip to main content". Design doc Section 4.3. | `ui/src/routes/+layout.svelte` |
-| 4.2 | Implement `Sidebar.svelte` | Navigation links for all 7 pages: Dashboard, Servers (placeholder), Queue, Explorer, Config, Playground, Models. `<nav aria-label="Main navigation">`. `aria-current="page"` on active link. Arrow key navigation between links. `Ctrl+B` toggle collapse. Collapse state persisted via preferences store. Design doc Section 9.2. | `ui/src/lib/components/layout/Sidebar.svelte` |
-| 4.3 | Implement `Header.svelte` | Breadcrumb trail (reactive to current route). "Dashboard Summary" button (Dashboard only — conditionally rendered). Keyboard shortcuts button (`?`). Connection status badge. Design doc Sections 9.2, 9.4. | `ui/src/lib/components/layout/Header.svelte` |
-| 4.4 | Implement `ConnectionStatus.svelte` | Reads `liveDataStore.connected`. Renders `StatusBadge` with connected/reconnecting/disconnected states. `aria-live="polite"` with transition-only announcements ("Live updates connected" / "Live updates paused — reconnecting"). Design doc Section 9.4. | `ui/src/lib/components/layout/ConnectionStatus.svelte` |
-| 4.5 | Implement keyboard shortcuts overlay | Triggered by `?` key (when no input focused) or header button. Modal with shortcuts grouped by context: Global, Dashboard, Tables, Playground. Uses `ConfirmDialog` primitive (or Bits UI dialog). Design doc Section 9.2. | `ui/src/lib/components/layout/KeyboardShortcuts.svelte` |
-| 4.6 | Implement route-change focus management | `afterNavigate` callback in `+layout.svelte`: focus moves to `<h1>` of new page (`tabindex="-1"` on `<h1>` for programmatic focus). Design doc Section 9.3. | `ui/src/routes/+layout.svelte` |
-| 4.7 | Create page stub routes | Stub `+page.svelte` for each route: `/` (Dashboard), `/servers/[id]`, `/queue`, `/explorer`, `/config/servers`, `/config/priority`, `/playground`, `/models`. Each stub renders `<h1>` with page title and `<p>Placeholder</p>`. | `ui/src/routes/*/+page.svelte` |
-| 4.8 | Implement sidebar link prefetching | `on:mouseenter` on sidebar links calls `prefetchRouteData(routeKey)`. Design doc Section 7.1 prefetching strategy. | `ui/src/lib/components/layout/Sidebar.svelte` |
-| 4.9 | Implement sidebar responsive behavior | Below 768px: sidebar collapses to icon-only. Below 640px: sidebar becomes a slide-out drawer. Toggle button visible on mobile. | `ui/src/lib/components/layout/Sidebar.svelte` |
-| 4.10 | Implement skeleton layout dimensions | CSS custom properties: `--sidebar-width: 240px`, `--sidebar-collapsed-width: 64px`, `--header-height: 56px`. Skeleton placeholders match these dimensions to prevent CLS. Design doc Section 4.4. | `ui/src/app.css` |
-| 4.11 | Unit tests: Sidebar | Active link has `aria-current="page"`. Arrow keys navigate between links. Collapse toggles width. | tests |
-| 4.12 | Unit tests: ConnectionStatus | Render connected → assert green badge. Render disconnected → assert red badge with "reconnecting" text. | tests |
-| 4.13 | Unit tests: route-change focus | Navigate to new route → assert `document.activeElement` is `<h1>`. | tests |
-| 4.14 | Unit tests: keyboard shortcuts overlay | Press `?` → assert overlay visible. Press `Escape` → assert overlay closed. | tests |
+| 4.1 | Define recommendation types | `RecommendationRequest`, `ConfigRecommendation`, `ServerRecommendation`, `RecommendationResult`. `serde::Serialize`/`Deserialize`. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.2 | Implement VRAM budget calculation | For each model: estimate model size from file_size_bytes, estimate KV cache from ctx_size, add overhead. Per Open Question #1 (filename heuristics in v1; GGUF header parsing deferred, `parse_gguf` still stubbed), use a transparent file-size-based heuristic — **not** `compute_vram_estimate`, which requires full GGUF metadata. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.3 | Implement gpu_layers recommendation | If total estimated VRAM <= available GPU VRAM: `gpu_layers: -1` (full offload). Otherwise: compute partial offload. If no GPU: `gpu_layers: 0`. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.4 | Implement ctx_size recommendation | Default 8192. Scale down if VRAM is tight (4096 minimum). Do **not** scale above 8192 — design doc Section 11.5's canonical example keeps ctx 8192 for an 8B-on-24GB box ("room for a second model"), and design > PLAN. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.5 | Implement parallel_slots recommendation | Default 2. Decrease to 1 if VRAM is tight. Do **not** auto-increase above 2 — design doc Section 11.5's canonical example uses 2 slots for an 8B-on-24GB box. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.6 | Implement cache type recommendation | Default `q8_0` for both k and v; `flash_attn: "auto"`. Do **not** switch to `f16` when VRAM is ample — design doc Section 11.5's canonical example uses `q8_0`, matching the merged engine. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.7 | Implement port auto-assignment | Start at 8080. Increment for each additional server. Avoid conflicts with known ports. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.8 | Implement rationale generation | For each recommended field, generate a human-readable rationale string explaining the reasoning. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.9 | Implement multi-model VRAM warnings | If total estimated VRAM across all models exceeds available VRAM, emit a warning. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.10 | Implement `recommend()` public API | Takes `HardwareInfo` + `Vec<ModelInput>`, returns `RecommendationResult`. | `crates/llamaforge-server/src/recommendation.rs` |
+| 4.11 | Export module from lib.rs | Add `pub mod recommendation;` to `llamaforge-server/src/lib.rs`. | `crates/llamaforge-server/src/lib.rs` |
+| 4.12 | Unit tests: single model, ample VRAM | 8B Q4_K_M model + 24GB GPU. Assert `gpu_layers: -1`, `ctx_size: 8192`, `parallel_slots: 2`. | `crates/llamaforge-server/tests/recommendation_tests.rs` |
+| 4.13 | Unit tests: single model, tight VRAM | 70B Q4_K_M model + 24GB GPU. Assert partial offload, reduced ctx_size. | `crates/llamaforge-server/tests/recommendation_tests.rs` |
+| 4.14 | Unit tests: no GPU (CPU-only) | Assert `gpu_layers: 0`, rationale mentions CPU-only mode. | `crates/llamaforge-server/tests/recommendation_tests.rs` |
+| 4.15 | Unit tests: multi-model port assignment | 3 models. Assert ports 8080, 8081, 8082. | `crates/llamaforge-server/tests/recommendation_tests.rs` |
+| 4.16 | Unit tests: multi-model VRAM warning | 2 models exceeding total VRAM. Assert warning in result. | `crates/llamaforge-server/tests/recommendation_tests.rs` |
 
 ### PR4 Acceptance Criteria
 
-- [ ] All 7 page routes render with correct `<h1>` and breadcrumb
-- [ ] Sidebar navigation works with arrow keys
-- [ ] Route changes move focus to `<h1>`
-- [ ] Skip link visible on focus, jumps to `<main>`
-- [ ] Connection status shows live/reconnecting/disconnected with `aria-live`
-- [ ] Keyboard shortcuts overlay opens via `?` key and header button
-- [ ] Sidebar collapse state persists across sessions
-- [ ] SSE subscribes on mount, unsubscribes on cleanup
-- [ ] All 4 test suites pass
+- [ ] `recommend()` produces valid `ConfigRecommendation` for each model
+- [ ] `gpu_layers` correctly reflects VRAM availability (full offload, partial, or CPU-only)
+- [ ] `ctx_size` scales with available VRAM
+- [ ] Port auto-assignment starts at 8080 and increments
+- [ ] Rationale strings are non-empty and explain the reasoning
+- [ ] Multi-model VRAM overflow produces a warning
+- [ ] All 5 test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR4 Creation Steps
 
 ```bash
-git checkout -b ui/04-app-shell frontend
-# ... implement tasks 4.1–4.14 ...
-git add -A && git commit -m "ui: implement app shell with sidebar, header, routing, and focus management"
-git push -u origin ui/04-app-shell
-# Open PR: "Web UI PR4: App Shell — Layout, Sidebar, Header & Routing"
-# Description: "Builds the application shell (FRONTEND_ARCHITECTURE.md Sections 4.3, 9.2–9.4).
-# Root layout with nav/header/main landmarks. Sidebar with arrow key navigation and
-# collapse persistence. Route-change focus management via afterNavigate. Skip links.
-# Connection status with aria-live announcements. Keyboard shortcuts overlay.
-# Sidebar link prefetching. 4 test suites."
+git checkout -b setup/04-recommendation main
+# ... implement tasks 4.1–4.16 ...
+git add -A && git commit -m "setup: add config recommendation engine with VRAM-aware gpu_layers, ctx_size, and rationale"
+git push -u origin setup/04-recommendation
+# Open PR: "Setup Wizard PR4: Config Recommendation Engine"
+# Description: "Implements config recommendations (08_SETUP_WIZARD.md Section 11.5, Appendix: Config Recommendation).
+# Takes hardware + models, computes gpu_layers/ctx_size/parallel_slots/cache types using existing
+# vram_estimate.rs. Rationale strings for each recommendation. Port auto-assignment from 8080.
+# Multi-model VRAM overflow warnings. 5 test suites with deterministic inputs."
 ```
 
 ---
 
-## PR5: Dashboard Page — ServerGrid, ServerCard, Gauges & Health Banner
+## PR5: Setup API Endpoints
 
-**Branch:** `ui/05-dashboard`  
-**Depends on:** PR4 merged to `frontend`  
-**Size:** Medium (~450 lines)  
-**Estimated Time:** 6–8 hours  
-**Design Reference:** `design_reference/v1/Dashboard.html` — server card grid, aggregate metric cards, skeleton/loading/empty/error states. `design_reference/v1/Component Library.html` — ServerCard variants
+**Branch:** `setup/05-api-endpoints`  
+**Merge Target:** `main`  
+**Depends on:** PR1, PR2, PR3, PR4 all merged to `main`  
+**Size:** Large (~600 lines)  
+**Estimated Time:** 8–10 hours  
 
 ### Purpose
 
-Implement the complete dashboard page (minus charts — those come in PR6 with ECharts). This includes the server grid with roving tabindex, server cards with the `availableActions` prop pattern, queue depth gauge, system health banner, and the "Dashboard Summary" button for screen readers.
+Mount all `/api/setup/*` endpoints on an axum router. This is the adapter layer that wires the domain modules (hardware, model_scanner, binary_scanner, recommendation) to HTTP. Includes the `setup_router()` shared function (Section 12.1), the `save-config` and `preview-config` endpoints (Section 11.6), session correlation via `X-Setup-Session-Id` (Section 11.7), and all backend observability (structured tracing spans per Section 11.7). Also includes the `validate-launch` endpoint for first-run mode validation.
+
+Design doc references: Section 11 (all API contracts), Section 11.7 (Backend Observability), Section 12.1 (Shared Setup Router), Section 13.5 (Save-Config Flow with Pre-Validation).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 5.1 | Implement `DashboardPage` (orchestrator) | Route `+page.svelte`. Subscribes to server list, queue, and metrics queries via TanStack Query. Computes `availableActions` per server via `getAvailableActions()`. Passes data to presentational children. Handles server restart/stop/start mutations. "Dashboard Summary" button triggers `aria-live` announcement. Design doc Section 5.1. | `ui/src/routes/+page.svelte` |
-| 5.2 | Implement `ServerGrid.svelte` | APG Grid pattern with roving tabindex. Single tab stop for entire grid. Arrow keys navigate between cards. Home/End move to first/last in row. Enter opens server detail. Dynamic removal: focus moves to next card (or previous if last). Design doc Section 9.2. | `ui/src/lib/components/dashboard/ServerGrid.svelte` |
-| 5.3 | Implement `ServerCard.svelte` (presentational) | Props: `ServerCardProps` (server, metrics, selected, availableActions). Renders server name, status via `StatusBadge`, key metrics (throughput, latency, slots). Action buttons: renders only the actions in `availableActions`. `onSelect`, `onAction` callbacks. Design doc Section 5.2. | `ui/src/lib/components/dashboard/ServerCard.svelte` |
-| 5.4 | Implement `QueueDepthGauge.svelte` (presentational) | Props: `depth`, `capacity`. `role="meter"` with `aria-valuenow/min/max`. Visually hidden `<span>` fallback: "Queue depth: N of M". Design doc Section 9.1. | `ui/src/lib/components/dashboard/QueueDepthGauge.svelte` |
-| 5.5 | Implement `SystemHealthBanner.svelte` (presentational) | Props: `healthStatus`, `serverCounts`. Renders banner when any server is degraded/failed. Uses `ErrorBanner` variant. Triple-redundancy via `StatusBadge`. | `ui/src/lib/components/dashboard/SystemHealthBanner.svelte` |
-| 5.6 | Implement Dashboard Summary button | Visible button in header (rendered only on dashboard route). `aria-label="Announce dashboard summary"`. On click: compose summary string ("3 servers healthy, 1 degraded. Total throughput 142 tok/s. Queue depth 7.") and inject into `aria-live` region. Design doc Section 9.4. | `ui/src/routes/+page.svelte` |
-| 5.7 | Implement server card hover prefetching | `on:mouseenter` on `ServerCard` calls `prefetchServerDetail(server.id)`. Design doc Section 7.1. | `ui/src/lib/components/dashboard/ServerCard.svelte` |
-| 5.8 | Implement dashboard skeleton loading state | While server data is loading: render `Skeleton` components matching card dimensions. `--card-min-height: 180px`. CSS Grid with `auto-fill` and `minmax(320px, 1fr)`. Design doc Section 4.4. | `ui/src/routes/+page.svelte` |
-| 5.9 | Implement dashboard responsive layout | Grid reflows naturally via CSS Grid `auto-fill`. Below 640px: single column. Cards have `min-width: 320px`. Content max-width: 1400px. Design doc Section 4.5. | `ui/src/routes/+page.svelte` |
-| 5.10 | Unit tests: ServerCard renders availableActions | Pass `['restart', 'stop']` → assert 2 buttons. Pass `[]` → assert no buttons. Assert `start` button absent when not in `availableActions`. Design doc test from Section 11.1. | tests |
-| 5.11 | Unit tests: getAvailableActions mapping | `running → ['restart', 'stop']`, `stopped → ['start']`, `failed → ['start']`, `restarting → []`. Already tested in PR3 but validate integration here. | tests |
-| 5.12 | Unit tests: ServerGrid keyboard | Arrow keys navigate between cards. Enter triggers `onSelect`. Home/End jump to first/last. | tests |
-| 5.13 | Unit tests: QueueDepthGauge accessibility | Assert `role="meter"`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`. Assert hidden fallback span text. | tests |
-| 5.14 | Unit tests: Dashboard Summary | Click button → assert `aria-live` region content updated with summary text. | tests |
+| 5.1 | Create setup module in llamaforge-api | Create `crates/llamaforge-api/src/setup/mod.rs` with handler module stubs. If `llamaforge-api` crate does not yet exist, create it with appropriate Cargo.toml using workspace dependencies. | `crates/llamaforge-api/src/setup/mod.rs` |
+| 5.2 | Implement `hardware_handler` | `GET /api/setup/hardware`. Calls `detect_hardware()`. Optional `?diagnostics=true` query param. Tracing span: `setup_request`, `endpoint = "hardware"`, `setup_session_id`. | `crates/llamaforge-api/src/setup/hardware.rs` |
+| 5.3 | Implement `scan_binary_handler` | `POST /api/setup/scan-binary`. Calls `scan_binary()`. CSRF header required. Tracing span with session ID. | `crates/llamaforge-api/src/setup/binary.rs` |
+| 5.4 | Implement `scan_models_handler` | `POST /api/setup/scan-models`. Validates input (non-empty directories, max 10, no path traversal). Calls `scan_models()`. CSRF header required. Tracing span. | `crates/llamaforge-api/src/setup/models.rs` |
+| 5.5 | Implement `recommend_handler` | `POST /api/setup/recommend`. Reads cached hardware from in-memory state. Calls `recommend()`. CSRF header required. Tracing span. | `crates/llamaforge-api/src/setup/recommend.rs` |
+| 5.6 | Implement `save_config_handler` | `POST /api/setup/save-config`. Assembles `AppConfig` from wizard inputs. Pre-validation: round-trip TOML fidelity, path resolution, port availability. Write mutex (`tokio::sync::Mutex`). Backup before overwrite (max 5 backups). CSRF required. Tracing span. | `crates/llamaforge-api/src/setup/save_config.rs` |
+| 5.7 | Implement `preview_config_handler` | `POST /api/setup/preview-config`. Same assembly as save-config but returns rendered TOML without writing. CSRF required. | `crates/llamaforge-api/src/setup/preview_config.rs` |
+| 5.8 | Implement `validate_launch_handler` | `POST /api/setup/validate-launch`. Spawns the first configured server, waits for health check (30s timeout), kills validation server. Returns success/failure with stderr. | `crates/llamaforge-api/src/setup/validate_launch.rs` |
+| 5.9 | Implement hardware cache | In-memory `Arc<RwLock<Option<HardwareInfo>>>`. Populated by hardware_handler. Read by recommend_handler. | `crates/llamaforge-api/src/setup/state.rs` |
+| 5.10 | Implement session correlation middleware | Extract `X-Setup-Session-Id` header. Set `setup_session_id` field on the tracing span. Default to `"anonymous"` if missing. | `crates/llamaforge-api/src/setup/mod.rs` |
+| 5.11 | Implement `setup_router()` | Compose all routes into a single `Router`. This is the shared function used by both standalone and first-run modes. | `crates/llamaforge-api/src/setup/mod.rs` |
+| 5.12 | Implement input validation | `scan-models` with empty directories -> 400. `scan-binary` with null bytes -> 400. `save-config` with unwritable path -> 403. `recommend` with empty models -> 400. `build` with invalid backend -> 400. | `crates/llamaforge-api/src/setup/` (various handlers) |
+| 5.13 | Implement version field | All responses include `"version": 1` at the top level. | `crates/llamaforge-api/src/setup/` (response types) |
+| 5.14 | Integration tests: hardware endpoint | Mock shell commands (set PATH to fixture directory). Hit `GET /api/setup/hardware`. Assert response shape. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.15 | Integration tests: scan-models endpoint | Create tempdir with .gguf files. Hit `POST /api/setup/scan-models`. Assert response contains discovered models. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.16 | Integration tests: scan-binary endpoint | Create mock binary script. Hit `POST /api/setup/scan-binary` with extra_paths. Assert found. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.17 | Integration tests: recommend endpoint | Pre-populate hardware cache. Hit `POST /api/setup/recommend` with model list. Assert recommendations. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.18 | Integration tests: input validation | Hit each endpoint with invalid input. Assert 400/403 with structured error. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.19 | Integration tests: save-config + preview-config | Hit preview-config, verify TOML returned. Hit save-config, verify file written. Hit save-config again without force, verify 409. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
+| 5.20 | Integration tests: session correlation | Send requests with `X-Setup-Session-Id` header. Verify session ID appears in tracing output. | `crates/llamaforge-api/tests/setup_api_tests.rs` |
 
 ### PR5 Acceptance Criteria
 
-- [ ] Dashboard renders server cards from TanStack Query data
-- [ ] ServerCard renders only `availableActions` from orchestrator
-- [ ] ServerGrid uses roving tabindex (single tab stop, arrow key navigation)
-- [ ] QueueDepthGauge has `role="meter"` with hidden fallback
-- [ ] Dashboard Summary button announces via `aria-live`
-- [ ] Server card hover prefetches detail data
-- [ ] Skeleton loading state matches card dimensions (no CLS)
-- [ ] All 5 test suites pass
+- [ ] All 8 `/api/setup/*` endpoints mounted and responding
+- [ ] `setup_router()` function is reusable for standalone and first-run modes
+- [ ] CSRF header required on all POST endpoints
+- [ ] `X-Setup-Session-Id` extracted and attached to tracing spans
+- [ ] All responses include `"version": 1`
+- [ ] Save-config: pre-validation (round-trip, path resolution, port check), write mutex, backup (max 5)
+- [ ] Preview-config: same assembly, no write
+- [ ] Input validation: empty directories 400, null bytes 400, unwritable path 403, empty models 400
+- [ ] Hardware cache shared between hardware and recommend endpoints
+- [ ] All 7 integration test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR5 Creation Steps
 
 ```bash
-git checkout -b ui/05-dashboard frontend
-# ... implement tasks 5.1–5.14 ...
-git add -A && git commit -m "ui: implement dashboard with ServerGrid, ServerCard, and availableActions pattern"
-git push -u origin ui/05-dashboard
-# Open PR: "Web UI PR5: Dashboard Page"
-# Description: "Implements the complete dashboard (FRONTEND_ARCHITECTURE.md Sections 5.1–5.2,
-# 9.1–9.4). ServerGrid with APG Grid roving tabindex. ServerCard with availableActions prop
-# pattern (no business logic in presentational component). QueueDepthGauge with role=meter
-# fallback. Dashboard Summary button for screen readers. Skeleton loading states.
-# Server card hover prefetching. 5 test suites."
+git checkout -b setup/05-api-endpoints main
+# ... implement tasks 5.1–5.20 ...
+git add -A && git commit -m "setup: mount all /api/setup/* endpoints with session correlation and observability"
+git push -u origin setup/05-api-endpoints
+# Open PR: "Setup Wizard PR5: Setup API Endpoints"
+# Description: "Implements all setup API endpoints (08_SETUP_WIZARD.md Section 11, 12.1).
+# setup_router() shared between standalone and first-run modes. hardware, scan-binary, scan-models,
+# recommend, save-config (with pre-validation, write mutex, backup), preview-config, validate-launch.
+# Session correlation via X-Setup-Session-Id. Structured tracing spans per Section 11.7.
+# Input validation with 400/403 error responses. 7 integration test suites."
 ```
 
 ---
 
-## VC-2: App Shell & Dashboard Verification Checkpoint
+## VC-1: Backend Foundation Verification Checkpoint
 
-**Gate:** PR5 merged. The app shell and first real page are working.
+**Gate:** PR1–PR5 merged to `main`. All scan/detect/recommend endpoints return correct data.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-2.1 | Navigation works | Click each sidebar link → correct page renders with `<h1>` | All 7 routes render |
-| VC-2.2 | Focus management | Navigate Dashboard → Queue → Dashboard → verify `<h1>` focused each time | `document.activeElement` is `<h1>` |
-| VC-2.3 | SSE → Dashboard update | Mock backend pushes `server-update` SSE → card updates without refresh | Card reflects new data |
-| VC-2.4 | SSE disconnect → polling fallback | Kill SSE → banner shows "reconnecting" → data still refreshes via polling | Data stays current |
-| VC-2.5 | ServerCard actions | Card for running server shows Restart/Stop. Card for stopped server shows Start. | Actions match status |
-| VC-2.6 | Keyboard navigation | Tab into dashboard → arrow keys between cards → Enter opens detail → Escape returns | Full keyboard flow works |
-| VC-2.7 | axe-core clean | Run `axe-core` on dashboard page in both themes | Zero violations |
+| VC-1.1 | Hardware detection | `curl http://127.0.0.1:8000/api/setup/hardware` | Returns GPU/CPU/RAM for the test machine |
+| VC-1.2 | Binary scan | `curl -X POST -H "X-LlamaForge-Request: 1" http://127.0.0.1:8000/api/setup/scan-binary` | Finds `llama-server` if installed, returns searched_paths if not |
+| VC-1.3 | Model scan | `curl -X POST -H "X-LlamaForge-Request: 1" -d '{"source":"local","directories":["./models"]}' http://127.0.0.1:8000/api/setup/scan-models` | Returns discovered .gguf files |
+| VC-1.4 | Recommendation | `curl -X POST -H "X-LlamaForge-Request: 1" -d '{"models":[...]}' http://127.0.0.1:8000/api/setup/recommend` | Returns gpu_layers, ctx_size, rationale per model |
+| VC-1.5 | Preview config | `curl -X POST -H "X-LlamaForge-Request: 1" -d '...' http://127.0.0.1:8000/api/setup/preview-config` | Returns valid TOML string |
+| VC-1.6 | Save config | Write config to temp path, verify file contents match preview | File written, valid TOML |
+| VC-1.7 | Input validation | Send invalid inputs to each endpoint | All return structured 400/403 errors |
+| VC-1.8 | Session correlation | `grep setup_session_id` in log output | Session ID present on all requests |
 
 ---
 
-## PR6: EChartsWrapper & Dashboard Charts
+## Phase 2: Build System + CLI
 
-**Branch:** `ui/06-charts`  
-**Depends on:** PR5 merged to `frontend`  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 5–7 hours  
-**Design Reference:** `design_reference/v1/Dashboard.html` — chart placement, 16:9 aspect ratio, throughput and latency chart layout
+---
+
+## PR6: Build Orchestrator
+
+**Branch:** `setup/06-build-orchestrator`  
+**Merge Target:** `main`  
+**Depends on:** PR5 merged to `main`  
+**Size:** Large (~700 lines)  
+**Estimated Time:** 10–12 hours  
 
 ### Purpose
 
-Implement the lazy-loaded ECharts integration via the `EChartsWrapper` shared component, then the dashboard-specific chart components: `ThroughputChart` and `LatencyPercentileChart`. This includes RAF-batched updates, 500-point sliding window, `chart.dispose()` + `ResizeObserver.disconnect()` on unmount, and the visually hidden accessible table alternative.
+Implement the build orchestrator that clones llama.cpp, runs cmake + make as child processes in a process group, and streams build output via SSE. Uses the job pattern: `POST /api/setup/build` creates a build, `GET /api/setup/build/{id}` polls status, `GET /api/setup/build/{id}/stream` connects to the SSE stream, `DELETE /api/setup/build/{id}` cancels. Includes per-phase timeouts (clone 5m, configure 5m, build 20m), process group management (`setsid`/`setpgid`), temp directory cleanup, binary backup-before-overwrite, disk space check, build log persistence, and SSE reconnection with terminal event replay.
+
+Design doc references: Section 11.4 (Build API contract), Section 11.7 (Backend Observability — build process logging, Build Log Persistence), Appendix: Implementation Notes (Build Process).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 6.1 | Implement `EChartsWrapper.svelte` | Lazy-loads ECharts via dynamic `import('echarts')`. Shows `Skeleton` placeholder until loaded. Creates chart instance on container. `ResizeObserver` for responsive resize (disconnected on unmount). `chart.dispose()` on unmount. `$effect` cleanup returns both `observer.disconnect()` and `chart.dispose()`. Design doc Section 5.3. | `ui/src/lib/components/shared/EChartsWrapper.svelte` |
-| 6.2 | Implement `requestAnimationFrame` batched updates | `setOption()` calls throttled to at most 1 per animation frame per chart. Multiple SSE-driven data updates within one frame coalesced. Design doc Section 8.2. | `ui/src/lib/components/shared/EChartsWrapper.svelte` |
-| 6.3 | Implement 500-point sliding window | Each chart data series capped at 500 points. Older points evicted on push. Design doc Section 8.2. | `ui/src/lib/components/shared/EChartsWrapper.svelte` |
-| 6.4 | Implement background tab pausing | When `document.hidden === true`, skip chart `setOption()` calls. On tab focus, single bulk update. Design doc Section 8.2. | `ui/src/lib/components/shared/EChartsWrapper.svelte` |
-| 6.5 | Implement accessible chart table | Visually hidden `<table>` inside chart container with most recent 20 data points. "Showing most recent 20 of N data points. Full data available via CSV export." Chart `<canvas>` has `aria-hidden="true"`, container has `role="img"` with `aria-label` summary. Design doc Section 9.4. | `ui/src/lib/components/shared/EChartsWrapper.svelte` |
-| 6.6 | Implement `ThroughputChart.svelte` (presentational) | Props: `data: TimeSeriesPoint[]`. Line chart showing aggregate throughput over time. ECharts colorblind-safe palette. Pattern textures for line differentiation. | `ui/src/lib/components/dashboard/ThroughputChart.svelte` |
-| 6.7 | Implement `LatencyChart.svelte` (presentational) | Props: `data: LatencyPercentilePoint[]`, `percentiles: number[]`. Multi-line chart for p50/p90/p99 latency. | `ui/src/lib/components/dashboard/LatencyChart.svelte` |
-| 6.8 | Wire charts into DashboardPage | Add `ThroughputChart` and `LatencyChart` below `ServerGrid`. Feed from metrics TanStack Query. Chart containers use `aspect-ratio` with skeleton placeholders. Design doc Section 4.4. | `ui/src/routes/+page.svelte` |
-| 6.9 | Unit tests: EChartsWrapper lifecycle | Mount → assert `import('echarts')` called lazily. Unmount → assert `chart.dispose()` and `observer.disconnect()` called. | tests |
-| 6.10 | Unit tests: sliding window | Push 600 points → assert array length === 500, oldest 100 evicted. | tests |
-| 6.11 | Unit tests: accessible table | Assert hidden table has ≤ 20 rows. Assert "Showing most recent 20 of N" text. Assert `aria-hidden="true"` on canvas. | tests |
+| 6.1 | Define build types | `BuildRequest`, `BuildStatus` (enum: idle/running/complete/failed/cancelled), `BuildPhase` (cloning/configuring/building), SSE event types (`phase`, `progress`, `log`, `complete`, `failed`). | `crates/llamaforge-server/src/build.rs` |
+| 6.2 | Implement process group management | Spawn child processes in their own process group via `setsid` (Linux) or `setpgid` (macOS). Implement `kill_process_group()`: SIGTERM -> 5s grace -> SIGKILL. | `crates/llamaforge-server/src/build.rs` |
+| 6.3 | Implement git clone phase | `git clone --depth=1 https://github.com/ggerganov/llama.cpp.git` into temp directory. Parse progress from stdout. 5-minute timeout. | `crates/llamaforge-server/src/build.rs` |
+| 6.4 | Implement cmake configure phase | `cmake -B build -DGGML_CUDA=ON` (or Metal/Vulkan/CPU). Parse output. 5-minute timeout. | `crates/llamaforge-server/src/build.rs` |
+| 6.5 | Implement cmake build phase | `cmake --build build -j <jobs> --target llama-server`. Parse `[N/M]` progress from stdout. 20-minute timeout. Jobs capped at `min(requested, num_cpus / 2)`. Nice value 10. | `crates/llamaforge-server/src/build.rs` |
+| 6.6 | Implement build log persistence | Tee all stdout/stderr to `$XDG_DATA_HOME/llamaforge/build-logs/build-<ISO-timestamp>.log`. Retention: last 5 builds or 30 days. Cleanup on build start. | `crates/llamaforge-server/src/build.rs` |
+| 6.7 | Implement SSE stream | `GET /api/setup/build/{id}/stream` returns `text/event-stream`. Events: `phase`, `progress`, `log`, `complete`, `failed`. Log throttled to max 10 events/s via batching. | `crates/llamaforge-api/src/setup/build_stream.rs` |
+| 6.8 | Implement terminal event replay | If build finished while client was disconnected, replay `complete` or `failed` event on reconnect. | `crates/llamaforge-api/src/setup/build_stream.rs` |
+| 6.9 | Implement build job state | In-memory `HashMap<Uuid, BuildJob>` behind `Arc<RwLock<>>`. Tracks status, log lines, SSE sender. | `crates/llamaforge-api/src/setup/build_state.rs` |
+| 6.10 | Implement `POST /api/setup/build` handler | Creates build job. Idempotent: if a build is already running for the same backend, return existing build_id. Disk space check (5 GB minimum). CSRF required. | `crates/llamaforge-api/src/setup/build_handler.rs` |
+| 6.11 | Implement `GET /api/setup/build/{id}` handler | Returns current status, phase, percent, last_lines. | `crates/llamaforge-api/src/setup/build_handler.rs` |
+| 6.12 | Implement `DELETE /api/setup/build/{id}` handler | Cancels the build. Kills process group. Cleans up temp directory. CSRF required. | `crates/llamaforge-api/src/setup/build_handler.rs` |
+| 6.13 | Implement binary backup-before-overwrite | Before copying built binary to `install_dir`, rename existing binary to `llama-server.backup.<ISO-timestamp>`. Include `replaced_existing` and `backup_path` in `complete` SSE event. | `crates/llamaforge-server/src/build.rs` |
+| 6.14 | Implement temp directory cleanup | On failure: clean up unless retry pending (2-minute grace). On skip: clean up immediately. On success: clean up after binary copy. On SSE disconnect: 2-minute grace, then kill + cleanup. | `crates/llamaforge-server/src/build.rs` |
+| 6.15 | Mount build endpoints on setup_router | Add build routes to the `setup_router()` function from PR5. | `crates/llamaforge-api/src/setup/mod.rs` |
+| 6.16 | Add SSE dependencies to workspace | Add `tokio-stream` and `axum-extra` (with `sse` feature) to `[workspace.dependencies]` if not already present. | `Cargo.toml`, `crates/llamaforge-api/Cargo.toml` |
+| 6.17 | Integration tests: build with mock git/cmake | Create shell scripts that mimic git clone + cmake progress output. Assert SSE events arrive in correct order. | `crates/llamaforge-api/tests/build_tests.rs` |
+| 6.18 | Integration tests: build cancellation | Start build, DELETE it mid-clone. Assert process group killed, temp dir cleaned. | `crates/llamaforge-api/tests/build_tests.rs` |
+| 6.19 | Integration tests: build timeout | Create a mock cmake that hangs. Assert `failed` event with timeout message after per-phase timeout. | `crates/llamaforge-api/tests/build_tests.rs` |
+| 6.20 | Integration tests: idempotent POST | POST build twice with same backend. Assert same build_id returned. | `crates/llamaforge-api/tests/build_tests.rs` |
+| 6.21 | Integration tests: disk space check | Mock disk check to return < 5 GB. Assert 409 with `insufficient_disk`. | `crates/llamaforge-api/tests/build_tests.rs` |
+| 6.22 | Integration tests: SSE reconnect with terminal replay | Start build, complete it, then connect to stream. Assert `complete` event replayed. | `crates/llamaforge-api/tests/build_tests.rs` |
 
 ### PR6 Acceptance Criteria
 
-- [ ] ECharts loads lazily — not in initial bundle (verify via `npm run build` output)
-- [ ] Skeleton visible until ECharts initializes
-- [ ] `chart.dispose()` and `observer.disconnect()` called on unmount (no leaks)
-- [ ] Sliding window caps at 500 points
-- [ ] Chart updates throttled to 1 per animation frame
-- [ ] Background tab pauses chart updates
-- [ ] Hidden accessible table limited to 20 data points with "N of M" note
-- [ ] Colorblind-safe palette used
-- [ ] All 3 test suites pass
+- [ ] `POST /api/setup/build` creates a build job with UUID
+- [ ] `GET /api/setup/build/{id}/stream` returns SSE stream with `phase`, `progress`, `log`, `complete`/`failed` events
+- [ ] Log events throttled to max 10/s via batching
+- [ ] Per-phase timeouts: clone 5m, configure 5m, build 20m
+- [ ] Jobs capped at `min(requested, num_cpus / 2)`
+- [ ] Process group management: SIGTERM -> 5s -> SIGKILL on cancel/timeout
+- [ ] Binary backup-before-overwrite with `replaced_existing` + `backup_path`
+- [ ] Temp directory cleaned up on all exit paths (success, failure, cancel, disconnect)
+- [ ] Build log persisted to `$XDG_DATA_HOME/llamaforge/build-logs/`
+- [ ] Terminal event replay on SSE reconnect
+- [ ] Disk space check (5 GB minimum) returns 409 on insufficient space
+- [ ] Idempotent POST returns existing build_id
+- [ ] All 6 integration test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR6 Creation Steps
 
 ```bash
-git checkout -b ui/06-charts frontend
-# ... implement tasks 6.1–6.11 ...
-git add -A && git commit -m "ui: implement EChartsWrapper with lazy loading, RAF batching, and accessible table"
-git push -u origin ui/06-charts
-# Open PR: "Web UI PR6: EChartsWrapper & Dashboard Charts"
-# Description: "Implements ECharts integration (FRONTEND_ARCHITECTURE.md Sections 5.3, 8.2, 9.4).
-# Lazy-loaded via dynamic import. RAF-batched updates. 500-point sliding window. Background tab
-# pausing. ResizeObserver + chart.dispose() cleanup. Visually hidden accessible table (20 points).
-# ThroughputChart and LatencyChart for dashboard. 3 test suites."
+git checkout -b setup/06-build-orchestrator main
+# ... implement tasks 6.1–6.22 ...
+git add -A && git commit -m "setup: add build orchestrator with SSE streaming, process groups, and per-phase timeouts"
+git push -u origin setup/06-build-orchestrator
+# Open PR: "Setup Wizard PR6: Build Orchestrator"
+# Description: "Implements the build system (08_SETUP_WIZARD.md Section 11.4).
+# Job pattern: POST create + GET status + GET stream + DELETE cancel.
+# git clone + cmake as child processes in process groups. SSE streaming with
+# phase/progress/log/complete/failed events. Per-phase timeouts (5m/5m/20m).
+# Log throttling (10/s). Build log persistence. Binary backup. Temp cleanup.
+# Terminal event replay. Disk space check. 6 integration test suites."
 ```
 
 ---
 
-## PR7: Server Detail Page
+## PR7: CLI Changes + First-Run Mode
 
-**Branch:** `ui/07-server-detail`  
-**Depends on:** PR4 merged to `frontend` (can be developed concurrently with PR5/PR6)  
-**Size:** Medium (~350 lines)  
-**Estimated Time:** 5–7 hours  
-**Design Reference:** `design_reference/v1/Server Detail.html` — slot grid, metrics panel, action bar with pending/failed/confirm states
+**Branch:** `setup/07-cli-first-run`  
+**Merge Target:** `main`  
+**Depends on:** PR6 merged to `main`  
+**Size:** Medium (~500 lines)  
+**Estimated Time:** 7–9 hours  
 
 ### Purpose
 
-Implement the server detail page with slot grid, server metrics panel, config summary, and the `ServerActionBar` with `DetailServerAction` type. Reuses `EChartsWrapper` from PR6 for per-server metrics charts.
+Add `--interactive` flag and `--timeout` option to `llamaforge init`. Implement the standalone wizard server lifecycle (Section 12): minimal axum server on ephemeral port, idle timeout, browser auto-open, periodic URL reminder, clean shutdown. Implement first-run detection in `llamaforge serve` (Section 13): `ConfigLoadError` triage, `Mode` state machine (`Setup -> Transitioning -> Running`), `SetupModeGuard` middleware for 503 on inference endpoints, `GET /api/status` with `setup_required` field, shared `setup_router()` integration.
+
+Design doc references: Section 12 (Standalone Wizard Mode), Section 13 (First-Run Detection and Mode State Machine).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 7.1 | Implement `ServerDetailPage` (orchestrator) | Route `+page.svelte` at `/servers/[id]`. Fetches server detail, metrics, and slot data via TanStack Query. Computes `availableActions` (extended with `force_kill`). Handles all server actions. `$effect` subscribes to SSE. | `ui/src/routes/servers/[id]/+page.svelte` |
-| 7.2 | Implement `SlotGrid.svelte` (presentational) | Props: `slots: SlotState[]`, `serverName: string`. Grid of slot cells showing slot status (idle/processing/loading). Color + icon per status via `StatusBadge`. | `ui/src/lib/components/server/SlotGrid.svelte` |
-| 7.3 | Implement `ServerMetrics.svelte` (presentational) | Props: server-level metrics. Renders throughput, latency percentiles, error rate, uptime. Uses `EChartsWrapper` for per-server time series charts. | `ui/src/lib/components/server/ServerMetrics.svelte` |
-| 7.4 | Implement `ServerActionBar.svelte` (presentational) | Props: `ServerActionBarProps` (server, availableActions: `Array<DetailServerAction>`, pendingAction: `DetailServerAction \| null`). `onAction: (action: DetailServerAction) => void`. `role="menu"` with `role="menuitem"` children (4 possible actions justifies menu pattern). Disables buttons during pending state. Design doc Section 5.2, 9.1. | `ui/src/lib/components/server/ServerActionBar.svelte` |
-| 7.5 | Implement server action focus management | Action button retains focus on state transition — DOM element not replaced, only label/handler updated. Result announced via `aria-live`. Design doc Section 9.3. | `ui/src/lib/components/server/ServerActionBar.svelte` |
-| 7.6 | Implement `ConfirmDialog` integration | Destructive actions (stop, force_kill) show confirmation dialog before executing. Non-destructive (restart, start) execute immediately with status feedback. | `ui/src/routes/servers/[id]/+page.svelte` |
-| 7.7 | Unit tests: ServerActionBar | Pass `['restart', 'stop', 'force_kill']` → assert 3 menu items. Set `pendingAction: 'restart'` → assert restart button disabled. Verify `role="menu"` and `role="menuitem"`. | tests |
-| 7.8 | Unit tests: SlotGrid | Render 8 slots (5 idle, 2 processing, 1 loading) → assert correct StatusBadge for each. | tests |
-| 7.9 | Unit tests: action focus retention | Trigger stop action → action completes → verify same button element focused with new label. | tests |
+| 7.1 | Add `--interactive` flag to Init subcommand | Add `interactive: bool` and `timeout: humantime::Duration` (default 30m) to the `Init` enum variant. When `interactive` is false, preserve existing template behavior. | `crates/llamaforge/src/main.rs` |
+| 7.2 | Implement standalone wizard server | Bind `127.0.0.1:0` (ephemeral port). Mount `ui_router().merge(setup_router())`. No gRPC, no inference, no config handle. Print URL to stdout. Attempt browser open (`open`/`xdg-open`). | `crates/llamaforge/src/init.rs` |
+| 7.3 | Implement idle timeout | `Arc<AtomicU64>` last-activity timestamp. Middleware on setup router resets on every `/api/setup/*` call. Tokio interval (60s check). Default 30m. Print reminder every 5m. Exit 0 on expiry. | `crates/llamaforge/src/init.rs` |
+| 7.4 | Implement standalone logging posture | Default `WARN` to stderr via `EnvFilter`. Single INFO startup message always emitted regardless of `RUST_LOG`. Hint for verbose: `RUST_LOG=debug`. | `crates/llamaforge/src/init.rs` |
+| 7.5 | Implement save-complete shutdown | After `save-config` + `validate-launch` succeed in standalone mode, shut down the server and exit 0. | `crates/llamaforge/src/init.rs` |
+| 7.6 | Define `Mode` enum | `Mode { Setup, Transitioning, Running }`. Wrapped in `Arc<ArcSwap<Mode>>`. | `crates/llamaforge/src/serve.rs` |
+| 7.7 | Implement `ConfigLoadError` triage | On `llamaforge serve`: `NotFound` -> setup mode. `EmptyFile` -> setup mode. `ParseError` -> `process::exit(78)` with error message. Normal load -> running mode. | `crates/llamaforge/src/serve.rs` |
+| 7.8 | Implement `SetupModeGuard` middleware | Tower middleware. When mode is `Setup` or `Transitioning`: inference endpoints return 503 (HTTP: JSON with `setup_url`; gRPC: `UNAVAILABLE` with `setup-url` metadata). `Retry-After: 60` header. | `crates/llamaforge/src/serve.rs` (or `crates/llamaforge-api/src/setup/guard.rs`) |
+| 7.9 | Implement setup mode boot sequence | Create empty `AppConfig`. Boot full transport (HTTP + gRPC). Compose `full_app_router().merge(setup_router())`. Set mode `Setup`. | `crates/llamaforge/src/serve.rs` |
+| 7.10 | Implement mode transitions | `Setup -> Transitioning` on save + validate success. `Transitioning -> Running` on hot-reload success. `Transitioning -> Setup` on hot-reload failure. | `crates/llamaforge/src/serve.rs` |
+| 7.11 | Implement `setup_required` on /api/status | Add `setup_required: bool` to the existing status endpoint response. True when mode is `Setup` or `Transitioning`. | `crates/llamaforge-api/src/setup/` or existing status handler |
+| 7.12 | Implement `X-Setup-Reconfigure` guard | In `Running` mode, setup endpoints require `X-Setup-Reconfigure: true` header. Without it, return 403. In `Setup`/`Transitioning`, no header required. | `crates/llamaforge-api/src/setup/mod.rs` |
+| 7.13 | Add `humantime` to workspace dependencies | Add `humantime = "2"` to `[workspace.dependencies]` in root `Cargo.toml`. Add `humantime = { workspace = true }` to `llamaforge/Cargo.toml`. | `Cargo.toml`, `crates/llamaforge/Cargo.toml` |
+| 7.14 | Integration tests: standalone wizard lifecycle | Start wizard server. Hit `/api/setup/hardware`. Verify response. Ctrl+C. Verify exit 130. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
+| 7.15 | Integration tests: idle timeout | Start wizard with `--timeout=3s`. Make no API calls. Verify exit 0 after ~3 seconds. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
+| 7.16 | Integration tests: first-run mode | Start `llamaforge serve` with no config file. Verify setup mode: status shows `setup_required: true`, inference endpoints return 503. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
+| 7.17 | Integration tests: mode transition | In setup mode: save config + validate launch. Verify mode transitions to Running. Verify `setup_required: false`. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
+| 7.18 | Integration tests: 503 during setup | In setup mode: hit `/v1/chat/completions`. Verify 503 with `setup_url`. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
+| 7.19 | Integration tests: reconfigure guard | In running mode: hit `/api/setup/hardware` without reconfigure header. Verify 403. With header: verify 200. | `crates/llamaforge/tests/wizard_lifecycle.rs` |
 
 ### PR7 Acceptance Criteria
 
-- [ ] Server detail page loads data via TanStack Query with correct `[id]` param
-- [ ] `ServerActionBar` uses `DetailServerAction` type (not `string`)
-- [ ] `role="menu"` pattern with keyboard navigation
-- [ ] Destructive actions require confirmation dialog
-- [ ] Action button retains focus through state transitions
-- [ ] `EChartsWrapper` reused for per-server charts
-- [ ] All 3 test suites pass
+- [ ] `llamaforge init --interactive` starts wizard server on ephemeral port
+- [ ] URL printed to stdout, browser auto-open attempted
+- [ ] Idle timeout works: default 30m, configurable via `--timeout`
+- [ ] Periodic URL reminder every 5 minutes
+- [ ] Standalone server exits 0 after successful save + validate
+- [ ] `llamaforge serve` with no config enters setup mode
+- [ ] `ConfigLoadError::ParseError` causes `exit(78)` (not setup mode)
+- [ ] Mode state machine: `Setup -> Transitioning -> Running` (or `-> Setup` on failure)
+- [ ] `SetupModeGuard` returns 503 with `setup_url` on inference endpoints during setup
+- [ ] `GET /api/status` includes `setup_required` boolean
+- [ ] `X-Setup-Reconfigure` guard on setup endpoints in Running mode
+- [ ] All 6 integration test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR7 Creation Steps
 
 ```bash
-git checkout -b ui/07-server-detail frontend
-# ... implement tasks 7.1–7.9 ...
-git add -A && git commit -m "ui: implement server detail page with SlotGrid and ServerActionBar"
-git push -u origin ui/07-server-detail
-# Open PR: "Web UI PR7: Server Detail Page"
-# Description: "Implements server detail (FRONTEND_ARCHITECTURE.md Sections 5.1–5.2, 9.1, 9.3).
-# SlotGrid, ServerMetrics with EChartsWrapper reuse, ServerActionBar with DetailServerAction
-# type safety and role=menu pattern. Destructive action confirmation. Focus retention through
-# state transitions. 3 test suites."
+git checkout -b setup/07-cli-first-run main
+# ... implement tasks 7.1–7.19 ...
+git add -A && git commit -m "setup: add llamaforge init --interactive, first-run mode, and Mode state machine"
+git push -u origin setup/07-cli-first-run
+# Open PR: "Setup Wizard PR7: CLI Changes + First-Run Mode"
+# Description: "Implements standalone wizard (08_SETUP_WIZARD.md Section 12) and first-run mode
+# (Section 13). --interactive flag on init. Standalone server: ephemeral port, idle timeout,
+# browser auto-open, periodic URL reminder. First-run: ConfigLoadError triage, Mode state machine
+# (Setup/Transitioning/Running), SetupModeGuard (503 on inference), setup_required on /api/status,
+# X-Setup-Reconfigure guard. 6 integration test suites."
 ```
 
 ---
 
-## PR8: Queue Inspector Page
+## VC-2: Build System + CLI Verification Checkpoint
 
-**Branch:** `ui/08-queue`  
-**Depends on:** PR7 merged to `frontend`  
-**Size:** Small–Medium (~250 lines)  
-**Estimated Time:** 4–5 hours  
-**Design Reference:** `design_reference/v1/Queue Inspector.html` — filter bar, table layout, cancel confirmation, empty state
+**Gate:** PR6–PR7 merged to `main`. Standalone wizard and build SSE work end-to-end.
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-2.1 | Standalone wizard starts | `llamaforge init --interactive` | URL printed, browser opens, API responds |
+| VC-2.2 | Idle timeout | `llamaforge init --interactive --timeout=30s`, wait | Server exits after ~30s |
+| VC-2.3 | Build SSE works | Start build via API, connect to SSE stream | Phase/progress/log events arrive |
+| VC-2.4 | Build cancellation | Start build, DELETE it | Process killed, temp dir cleaned |
+| VC-2.5 | First-run detection | `llamaforge serve` with no config file | Server enters setup mode, status shows `setup_required: true` |
+| VC-2.6 | 503 during setup | Hit `/v1/chat/completions` in setup mode | Returns 503 with `setup_url` |
+| VC-2.7 | Mode transition | Save config + validate in setup mode | Mode transitions to Running, `setup_required: false` |
+| VC-2.8 | Ctrl+C cleanup | Kill wizard during build | Build process group killed, no orphans |
+
+---
+
+## Phase 3: Frontend Wizard
+
+> **Pre-Phase 3 setup:** Rebase `frontend` branch onto `main` to pick up all Phase 1 + Phase 2 backend changes:
+> ```bash
+> git checkout frontend && git pull
+> git rebase main
+> git push --force-with-lease origin frontend
+> ```
+
+---
+
+## PR8: Wizard Scaffold + Step Navigation
+
+**Branch:** `ui/setup-08-scaffold`  
+**Merge Target:** `frontend`  
+**Depends on:** Phase 1 + Phase 2 merged to `main`, `frontend` rebased onto `main`  
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 6–8 hours  
 
 ### Purpose
 
-Implement the queue inspector with filters and the simple interactive table (Tab/Shift-Tab keyboard model — not the APG Grid pattern, which is for the Explorer). Includes cancel request mutation with optimistic UI.
+Create the wizard route structure under `ui/src/routes/setup/`, the `SetupLayout` orchestrator with `StepIndicator` and `StepNavigation`, the `SetupWizardStore` (lean: `selectedModelIds`, `userOverrides`, `savePath`), the step state machine with `STEP_TRANSITIONS`, and session ID generation. This PR creates the skeleton — step content is placeholder. The WelcomeStep is fully implemented as it is static content.
+
+Design doc references: Section 3 (Rendering Strategy), Section 4 (Component Architecture), Section 5 (State Management), Appendix: New Route Structure, Appendix: New TypeScript Types.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 8.1 | Implement `QueuePage` (orchestrator) | Route `+page.svelte`. Fetches queue via TanStack Query + SSE. Handles cancel mutation with optimistic "Cancelling..." state. | `ui/src/routes/queue/+page.svelte` |
-| 8.2 | Implement `QueueFilters.svelte` (presentational) | Props: `filters`, `onChange`. Filter by model, requestor, status. All filters as `<select>` or text input. | `ui/src/lib/components/queue/QueueFilters.svelte` |
-| 8.3 | Implement `QueueTable.svelte` | Props: `items: QueueItem[]`, `onCancel`. Table with `<thead>`, `<th scope="col">`. Columns: position, request ID, model, requestor, status, wait time, actions. `QueueRow` inline (not separate file). Simple keyboard model: Tab/Shift-Tab between interactive elements. Design doc Section 9.2. | `ui/src/lib/components/queue/QueueTable.svelte` |
-| 8.4 | Implement cancel optimistic UI | Click cancel → row shows "Cancelling..." (grayed, spinner) immediately. On SSE update removing request → row disappears. On API failure → restore original state + error toast. Race condition: if naturally completed, SSE removes row and cancel response absorbed silently. Design doc Section 6.5. | `ui/src/routes/queue/+page.svelte` |
-| 8.5 | Implement queue empty state | No items → render `EmptyState` with "Queue is empty" message. | `ui/src/routes/queue/+page.svelte` |
-| 8.6 | Unit tests: QueueTable | Render 5 items → assert 5 rows. Assert sort headers have `aria-sort`. Assert cancel button present on each row. | tests |
-| 8.7 | Unit tests: cancel optimistic UI | Click cancel → assert row shows "Cancelling..." state. Mock API failure → assert original state restored. | tests |
+| 8.1 | Create route structure | `setup/+layout.svelte`, `setup/+layout.ts` (ssr=false), `setup/+page.svelte` (Welcome), `setup/hardware/+page.svelte`, `setup/binary/+page.svelte`, `setup/models/+page.svelte`, `setup/configure/+page.svelte`, `setup/review/+page.svelte`. Each step is a placeholder except Welcome. | `ui/src/routes/setup/**` |
+| 8.2 | Implement `SetupLayout` | Orchestrator: step indicator + content area + navigation footer. Provides `SetupWizardStore` via Svelte context (`setContext`/`getContext`). Generates UUID v4 session ID. `beforeunload` guard when step >= configure. | `ui/src/routes/setup/+layout.svelte` |
+| 8.3 | Implement `StepIndicator.svelte` | Presentational. Props: `steps: { label, status }[]`. `<ol>` with `aria-current="step"`. Arrow key navigation between completed steps. Below 640px: numbered circles only. | `ui/src/lib/components/setup/StepIndicator.svelte` |
+| 8.4 | Implement `StepNavigation.svelte` | Presentational. Props: `canGoBack`, `canAdvance`, `canSkip`, `nextLabel`, `isLoading`. Events: `onback`, `onnext`, `onskip`. | `ui/src/lib/components/setup/StepNavigation.svelte` |
+| 8.5 | Implement `SetupWizardStore` | Svelte 5 rune class in `.svelte.ts`. Fields: `selectedModelIds: Set<string>`, `userOverrides: Map<string, Partial<ServerConfigDraft>>`, `savePath: string`. Instantiated in `SetupLayout`, provided via context. | `ui/src/lib/stores/setup.svelte.ts` |
+| 8.6 | Implement step state machine | `STEP_TRANSITIONS` record: each step has `canAdvance(qc, store)` guard and `invalidatesOnReentry: WizardStep[]`. `completedSteps` derived from iterating the transition table. | `ui/src/lib/stores/setup.svelte.ts` |
+| 8.7 | Implement downstream invalidation | On re-entry to a completed step: remove TanStack Query data for invalidated steps, clear relevant client state. | `ui/src/routes/setup/+layout.svelte` |
+| 8.8 | Implement session ID generation + header | Generate UUID v4 on `SetupLayout` init. Attach as `X-Setup-Session-Id` header on all wizard API calls (extend `apiFetch` or create a wrapper). | `ui/src/lib/stores/setup.svelte.ts`, `ui/src/lib/api/client.ts` |
+| 8.9 | Implement WelcomeStep | Static content: welcome message, "Start Setup" button. "Start" navigates to `/ui/setup/hardware`. | `ui/src/routes/setup/+page.svelte` |
+| 8.10 | Implement step focus management | On step transition, focus moves to the new step's `<h1>`. Uses `afterNavigate` hook. | `ui/src/routes/setup/+layout.svelte` |
+| 8.11 | Add setup TypeScript types | All types from Appendix: New TypeScript Types — `HardwareInfo`, `BinaryScanResult`, `DiscoveredModel`, `ModelScanResult`, `BuildStatus`, `ConfigRecommendation`, `ServerConfigDraft`, `WizardStep`, etc. | `ui/src/lib/api/types.ts` |
+| 8.12 | Add setup TanStack Query definitions | `createHardwareQuery()`, `createBinaryScanMutation()`, `createModelScanMutation()`, `createRecommendationMutation()`, `createPreviewConfigMutation()`, `createSaveConfigMutation()`. Each with correct query key and `staleTime: Infinity`. | `ui/src/lib/api/queries.ts` |
+| 8.13 | Unit tests: StepIndicator | Render with 5 steps, 2 complete, 1 current. Assert `aria-current="step"` on current. Assert completed steps are clickable. | tests |
+| 8.14 | Unit tests: StepNavigation | Render with `canAdvance: false`. Assert Next button disabled. Render with `canSkip: true`. Assert Skip button present. | tests |
+| 8.15 | Unit tests: step state machine | Assert `canAdvance` returns correct boolean for each step. Assert `invalidatesOnReentry` lists correct downstream steps. | tests |
+| 8.16 | Unit tests: session ID | Assert UUID v4 generated on store init. Assert it is attached to API requests. | tests |
 
 ### PR8 Acceptance Criteria
 
-- [ ] Queue table renders from SSE-fed TanStack Query data
-- [ ] Cancel shows optimistic "Cancelling..." state
-- [ ] Race condition handled: natural completion + cancel doesn't error
-- [ ] Simple keyboard model (Tab/Shift-Tab, not arrow keys)
-- [ ] Empty state shown when queue is empty
-- [ ] All 2 test suites pass
+- [ ] All 6 wizard routes render with placeholder content and correct `<h1>`
+- [ ] `StepIndicator` shows step progress with `aria-current="step"`
+- [ ] `StepNavigation` Next button disabled when `canAdvance` is false
+- [ ] `SetupWizardStore` provides `selectedModelIds`, `userOverrides`, `savePath` via context
+- [ ] `STEP_TRANSITIONS` enforces advancement guards
+- [ ] Downstream invalidation works on re-entry
+- [ ] Session ID generated and attached to `X-Setup-Session-Id` header
+- [ ] `beforeunload` fires when step >= configure
+- [ ] Focus moves to `<h1>` on step transition
+- [ ] All setup TypeScript types defined
+- [ ] All 4 unit test suites pass
+- [ ] `npm run check && npm run lint` clean
 
 ### PR8 Creation Steps
 
 ```bash
-git checkout -b ui/08-queue frontend
-# ... implement tasks 8.1–8.7 ...
-git add -A && git commit -m "ui: implement queue inspector with cancel optimistic UI"
-git push -u origin ui/08-queue
-# Open PR: "Web UI PR8: Queue Inspector Page"
-# Description: "Implements queue inspector (FRONTEND_ARCHITECTURE.md Sections 6.5, 9.2).
-# Simple interactive table with Tab/Shift-Tab keyboard model. Cancel with optimistic
-# Cancelling state and race condition handling. 2 test suites."
+git checkout -b ui/setup-08-scaffold frontend
+# ... implement tasks 8.1–8.16 ...
+git add -A && git commit -m "ui: add wizard scaffold with StepIndicator, step state machine, and SetupWizardStore"
+git push -u origin ui/setup-08-scaffold
+# Open PR: "Setup Wizard PR8: Wizard Scaffold + Step Navigation"
+# Description: "Creates the wizard route structure (08_SETUP_WIZARD.md Sections 3-5, Appendices).
+# SetupLayout with StepIndicator + StepNavigation. SetupWizardStore (lean: selectedModelIds,
+# userOverrides, savePath). STEP_TRANSITIONS state machine with advancement guards and downstream
+# invalidation. Session ID generation. WelcomeStep. Setup TypeScript types and TanStack Query
+# definitions. 4 unit test suites."
 ```
 
 ---
 
-## PR9: Request Explorer — TanStack Table, Virtual Scroll & Detail Drawer
+## PR9: Hardware Step + Binary Step
 
-**Branch:** `ui/09-explorer`  
-**Depends on:** PR7 merged to `frontend`  
+**Branch:** `ui/setup-09-hardware-binary`  
+**Merge Target:** `frontend`  
+**Depends on:** PR8 merged to `frontend`  
 **Size:** Large (~550 lines)  
 **Estimated Time:** 8–10 hours  
-**Design Reference:** `design_reference/v1/Request Explorer.html` — filter bar, TanStack Table layout, detail drawer, export buttons, virtual scroll
 
 ### Purpose
 
-Implement the request explorer with TanStack Table, TanStack Virtual for virtual scrolling over 10K+ rows, the APG Grid keyboard pattern, filter state synced to URL, and the `RequestDetailDrawer` slide-out panel.
+Implement the HardwareStep and BinaryStep pages. HardwareStep is an orchestrator that fires the hardware detection query on mount, shows hardware cards, and provides a manual entry fallback on failure. BinaryStep is an orchestrator with inline `{#if}` blocks for found/not-found/manual states — it includes `BuildConfigurator` (backend selector) and `BuildProgress` (streaming log via SSE `EventSource` connected to the build job stream endpoint) with cancel support.
+
+Design doc references: Section 2.1 (User Flows 1 and 2), Section 2.2 (Hardware Detection and Binary Locator screen states), Section 4 (Component Architecture — HardwareStep, BinaryStep, BuildProgress), Section 6.2 (Error Handling Strategy).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 9.1 | Implement `ExplorerPage` (orchestrator) | Route `+page.svelte`. URL-synced filters (model, task type, time range, sort, page). Fetches via `createRequestsQuery(filters)`. Handles export (serializes data, triggers download). Manages drawer open/close state. | `ui/src/routes/explorer/+page.svelte` |
-| 9.2 | Implement `ExplorerFilters.svelte` (presentational) | Props: `filters`, `onChange`. Model dropdown, task type dropdown, date range pickers, search input. All filter changes update URL params bidirectionally. | `ui/src/lib/components/explorer/ExplorerFilters.svelte` |
-| 9.3 | Implement `ExplorerTable.svelte` | Props: `ExplorerTableProps`. Uses TanStack Table for column definitions, sorting, and row model. TanStack Virtual for virtualized scrolling. APG Grid keyboard pattern: arrow keys navigate cells, Enter enters cell interaction, Escape returns to cell navigation. `RequestRow` inline. `aria-sort` on sortable headers. Design doc Section 9.2. | `ui/src/lib/components/explorer/ExplorerTable.svelte` |
-| 9.4 | Implement virtual scroll focus preservation | Save logical index on focus. On DOM recycle: restore focus to same logical position. If row left virtual window: focus moves to table container in grid-navigation mode, announce "Row N is no longer visible". Design doc Section 9.2. | `ui/src/lib/components/explorer/ExplorerTable.svelte` |
-| 9.5 | Implement `ExplorerTable` export | `onExport: (format) => void` — signals intent only. `ExplorerPage` handles serialization (CSV via manual string building, JSON via `JSON.stringify`). Triggers browser download via `Blob` + `URL.createObjectURL`. | `ui/src/routes/explorer/+page.svelte` |
-| 9.6 | Implement next-page prefetching | When at page N, prefetch page N+1: `prefetchExplorerNextPage(filters, page)`. Design doc Section 7.1. | `ui/src/routes/explorer/+page.svelte` |
-| 9.7 | Implement `RequestDetailDrawer.svelte` (presentational) | Props: `request: RequestRecord \| null`, `open: boolean`. Slide-out panel showing full request/response data, timing breakdown, server/slot assignment, prompt/completion text. Focus moves to close button on open, returns to selected row on close. Design doc Section 5.2, 9.3. | `ui/src/lib/components/explorer/RequestDetailDrawer.svelte` |
-| 9.8 | Implement responsive table | Three-tier column visibility: all columns > 1024px, hide low-priority columns 768–1024px, minimum columns < 768px. Sticky first column. Design doc Section 4.5. | `ui/src/lib/components/explorer/ExplorerTable.svelte` |
-| 9.9 | Unit tests: ExplorerTable sorting | Click column header → assert `onSort` called with correct column. Assert `aria-sort` attribute updates. | tests |
-| 9.10 | Unit tests: virtual scroll focus | Scroll focused row out of view → assert focus moves to container. Assert "no longer visible" announcement. | tests |
-| 9.11 | Unit tests: RequestDetailDrawer focus | Open drawer → assert close button focused. Close drawer → assert triggering row focused. | tests |
-| 9.12 | Unit tests: URL filter sync | Set filters → assert URL params updated. Load URL with params → assert filters populated. | tests |
-| 9.13 | Unit tests: export | Click export CSV → assert download triggered with correct content-type. | tests |
+| 9.1 | Implement `HardwareStep` (orchestrator) | `TanStack Query` for `GET /api/setup/hardware`. Shows spinner while loading. 10-second frontend "Cancel and enter manually" button. Displays results in `HardwareCard` components. On error: `ErrorBanner` with "Retry" + "Enter manually" link. | `ui/src/routes/setup/hardware/+page.svelte` |
+| 9.2 | Implement `HardwareCard.svelte` (presentational) | Props: `type`, `label`, `details`, `status`, `icon`. Uses `StatusBadge` for detection status. | `ui/src/lib/components/setup/HardwareCard.svelte` |
+| 9.3 | Implement `HardwareManualEntry.svelte` (presentational) | Props: `onsubmit`. Form for manual GPU name, VRAM, CPU cores, RAM. Inline validation. | `ui/src/lib/components/setup/HardwareManualEntry.svelte` |
+| 9.4 | Implement `BinaryStep` (orchestrator) | Fires binary scan mutation on mount. Inline `{#if}` states: scanning, found (path + version), not-found (build option + manual path input). Manages build lifecycle. | `ui/src/routes/setup/binary/+page.svelte` |
+| 9.5 | Implement `BuildConfigurator.svelte` (presentational) | Props: `detectedBackend`, `onstart`. Backend selector dropdown (`cuda`/`metal`/`vulkan`/`cpu`). Install directory input. Jobs input. "Build" button. First-run confirmation dialog per design doc. | `ui/src/lib/components/setup/BuildConfigurator.svelte` |
+| 9.6 | Implement `BuildProgress.svelte` (presentational) | Props: `status`, `logLines`, `progress`, `errorSummary`. Events: `onretry`, `onskip`, `onchangebackend`, `oncancel`. `LogViewer` component with auto-scroll, `role="log"`, `aria-live="polite"`. Progress display: cmake `[N/M]` + elapsed time. Error state: last lines + retry/skip/change-backend buttons. | `ui/src/lib/components/setup/BuildProgress.svelte` |
+| 9.7 | Implement `LogViewer.svelte` (shared) | Scrollable `<pre>` (400px fixed height). Auto-tail on new lines. Focusable (`tabindex="0"`). Arrow key scrolling. Reusable for future server log viewing. | `ui/src/lib/components/shared/LogViewer.svelte` |
+| 9.8 | Implement `ProgressBar.svelte` (shared) | Determinate/indeterminate modes. `role="progressbar"` with `aria-valuenow/min/max`. Percentage label. `prefers-reduced-motion` disables animation. | `ui/src/lib/components/shared/ProgressBar.svelte` |
+| 9.9 | Implement SSE build stream connection | `EventSource` to `/api/setup/build/{id}/stream`. Parse `phase`, `progress`, `log`, `complete`, `failed` events. Update build state. Reconnect with exponential backoff + jitter (base 1s, max 8s, 3 attempts). Cleanup in `$effect` return. | `ui/src/routes/setup/binary/+page.svelte` |
+| 9.10 | Implement build cancel | Click "Cancel" calls `DELETE /api/setup/build/{id}`. Close EventSource. Transition to not-found state. | `ui/src/routes/setup/binary/+page.svelte` |
+| 9.11 | Unit tests: HardwareCard | Render with `status: 'detected'` -> green StatusBadge. `status: 'not_detected'` -> red. `status: 'error'` -> yellow. | tests |
+| 9.12 | Unit tests: HardwareStep states | Mock successful hardware response -> assert cards rendered. Mock 500 error -> assert ErrorBanner with retry. Mock timeout -> assert "Cancel and enter manually" button. | tests |
+| 9.13 | Unit tests: BinaryStep found/not-found | Mock `found: true` -> assert path + version displayed. Mock `found: false` -> assert build option shown. | tests |
+| 9.14 | Unit tests: BuildProgress states | Render with `status: 'cloning'` -> assert progress. `status: 'failed'` -> assert error summary + retry button. `status: 'complete'` -> assert success. | tests |
+| 9.15 | Unit tests: LogViewer | Push 100 lines -> assert auto-scroll to bottom. Assert `role="log"`. Assert focusable. | tests |
+| 9.16 | Unit tests: SSE event parsing | Mock each SSE event type individually. Assert correct UI state update for each. | tests |
 
 ### PR9 Acceptance Criteria
 
-- [ ] TanStack Table with sortable columns and `aria-sort`
-- [ ] Virtual scroll handles 10K+ rows without performance degradation
-- [ ] APG Grid keyboard pattern (arrow key cell navigation)
-- [ ] Focus preservation on virtual scroll recycle
-- [ ] URL filter sync is bidirectional
-- [ ] Next-page prefetching active
-- [ ] Detail drawer manages focus correctly (open → close button, close → row)
-- [ ] Export signals intent only — orchestrator handles execution
-- [ ] Responsive column visibility
-- [ ] All 5 test suites pass
+- [ ] HardwareStep shows detection results in HardwareCards
+- [ ] Manual entry fallback on detection failure
+- [ ] 10-second "Cancel and enter manually" button appears during long detection
+- [ ] BinaryStep shows found/not-found/manual states correctly
+- [ ] Build flow works: configure -> progress -> complete (or error)
+- [ ] SSE stream connects and parses all event types
+- [ ] SSE reconnection with exponential backoff + jitter (3 attempts)
+- [ ] Build cancel kills process and transitions to not-found
+- [ ] `LogViewer` auto-scrolls, is focusable, has `role="log"`
+- [ ] `ProgressBar` has `role="progressbar"` with correct ARIA attributes
+- [ ] All 6 unit test suites pass
+- [ ] `npm run check && npm run lint` clean
 
 ### PR9 Creation Steps
 
 ```bash
-git checkout -b ui/09-explorer frontend
-# ... implement tasks 9.1–9.13 ...
-git add -A && git commit -m "ui: implement request explorer with TanStack Table, virtual scroll, and APG Grid keyboard"
-git push -u origin ui/09-explorer
-# Open PR: "Web UI PR9: Request Explorer"
-# Description: "Implements request explorer (FRONTEND_ARCHITECTURE.md Sections 5.2, 6.4, 9.2–9.3).
-# TanStack Table + TanStack Virtual for 10K+ row virtual scroll. APG Grid keyboard pattern with
-# focus preservation on DOM recycle. URL-synced filters. RequestDetailDrawer with focus management.
-# Export as signal-only pattern. Next-page prefetching. Responsive column visibility. 5 test suites."
+git checkout -b ui/setup-09-hardware-binary frontend
+# ... implement tasks 9.1–9.16 ...
+git add -A && git commit -m "ui: add HardwareStep and BinaryStep with build SSE streaming and LogViewer"
+git push -u origin ui/setup-09-hardware-binary
+# Open PR: "Setup Wizard PR9: Hardware Step + Binary Step"
+# Description: "Implements Hardware and Binary wizard steps (08_SETUP_WIZARD.md Sections 2.1, 2.2, 4, 6.2).
+# HardwareStep with TanStack Query, HardwareCards, manual entry fallback. BinaryStep with inline
+# {#if} states, BuildConfigurator, BuildProgress with SSE via EventSource. LogViewer (shared,
+# reusable) with auto-scroll and role=log. ProgressBar (shared). SSE reconnect with jitter.
+# Build cancel. 6 unit test suites."
 ```
 
 ---
 
-## VC-3: Feature Pages Verification Checkpoint
+## PR10: Model Step + Config Step
 
-**Gate:** PR9 merged. Dashboard, Server Detail, Queue, and Explorer all working.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-3.1 | Dashboard → Server Detail navigation | Click server card → detail page loads with correct server data | Data matches clicked card |
-| VC-3.2 | SSE updates all pages | Push SSE events → verify dashboard cards, queue table, and server detail all update | Live updates work across pages |
-| VC-3.3 | Explorer virtual scroll | Load 5000 rows → scroll to bottom → verify smooth scroll, no jank | FPS > 30 during scroll |
-| VC-3.4 | Explorer keyboard | APG Grid: arrow keys between cells, Enter to interact, Escape to return | Full keyboard flow works |
-| VC-3.5 | Queue cancel lifecycle | Cancel request → "Cancelling..." → SSE removes → row gone | Full lifecycle completes |
-| VC-3.6 | axe-core all pages | Run axe-core on dashboard, server detail, queue, explorer | Zero violations on all |
-
----
-
-## PR10: Configuration Pages — Forms, Diff Preview & Concurrent Editing
-
-**Branch:** `ui/10-config`  
-**Depends on:** PR7 merged to `frontend`  
+**Branch:** `ui/setup-10-models-config`  
+**Merge Target:** `frontend`  
+**Depends on:** PR9 merged to `frontend`  
 **Size:** Medium (~450 lines)  
-**Estimated Time:** 6–8 hours  
-**Design Reference:** `design_reference/v1/Configuration.html` — form layout, diff preview modal, validation errors, concurrent edit banner, priority rules editor
+**Estimated Time:** 7–9 hours  
 
 ### Purpose
 
-Implement all three config editors (server config, priority rules, global settings) using the shared `createConfigForm()` factory. Includes `DiffPreview`, `beforeunload` + `beforeNavigate` dirty form protection, and lock-on-load + ETag concurrent editing protection with 409 Conflict handling.
+Implement the ModelStep (directory selector + scan trigger + ModelTable with checkboxes) and ConfigStep (ServerConfigForm with recommendation badges and form validation). ModelStep fires the scan-models mutation and populates `selectedModelIds` in the store. ConfigStep fires the recommendation query and renders a `ServerConfigForm` per selected model, with inline "Recommended: X" hints. Includes the `beforeunload` unsaved changes guard.
+
+Design doc references: Section 2.1 (Flows 1 and 2 — Steps 3 and 4), Section 2.2 (Model Scanner and Server Config screen states), Section 4.2 (ModelTable and ServerConfigForm contracts), Section 5.6 (Form Design with concrete validation bounds).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 10.1 | Implement `createConfigForm()` factory | Returns reactive form state: `saved` ($state with `structuredClone`), `current` ($state), `isDirty` ($derived via `deepEqual`), `errors` ($derived from validation), `isSubmitting` ($state), `submit()`, `reset()`. Design doc Section 6.6. | `ui/src/lib/utils/configForm.ts` |
-| 10.2 | Implement unsaved changes guards | `beforeunload` listener for browser navigation. `beforeNavigate` from `$app/navigation` for SvelteKit client-side routing. Both gated on `isDirty`. Design doc Section 6.6. | `ui/src/lib/utils/configForm.ts` |
-| 10.3 | Implement concurrent editing protection | Submit uses `If-Match` with ETag. On 409 Conflict: show banner "Configuration was updated by another source" with Reload button. Focus moves to Reload button. Reload refetches and reinitializes form. Design doc Section 6.6. | `ui/src/lib/utils/configForm.ts` |
-| 10.4 | Implement `ServerConfigEditor.svelte` | Uses `createConfigForm()`. Fields per server config schema. Inline validation on blur. Backend-mapped validation errors. | `ui/src/lib/components/config/ServerConfigEditor.svelte` |
-| 10.5 | Implement `PriorityRulesEditor.svelte` | Uses `createConfigForm()`. Priority rules table with add/remove/edit rows. | `ui/src/lib/components/config/PriorityRulesEditor.svelte` |
-| 10.6 | Implement `GlobalSettingsEditor.svelte` | Uses `createConfigForm()`. Global settings form fields. | `ui/src/lib/components/config/GlobalSettingsEditor.svelte` (or inline in route) |
-| 10.7 | Implement `DiffPreview.svelte` (presentational) | Props: `original`, `modified`, `format: 'toml' \| 'json'`. Side-by-side or unified diff view. Mounted in modal via "Review Changes" button (visible when `isDirty`). Design doc Section 6.6. | `ui/src/lib/components/config/DiffPreview.svelte` |
-| 10.8 | Implement config route pages | `/config/servers/+page.svelte` and `/config/priority/+page.svelte`. Each is an orchestrator fetching config via TanStack Query and passing to editor components. Tab navigation between config sections using `role="tablist"`. | `ui/src/routes/config/*/+page.svelte` |
-| 10.9 | Unit tests: createConfigForm | Change field → assert `isDirty === true`. Reset → assert `isDirty === false`. Submit with validation error → assert button not disabled, errors shown. | tests |
-| 10.10 | Unit tests: concurrent editing | Simulate 409 response → assert banner shown, Reload button focused. Click Reload → assert form reinitialized with fresh data. | tests |
-| 10.11 | Unit tests: DiffPreview | Pass original/modified objects → assert diff output shows changed fields. | tests |
-| 10.12 | Unit tests: beforeNavigate guard | Set `isDirty = true` → trigger client navigation → assert `beforeNavigate` callback fires. | tests |
+| 10.1 | Implement `ModelStep` (orchestrator) | Directory selector with sensible defaults (`~/models`, `./models`). "Scan" button fires `scan-models` mutation. Shows `ScanProgress` during scan. Results in `ModelTable`. Empty state: "No .gguf files found." Warnings displayed. | `ui/src/routes/setup/models/+page.svelte` |
+| 10.2 | Implement `DirectorySelector.svelte` (presentational) | Props: `directories: string[]`. Events: `onadd`, `onremove`, `onscan`. Text inputs with add/remove. Pre-filled with defaults. | `ui/src/lib/components/setup/DirectorySelector.svelte` |
+| 10.3 | Implement `ScanProgress.svelte` (presentational) | Props: `isScanning: boolean`, `filesScanned: number`. Spinner + file count. | `ui/src/lib/components/setup/ScanProgress.svelte` |
+| 10.4 | Implement `ModelTable.svelte` (presentational) | Props: `models: DiscoveredModel[]`, `selectedIds: Set<string>`. Events: `onselectionchange`. `<table>` with `<thead>`, `<th scope="col">`. Columns: checkbox, filename, size, quantization, modified. Native `<input type="checkbox">`. Space toggles checkbox. | `ui/src/lib/components/setup/ModelTable.svelte` |
+| 10.5 | Implement `ConfigStep` (orchestrator) | Fires recommendation mutation with selected models. Renders `ServerConfigForm` per selected model. Stores user overrides in `SetupWizardStore.userOverrides`. Merges recommendations with overrides at render time. | `ui/src/routes/setup/configure/+page.svelte` |
+| 10.6 | Implement `ServerConfigForm.svelte` (presentational) | Props: `model`, `hardware`, `recommendation`, `values`. Events: `onchange`. Fields: gpu_layers, ctx_size, parallel_slots, port, cache_type_k, cache_type_v, flash_attn. Each field is a labeled input with inline "Recommended: X" hint. Inline validation on blur. Concrete bounds per Section 5.6: gpu_layers (-1 or 0–512), ctx_size (0 or 128–1048576), parallel_slots (1–64), port (1024–65535, unique). | `ui/src/lib/components/setup/ServerConfigForm.svelte` |
+| 10.7 | Implement form validation | Client-side validation for all numeric fields per concrete bounds. `binary_path` and `model_path` non-empty. Validation errors use `aria-describedby` linked to the input. | `ui/src/lib/components/setup/ServerConfigForm.svelte` |
+| 10.8 | Implement unsaved changes guard | `beforeunload` listener when ConfigStep has modifications. Active when `userOverrides.size > 0`. | `ui/src/routes/setup/+layout.svelte` (update existing guard) |
+| 10.9 | Unit tests: ModelTable | Render 5 models. Check 2. Assert `onselectionchange` called with Set of 2 IDs. Render 0 models. Assert `EmptyState`. | tests |
+| 10.10 | Unit tests: ServerConfigForm validation | Enter `gpu_layers: -2` -> assert rejected. `gpu_layers: 513` -> rejected. `gpu_layers: -1` -> accepted. `ctx_size: 64` -> rejected. `ctx_size: 2000000` -> rejected. `parallel_slots: 0` -> rejected. `port: 1023` -> rejected. | tests |
+| 10.11 | Unit tests: recommendation display | Render with recommendation. Assert "Recommended: 8192" hint near ctx_size input. | tests |
+| 10.12 | Unit tests: unsaved changes | Set `userOverrides` to non-empty. Assert `beforeunload` listener active. | tests |
 
 ### PR10 Acceptance Criteria
 
-- [ ] `createConfigForm()` provides reactive `isDirty`, `errors`, `isSubmitting`
-- [ ] `isDirty` is `$derived` from deep comparison (never stored manually)
-- [ ] `beforeunload` fires on browser navigation when dirty
-- [ ] `beforeNavigate` fires on SvelteKit client navigation when dirty
-- [ ] 409 Conflict shows banner with Reload button, focus moves to button
-- [ ] DiffPreview renders changes in modal
-- [ ] Submit disables button (no double-submit)
-- [ ] All 4 test suites pass
+- [ ] ModelStep: directory selector, scan trigger, model table with checkboxes
+- [ ] Model scan shows progress, handles truncation warning, empty state
+- [ ] `selectedModelIds` persisted in `SetupWizardStore`
+- [ ] ConfigStep: renders `ServerConfigForm` per selected model
+- [ ] Recommendations displayed as inline hints with "Recommended: X"
+- [ ] Form validation enforces concrete bounds (gpu_layers, ctx_size, parallel_slots, port)
+- [ ] Validation errors use `aria-describedby`
+- [ ] `beforeunload` guard active when overrides exist
+- [ ] All 4 unit test suites pass
+- [ ] `npm run check && npm run lint` clean
 
 ### PR10 Creation Steps
 
 ```bash
-git checkout -b ui/10-config frontend
+git checkout -b ui/setup-10-models-config frontend
 # ... implement tasks 10.1–10.12 ...
-git add -A && git commit -m "ui: implement config editors with createConfigForm, diff preview, and concurrent editing"
-git push -u origin ui/10-config
-# Open PR: "Web UI PR10: Configuration Pages"
-# Description: "Implements all config editors (FRONTEND_ARCHITECTURE.md Section 6.6).
-# Shared createConfigForm() factory with $derived isDirty/errors. DiffPreview modal.
-# beforeunload + beforeNavigate dirty form guards. Lock-on-load + ETag concurrent editing
-# with 409 Conflict handling and Reload button focus. 4 test suites."
+git add -A && git commit -m "ui: add ModelStep with table selection and ConfigStep with validation and recommendation badges"
+git push -u origin ui/setup-10-models-config
+# Open PR: "Setup Wizard PR10: Model Step + Config Step"
+# Description: "Implements Model and Config wizard steps (08_SETUP_WIZARD.md Sections 2.1, 4.2, 5.6).
+# ModelStep with DirectorySelector, ScanProgress, ModelTable with checkboxes. ConfigStep with
+# ServerConfigForm per selected model, recommendation badges, inline validation with concrete
+# bounds (gpu_layers -1/0-512, ctx_size 0/128-1M, parallel_slots 1-64, port 1024-65535).
+# beforeunload unsaved changes guard. 4 unit test suites."
 ```
 
 ---
 
-## PR11: Playground Core — Chat, Streaming, Markdown & DOMPurify
+## PR11: Review Step + Completion
 
-**Branch:** `ui/11-playground`  
+**Branch:** `ui/setup-11-review-completion`  
+**Merge Target:** `frontend`  
 **Depends on:** PR10 merged to `frontend`  
-**Size:** Large (~550 lines)  
-**Estimated Time:** 8–10 hours  
-**Design Reference:** `design_reference/v1/Playground.html` — chat layout, parameter sidebar, streaming states, message bubbles, error states, queued state
+**Size:** Medium (~400 lines)  
+**Estimated Time:** 6–8 hours  
 
 ### Purpose
 
-Implement the playground page with single-model chat: `ChatPane`, `StreamingTokenDisplay`, `MessageBubble`, `ParameterSidebar`, `ModelSelector`, the markdown sanitization pipeline (marked → DOMPurify → `{@html}`), and the ESLint enforcement rule. This PR covers the core streaming experience — comparison mode is PR12.
+Implement the ReviewStep with `preview-config` endpoint call, `TomlPreview` via `renderMarkdown()` (TOML code block — no `{@html}`), `SavePathSelector`, `save-config` call with backup display, and `CompletionScreen` with status polling (`setup_required` check). This closes the wizard loop: the user can see the generated config, choose a save path, save, and verify the server transitions to running mode.
+
+Design doc references: Section 2.1 (Flows 1 and 2 — Step 5), Section 2.2 (Review and Complete screen states), Section 4.2 (TomlPreview, SavePathSelector, CompletionScreen contracts), Section 5.6 (Save path form), Section 13.7 (CompletionScreen Verification).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 11.1 | Implement `PlaygroundPage` (orchestrator) | Route `+page.svelte`. URL-synced model + parameters. Default resolution: model-specific defaults from registry, hardcoded fallbacks (`temp=0.7`, `max_tokens=2048`). URL updated on first render. Manages `StreamingState` ($state). Owns `AbortController` in $state. $effect subscribes to SSE for streaming. Design doc Sections 5.4, 6.4. | `ui/src/routes/playground/+page.svelte` |
-| 11.2 | Implement `ChatPane.svelte` (presentational) | Props: `ChatPaneProps` (messages, streamingState). `onSend`, `onCancel`, `onClear` callbacks. Renders message list + input. Streaming state drives UI: idle (input), queued (position indicator), streaming (tokens + cancel button), complete (full response), error (retry button). Design doc Section 5.2. | `ui/src/lib/components/playground/ChatPane.svelte` |
-| 11.3 | Implement `MessageBubble.svelte` (presentational) | Props: `message: Message`. Renders user messages as plain text, assistant messages via `renderMarkdown()`. Displays timing metrics on complete messages. | `ui/src/lib/components/playground/MessageBubble.svelte` |
-| 11.4 | Implement `StreamingDisplay.svelte` (presentational) | Props: `tokens: string`, `isStreaming: boolean`. Typewriter cursor when streaming, removed when done. `aria-live="off"` during streaming. "Generation complete" announcement on finish. Design doc Section 9.4. | `ui/src/lib/components/playground/StreamingDisplay.svelte` |
-| 11.5 | Implement markdown sanitization pipeline | `marked.parse()` → `DOMPurify.sanitize(html, DOMPURIFY_CONFIG)` → `{@html}`. Strict config: `ALLOWED_TAGS`, `ALLOWED_ATTR: ['href', 'class']`, `FORBID_TAGS: ['style', 'script', 'iframe', 'form', 'input', 'img', 'svg', 'math', 'object', 'embed']`, `FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick']`, `ALLOWED_URI_REGEXP: /^(?:https?\|mailto):/i`. Design doc Section 10.1. | `ui/src/lib/utils/markdown.ts` |
-| 11.6 | Implement ESLint `no-raw-html-without-sanitize` | Custom ESLint rule: `{@html}` must only appear with `renderMarkdown()` as its argument. Any other `{@html}` usage fails CI. Design doc Section 10.1. | `ui/eslint.config.js` (or `eslint-rules/`) |
-| 11.7 | Implement lazy highlight.js integration | Dynamic `import('highlight.js')` in `renderMarkdown()` for code blocks. Only loaded when playground page mounts. Selected grammars: JavaScript, Python, TypeScript, JSON, YAML, Bash (~15 KB). | `ui/src/lib/utils/markdown.ts` |
-| 11.8 | Implement `ParameterSidebar.svelte` (presentational) | Props: `ParameterSidebarProps` (params, defaults). Sliders for temperature, top_p. Number inputs for max_tokens, top_k. Reset button. `onChange`, `onReset` callbacks. | `ui/src/lib/components/playground/ParameterSidebar.svelte` |
-| 11.9 | Implement `ModelSelector.svelte` (presentational) | Props: `models: ModelInfo[]`, `selected: ModelInfo \| null`. Dropdown with model names. Model list prefetched on mount. | `ui/src/lib/components/playground/ModelSelector.svelte` |
-| 11.10 | Implement `ResponseMetrics.svelte` (presentational) | Props: TTFT, tokens per second, total tokens. Shown below completed responses. | `ui/src/lib/components/playground/ResponseMetrics.svelte` |
-| 11.11 | Implement `AbortController` pattern | Controller in `$state<AbortController \| null>`. `$effect` creates controller, cleanup calls `controller.abort()`. `handleCancel()` accesses same controller. `AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)])` for dual abort. Design doc Section 5.4. | `ui/src/routes/playground/+page.svelte` |
-| 11.12 | Implement queue position announcements | On queue entry: `aria-live="polite"` announcement "Request queued — position N, estimated wait Xs." Silent position updates. On processing start: "Request processing — generating response." Design doc Section 9.4. | `ui/src/lib/components/playground/ChatPane.svelte` |
-| 11.13 | Unit tests: renderMarkdown | Input with `<script>` → assert stripped. Input with `<img onerror=...>` → assert stripped. Valid markdown → assert correct HTML. Code block → assert syntax highlighted. | tests |
-| 11.14 | Unit tests: ChatPane streaming states | Render with `idle` → assert input visible. Render with `streaming` → assert cancel button. Render with `error` → assert retry button, partial response preserved. | tests |
-| 11.15 | Unit tests: AbortController lifecycle | Mount → assert controller created. Cancel → assert aborted. Unmount → assert aborted. | tests |
-| 11.16 | Unit tests: ESLint rule | `{@html someVar}` → assert lint error. `{@html renderMarkdown(x)}` → assert passes. | tests |
-| 11.17 | Unit tests: URL parameter sync | Navigate to `/playground?temp=0.5` → assert temperature slider at 0.5. Navigate to `/playground` (no params) → assert defaults applied and URL updated. | tests |
+| 11.1 | Implement `ReviewStep` (orchestrator) | Fires `preview-config` mutation on mount. Shows TOML preview. "Save & Finish" button. Save path selector. On save: calls `save-config`, shows completion screen. Handles 409 (file exists without force) with `ConfirmDialog`. Handles 403 (permission denied) with inline error. | `ui/src/routes/setup/review/+page.svelte` |
+| 11.2 | Implement `TomlPreview.svelte` (presentational) | Props: `toml: string`. Renders syntax-highlighted TOML via `renderMarkdown()` with a code block (```toml ... ```). No `{@html}` — uses the existing sanitized pipeline. | `ui/src/lib/components/setup/TomlPreview.svelte` |
+| 11.3 | Implement `SavePathSelector.svelte` (presentational) | Props: `path: string`, `defaultPath: string`. Events: `onchange`. Text input pre-filled with XDG default path. "Reset to default" link. | `ui/src/lib/components/setup/SavePathSelector.svelte` |
+| 11.4 | Implement `CompletionScreen.svelte` (presentational) | Props: `saveResult`, `validationResult`, `reloadResult`, `isVerifying`, `isVerified`. States: saving -> validation result -> reload result -> polling -> success/failure. "Go to Dashboard" button (enabled when verified). "Go to Dashboard Anyway" link (fallback after 10s). Backup path display when `backup_path` non-null. | `ui/src/lib/components/setup/CompletionScreen.svelte` |
+| 11.5 | Implement completion verification polling | Poll `GET /api/status` every 2s, up to 5 attempts. Check `setup_required == false`. On success: show green checkmark. After 5 polls: show error with retry + "Go to Dashboard Anyway." | `ui/src/routes/setup/review/+page.svelte` |
+| 11.6 | Implement validation-launch result display | If `validation_launch.success: false`: display error, server name, hint. "Go Back" button to ConfigStep. "Retry" button. | `ui/src/routes/setup/review/+page.svelte` |
+| 11.7 | Implement hot-reload failure display | If `reload.success: false`: display error. "Retry" button (re-calls save-config with `force: true`). | `ui/src/routes/setup/review/+page.svelte` |
+| 11.8 | Implement save double-submit protection | Disable "Save & Finish" button and show spinner while save request is in flight. | `ui/src/routes/setup/review/+page.svelte` |
+| 11.9 | Unit tests: TomlPreview | Pass TOML string -> assert rendered in `<pre><code>` block. Assert no `{@html}` usage (verify it goes through `renderMarkdown()`). | tests |
+| 11.10 | Unit tests: CompletionScreen states | Render with `isVerifying: true` -> assert spinner. Render with `isVerified: true` -> assert success checkmark + "Go to Dashboard" enabled. Render with verification failed -> assert "Go to Dashboard Anyway" link. | tests |
+| 11.11 | Unit tests: validation-launch failure | Mock `validation_launch.success: false`. Assert error display with hint and "Go Back" button. | tests |
+| 11.12 | Unit tests: 409 overwrite flow | Mock save-config returning 409. Assert `ConfirmDialog` appears. Confirm -> assert re-call with `force: true`. | tests |
+| 11.13 | Unit tests: backup path display | Mock save response with `backup_path`. Assert "Previous config backed up to ..." displayed. | tests |
 
 ### PR11 Acceptance Criteria
 
-- [ ] Streaming lifecycle works: idle → queued → streaming → complete (or error)
-- [ ] `StreamingState` is discriminated union — impossible states unrepresentable
-- [ ] Markdown sanitization strips all XSS vectors (script, img, onerror, etc.)
-- [ ] ESLint rule enforces `{@html}` only with `renderMarkdown()`
-- [ ] highlight.js lazy-loaded only on playground page
-- [ ] `AbortController` in `$state` accessible to both `$effect` cleanup and cancel handler
-- [ ] `AbortSignal.any()` combines user cancel + 120s timeout
-- [ ] Queue position announced once, position updates silent
-- [ ] URL params sync bidirectionally with defaults on absence
-- [ ] All 5 test suites pass
+- [ ] TOML preview rendered via `renderMarkdown()` (no raw `{@html}`)
+- [ ] Save path pre-filled with XDG default
+- [ ] 409 overwrite handled with `ConfirmDialog`
+- [ ] 403 permission denied displayed inline
+- [ ] Validation-launch failure shows error + hint + "Go Back"
+- [ ] Hot-reload failure shows error + "Retry"
+- [ ] Completion polling: 5 attempts, 2s interval, success/failure states
+- [ ] "Go to Dashboard" enabled only when `setup_required == false`
+- [ ] "Go to Dashboard Anyway" link available after 10s timeout
+- [ ] Backup path displayed when non-null
+- [ ] Double-submit protection on "Save & Finish"
+- [ ] All 5 unit test suites pass
+- [ ] `npm run check && npm run lint` clean
 
 ### PR11 Creation Steps
 
 ```bash
-git checkout -b ui/11-playground frontend
-# ... implement tasks 11.1–11.17 ...
-git add -A && git commit -m "ui: implement playground with streaming chat, markdown pipeline, and DOMPurify"
-git push -u origin ui/11-playground
-# Open PR: "Web UI PR11: Playground Core"
-# Description: "Implements playground single-model chat (FRONTEND_ARCHITECTURE.md Sections 5.2,
-# 5.4, 6.4, 9.4, 10.1). StreamingState discriminated union. marked → DOMPurify → {@html}
-# sanitization pipeline with ESLint CI enforcement. Lazy highlight.js. AbortController in $state
-# with AbortSignal.any() dual abort. Queue position announcements. URL parameter sync with
-# default resolution. 5 test suites."
+git checkout -b ui/setup-11-review-completion frontend
+# ... implement tasks 11.1–11.13 ...
+git add -A && git commit -m "ui: add ReviewStep with TOML preview, save flow, and CompletionScreen verification"
+git push -u origin ui/setup-11-review-completion
+# Open PR: "Setup Wizard PR11: Review Step + Completion"
+# Description: "Implements Review and Completion wizard steps (08_SETUP_WIZARD.md Sections 2.1, 4.2, 5.6, 13.7).
+# TomlPreview via renderMarkdown() (no {@html}). SavePathSelector with XDG default. save-config
+# with 409 overwrite confirmation, 403 permission display, validation-launch failure display with
+# hint, hot-reload failure retry, completion verification polling (5 attempts, 2s, setup_required
+# check). Backup path display. Double-submit protection. 5 unit test suites."
 ```
 
 ---
 
-## PR12: Playground Comparison, Model Registry & Remaining Pages
+## VC-3: Full Wizard Flow Verification Checkpoint
 
-**Branch:** `ui/12-comparison`  
-**Depends on:** PR11 merged to `frontend`  
+**Gate:** PR8–PR11 merged to `frontend`. Full wizard flow works end-to-end (happy path).
+
+| # | Check | Method | Pass Criteria |
+|---|-------|--------|---------------|
+| VC-3.1 | Welcome -> Hardware | Click "Start Setup" -> hardware detection runs | Hardware cards appear with detection results |
+| VC-3.2 | Hardware -> Binary | Advance from hardware -> binary scan runs | Binary found/not-found state displayed |
+| VC-3.3 | Build flow | Binary not found -> start build -> SSE log streams | Build progresses through phases |
+| VC-3.4 | Binary -> Models | Advance from binary -> model scan UI | Directory selector + scan + model table |
+| VC-3.5 | Models -> Configure | Select models, advance -> config forms appear | Recommendations pre-filled, validation works |
+| VC-3.6 | Step back-navigation | Navigate back to Hardware from Configure | Hardware shows cached results, Configure invalidated |
+| VC-3.7 | Keyboard-only flow | Complete welcome through configure with keyboard only | All controls keyboard-accessible |
+| VC-3.8 | axe-core all wizard steps | Run axe-core on each step | Zero violations |
+| VC-3.9 | Review step TOML preview | Review step shows TOML preview from preview-config endpoint | TOML rendered via renderMarkdown() |
+| VC-3.10 | Save flow end-to-end | save-config -> validation-launch -> completion polling -> "Go to Dashboard" | Full save flow completes successfully |
+
+---
+
+## Phase 4: Integration & Testing
+
+---
+
+## PR12: Backend Contract Tests
+
+**Branch:** `setup/12-contract-tests`  
+**Merge Target:** `main`  
+**Depends on:** PR5, PR6, PR7 merged to `main` (all backend PRs)  
 **Size:** Medium (~350 lines)  
 **Estimated Time:** 5–7 hours  
-**Design Reference:** `design_reference/v1/Playground.html` — side-by-side comparison, tab fallback at <1280px. `design_reference/v1/Model Registry.html` — model card grid
 
 ### Purpose
 
-Add comparison mode to the playground (side-by-side model output), implement the model registry page, and close out any remaining page stubs. ComparisonPane is an orchestrator — it manages its own SSE stream and AbortController.
+Implement JSON schema snapshot tests for all `/api/setup/*` endpoints to ensure the contract between backend and frontend stays in sync. Covers happy-path response shapes, error response shapes, and input validation boundary tests. If `ts-rs` is feasible, generate TypeScript type definitions directly from Rust structs; otherwise, use manual snapshot comparison.
+
+Design doc references: Section 10.6 (Backend API Tests), Section 10.7 (Contract Tests).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 12.1 | Implement `ComparisonPane.svelte` (orchestrator) | Props: `ComparisonPaneProps`. Owns its own `ChatPane` instance, `AbortController`, and SSE stream. Closing aborts only this stream. `<section aria-label="Response from {model} (comparison)">` with `<h3>`. `aria-live` announcement on toggle: "Comparison pane opened for {model}." Design doc Sections 5.2, 9.4. | `ui/src/lib/components/playground/ComparisonPane.svelte` |
-| 12.2 | Wire comparison into PlaygroundPage | Toggle button adds/removes `ComparisonPane`. Below 1280px: tab switching instead of side-by-side. Shared prompt sync via `sharedPrompt` prop. Design doc Section 4.5. | `ui/src/routes/playground/+page.svelte` |
-| 12.3 | Implement comparison responsive fallback | Below 1280px: primary and comparison panes become tabs. `role="tablist"` / `role="tab"` / `role="tabpanel"`. Design doc Section 4.5. | `ui/src/routes/playground/+page.svelte` |
-| 12.4 | Implement `ModelRegistryPage` | Route `+page.svelte` at `/models`. Fetches model list via TanStack Query. Renders `ModelCard` grid. | `ui/src/routes/models/+page.svelte` |
-| 12.5 | Implement `ModelCard.svelte` (presentational) | Props: `model: ModelInfo`. Displays model name, loaded status, assigned server(s), capabilities. | `ui/src/lib/components/models/ModelCard.svelte` |
-| 12.6 | Unit tests: ComparisonPane independence | Open comparison → send message in primary → assert comparison pane unaffected. Cancel comparison → assert only comparison stream aborted. | tests |
-| 12.7 | Unit tests: comparison screen reader | Assert `<section aria-label>` with model name. Assert `aria-live` announcement on toggle. | tests |
-| 12.8 | Unit tests: responsive fallback | Viewport < 1280px → assert tab interface rendered instead of side-by-side. | tests |
+| 12.1 | Implement JSON schema snapshot capture | For each endpoint, capture the response JSON shape from happy-path integration tests. Store as `.json` snapshot files in version control. | `crates/llamaforge-api/tests/snapshots/` |
+| 12.2 | Hardware detection snapshot | Capture response from `GET /api/setup/hardware` with mocked probes. Pin field names, types, nesting. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.3 | Binary scanner snapshot | Capture both found and not-found variants. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.4 | Model scanner snapshot | Capture response with models, truncation, and warnings. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.5 | Recommendation snapshot | Capture response with recommendations and rationale. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.6 | Build SSE event snapshots | Capture each SSE event type: `phase`, `progress`, `log`, `complete`, `failed`. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.7 | Save-config / preview-config snapshot | Capture success, 409, 403, 422 responses. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.8 | Error response envelope tests | Verify all 4xx/5xx responses have `Content-Type: application/json` and `error`/`message` fields. | `crates/llamaforge-api/tests/contract_tests.rs` |
+| 12.9 | Evaluate ts-rs integration | Attempt `ts-rs` derivation from Rust response structs. If feasible, add `#[derive(TS)]` and generate `.ts` files. If not, document why and proceed with snapshots. | `crates/llamaforge-api/Cargo.toml`, response structs |
+| 12.10 | TypeScript type sync verification | If using snapshots: compare snapshot shapes against `ui/src/lib/api/types.ts` setup types. If using ts-rs: verify generated types match checked-in types. | CI script or test |
+| 12.11 | Input validation boundary tests | All boundary tests from Section 10.6: empty directories, path traversal, null bytes, read-only path, invalid backend, jobs 0/negative, jobs > num_cpus, empty models, gibberish command output, multi-GPU output, Apple Silicon unified memory. | `crates/llamaforge-api/tests/validation_boundary_tests.rs` |
 
 ### PR12 Acceptance Criteria
 
-- [ ] ComparisonPane manages its own stream independently
-- [ ] Closing comparison aborts only its stream (primary unaffected)
-- [ ] Screen reader sections with `aria-label` for each pane
-- [ ] `aria-live` announcement on comparison toggle
-- [ ] Below 1280px: tab switching instead of side-by-side
-- [ ] Model registry page renders model list
-- [ ] All 3 test suites pass
+- [ ] JSON schema snapshots exist for all `/api/setup/*` endpoints
+- [ ] Snapshot tests fail if response shape changes (new field, removed field, type change)
+- [ ] Error responses verified: all return structured JSON with `error`/`message`
+- [ ] Input validation boundary tests cover all cases from Section 10.6
+- [ ] ts-rs evaluation documented (adopted or deferred with rationale)
+- [ ] TypeScript types verified against backend response shapes
+- [ ] All test suites pass
+- [ ] `cargo clippy` clean, `cargo test` passes
 
 ### PR12 Creation Steps
 
 ```bash
-git checkout -b ui/12-comparison frontend
-# ... implement tasks 12.1–12.8 ...
-git add -A && git commit -m "ui: implement playground comparison mode and model registry page"
-git push -u origin ui/12-comparison
-# Open PR: "Web UI PR12: Playground Comparison & Model Registry"
-# Description: "Adds comparison mode (FRONTEND_ARCHITECTURE.md Sections 5.2, 9.4).
-# ComparisonPane as orchestrator with independent SSE stream and AbortController.
-# Screen reader section landmarks. Responsive tab fallback below 1280px.
-# Model registry page with ModelCard grid. 3 test suites."
+git checkout -b setup/12-contract-tests main
+# ... implement tasks 12.1–12.11 ...
+git add -A && git commit -m "setup: add contract tests with JSON schema snapshots and input validation boundaries"
+git push -u origin setup/12-contract-tests
+# Open PR: "Setup Wizard PR12: Backend Contract Tests"
+# Description: "Implements contract tests (08_SETUP_WIZARD.md Sections 10.6, 10.7).
+# JSON schema snapshot tests for all /api/setup/* endpoints. Error envelope verification.
+# Input validation boundary tests (empty dirs, path traversal, null bytes, invalid backend,
+# jobs bounds, multi-GPU parsing, Apple Silicon). ts-rs evaluation. TypeScript type sync check."
 ```
 
 ---
 
-## VC-4: Full Feature Verification Checkpoint
+## PR13: Frontend Test Suite + CI
 
-**Gate:** PR12 merged. All pages implemented.
-
-| # | Check | Method | Pass Criteria |
-|---|-------|--------|---------------|
-| VC-4.1 | All routes render | Navigate to each of the 8 route patterns | No blank screens, correct data |
-| VC-4.2 | Streaming chat | Send message → tokens stream in → complete with metrics | Full lifecycle works |
-| VC-4.3 | Comparison mode | Open comparison, different model → both stream independently | Independent streams |
-| VC-4.4 | Config save lifecycle | Edit config → diff preview → save → toast → form reset | Full lifecycle works |
-| VC-4.5 | Config concurrent edit | Save from another tab → 409 on submit → banner → reload | Conflict handled correctly |
-| VC-4.6 | Explorer 10K rows | Load 10K requests → virtual scroll → no jank | FPS > 30 |
-| VC-4.7 | Dark mode all pages | Toggle dark mode → verify every page renders correctly | No contrast violations |
-| VC-4.8 | Keyboard-only navigation | Complete all user flows without mouse | All flows possible |
-| VC-4.9 | axe-core all pages both themes | Run axe-core on every page in light and dark modes | Zero violations |
-
----
-
-## PR13: Security Hardening & Rust Build Integration
-
-**Branch:** `ui/13-security-build`  
-**Depends on:** PR12 merged to `frontend`  
-**Size:** Medium (~300 lines)  
-**Estimated Time:** 4–6 hours  
-**Design Reference:** None — this PR is infrastructure (CSP headers, rust-embed, build pipeline). No visual changes.
+**Branch:** `ui/setup-13-tests`  
+**Merge Target:** `frontend`  
+**Depends on:** PR11 merged to `frontend`  
+**Size:** Large (~600 lines of tests + CI config)  
+**Estimated Time:** 8–10 hours  
 
 ### Purpose
 
-Implement all security response headers, verify CSP correctness, set up `build.rs` integration with `rust-embed` for single-binary distribution, and configure the Vite build for optimal output.
+Implement the comprehensive frontend test suite for the wizard: component tests (5 states each), integration tests (full wizard flow, build failure recovery, hardware failure manual entry, SSE streaming tests), visual regression (light + dark), axe-core, and bundle size verification for the wizard chunk (< 40 KB gzipped). Also includes standalone mode tests and the CI pipeline configuration for wizard-specific checks.
+
+Design doc references: Section 10 (Testing Strategy — all subsections).
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 13.1 | Implement Rust UI serving handler | axum handler serving embedded UI assets at `/ui/*`. Sets all security response headers. | `src/transport/ui.rs` |
-| 13.2 | Implement CSP header generation | Dynamic `connect-src 'self'` (SSE over same origin). Full CSP: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests`. Design doc Section 10.3. | `src/transport/ui.rs` |
-| 13.3 | Implement response headers | `X-Frame-Options: DENY`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`. Design doc Section 10.3. | `src/transport/ui.rs` |
-| 13.4 | Implement CSRF header enforcement | Backend middleware rejects POST/PUT/PATCH/DELETE requests to `/api/*` without `X-LlamaForge-Request: 1` header. Returns `403 Forbidden`. Design doc Section 10.2. | `src/transport/` (middleware) |
-| 13.5 | Implement CORS policy | Do NOT set `Access-Control-Allow-Origin` on any `/api/*` endpoint. Browser default blocks cross-origin reads. Design doc Section 10.2. | `src/transport/` (verify no CORS headers) |
-| 13.6 | Configure `build.rs` | Detect `ui/` directory. Run `npm ci && npm run build`. Use `rust-embed` to include `ui/build/` in binary. `debug-embed = false` for development (serves from filesystem). Design doc Appendix C. | `build.rs` |
-| 13.7 | Configure Vite production build | `vite.config.ts`: enable `vite-plugin-compression` for gzip sizes. Verify code splitting produces per-route chunks matching Section 8.2 budget. Generate build manifest (`.vite/manifest.json`). | `ui/vite.config.ts` |
-| 13.8 | Implement `<link rel="modulepreload">` | In `app.html`, add modulepreload hint for dashboard chunk. Design doc Section 8.4. | `ui/src/app.html` |
-| 13.9 | Verify no eval() or new Function() | Grep codebase for `eval(`, `new Function(`, `setTimeout(string)`, `setInterval(string)`. Assert zero matches. Design doc Section 10.1. | — |
-| 13.10 | Integration test: CSP blocks inline script | Serve UI with CSP → inject `<script>alert(1)</script>` → verify browser blocks execution. | manual test |
-| 13.11 | Integration test: CSRF blocks cross-origin | Send POST to `/api/servers/1/restart` without custom header → assert 403 Forbidden. | tests |
-| 13.12 | Integration test: single binary serves UI | `cargo build --release` → run binary → navigate to `/ui/` → assert UI renders. | manual test |
+| 13.1 | Component tests: StepIndicator | 5 states: all upcoming, 1 current, 2 complete + 1 current, all complete, 1 skipped. | `ui/tests/components/StepIndicator.test.ts` |
+| 13.2 | Component tests: HardwareCard | 5 states: detected, not_detected, error, loading (skeleton), timed_out. | `ui/tests/components/HardwareCard.test.ts` |
+| 13.3 | Component tests: ModelTable | 5 states: empty, 1 model, 5 models (2 selected), truncated, with warnings. | `ui/tests/components/ModelTable.test.ts` |
+| 13.4 | Component tests: ServerConfigForm | 5 states: default values, custom values, validation errors, all recommended, recommendation override. | `ui/tests/components/ServerConfigForm.test.ts` |
+| 13.5 | Component tests: BuildProgress | 5 states: idle, cloning, building (50%), complete, failed. | `ui/tests/components/BuildProgress.test.ts` |
+| 13.6 | Component tests: TomlPreview | Render TOML string -> assert syntax highlighting applied via renderMarkdown. | `ui/tests/components/TomlPreview.test.ts` |
+| 13.7 | Integration test: full wizard flow (happy path) | Mock all API responses. Walk through all 6 steps. Verify state accumulates. Verify save request contains expected config. | `ui/tests/integration/wizard-flow.test.ts` |
+| 13.8 | Integration test: build failure recovery | Mock build SSE with `failed` event. Verify error UI. Click retry. Mock success on second attempt. Verify transition to binary-found. | `ui/tests/integration/build-recovery.test.ts` |
+| 13.9 | Integration test: build failure skip | Mock build `failed`. Click "Skip." Verify manual path input. Enter path. Advance. Verify path carried to review. | `ui/tests/integration/build-skip.test.ts` |
+| 13.10 | Integration test: hardware failure manual entry | Mock 500 from hardware endpoint. Verify error banner + manual entry form. Fill in hardware. Advance. Verify manual values used in recommendations. | `ui/tests/integration/hardware-fallback.test.ts` |
+| 13.11 | Integration test: SSE reconnect during build | Mock SSE disconnect mid-stream. Verify reconnect. Mock successful resume. Verify log continues without duplicates. | `ui/tests/integration/sse-reconnect.test.ts` |
+| 13.12 | Integration test: SSE reconnect exhaustion | Mock 3 consecutive failed reconnects. Verify "Connection lost" UI. Click retry. Verify fresh connection. | `ui/tests/integration/sse-exhaustion.test.ts` |
+| 13.13 | Integration test: SSE malformed event | Mock invalid JSON in SSE data. Verify graceful handling: logged, stream continues. | `ui/tests/integration/sse-malformed.test.ts` |
+| 13.14 | Integration test: navigation back/forward | Complete through Configure, navigate back to Hardware, verify data cached. Navigate forward, verify Configure invalidated. | `ui/tests/integration/wizard-navigation.test.ts` |
+| 13.15 | Integration test: keyboard-only flow | Playwright: complete full wizard using only Tab, Enter, Space, Arrow keys. | `ui/tests/e2e/wizard-keyboard.spec.ts` |
+| 13.16 | Visual regression: wizard steps | Playwright screenshots for each step in light + dark themes at 1280x800. | `ui/tests/visual/wizard.spec.ts` |
+| 13.17 | axe-core: wizard steps | Run axe-core on each wizard step in both themes. | `ui/tests/a11y/wizard-axe.spec.ts` |
+| 13.18 | Bundle size check | Verify wizard chunk < 40 KB gzipped. Update `bundle-baseline.json` if it exists. | `ui/scripts/check-bundle-size.js` (update) |
+| 13.19 | Standalone mode test: save failure + retry | Mock filesystem error on first save. Verify error displayed. Retry with valid path. Verify success. | `ui/tests/integration/standalone-save.test.ts` |
 
 ### PR13 Acceptance Criteria
 
-- [ ] CSP header correct on all `/ui/*` responses
-- [ ] All 4 response headers present
-- [ ] CSRF middleware rejects mutating requests without custom header
-- [ ] No `Access-Control-Allow-Origin` header on `/api/*`
-- [ ] `cargo build --release` embeds UI assets in binary
-- [ ] `debug-embed = false` enables filesystem serving in dev builds
-- [ ] No `eval()` or `new Function()` in codebase
-- [ ] Per-route chunk sizes within Section 8.2 budgets
+- [ ] Component tests: 6 components tested with 5 states each (30 test cases)
+- [ ] Integration tests: 8 flow tests covering happy path, failure recovery, SSE edge cases
+- [ ] Keyboard-only E2E test passes
+- [ ] Visual regression screenshots captured for 6 steps x 2 themes = 12 screenshots
+- [ ] axe-core: zero violations on all wizard steps in both themes
+- [ ] Wizard chunk < 40 KB gzipped
+- [ ] All test suites pass
+- [ ] `npm run check && npm run lint` clean
 
 ### PR13 Creation Steps
 
 ```bash
-git checkout -b ui/13-security-build frontend
-# ... implement tasks 13.1–13.12 ...
-git add -A && git commit -m "ui: implement security headers, CSRF enforcement, and rust-embed build integration"
-git push -u origin ui/13-security-build
-# Open PR: "Web UI PR13: Security Hardening & Build Integration"
-# Description: "Implements security posture and build integration (FRONTEND_ARCHITECTURE.md
-# Sections 10.2–10.4, Appendix C). CSP, X-Frame-Options, Permissions-Policy, CSRF middleware.
-# rust-embed for single-binary distribution. Vite production build optimization.
-# No eval() audit. 2 integration tests."
+git checkout -b ui/setup-13-tests frontend
+# ... implement tasks 13.1–13.19 ...
+git add -A && git commit -m "ui: add wizard test suite — components, integration, visual regression, axe-core, bundle check"
+git push -u origin ui/setup-13-tests
+# Open PR: "Setup Wizard PR13: Frontend Test Suite + CI"
+# Description: "Implements the full wizard test suite (08_SETUP_WIZARD.md Section 10).
+# Component tests (6 components x 5 states). Integration tests: full flow, build failure
+# recovery, build skip, hardware fallback, SSE reconnect, SSE exhaustion, SSE malformed,
+# navigation, standalone save. Keyboard E2E test. Visual regression (12 screenshots).
+# axe-core (12 pages). Bundle size check (< 40 KB). 19 test files."
 ```
 
 ---
 
-## PR14: Test Suite, Bundle Size CI & Final Polish
+## PR14: Final Polish + End-to-End Verification
 
-**Branch:** `ui/14-verification`  
-**Depends on:** PR13 merged to `frontend`  
-**Size:** Medium (~400 lines of tests + CI config)  
-**Estimated Time:** 6–8 hours  
-**Design Reference:** `design_reference/v1/All Screens Dark.html` — dark theme visual regression targets. `design_reference/v1/Responsive.html` — responsive breakpoint regression targets
+**Branch:** `setup/14-final-polish`  
+**Merge Target:** `main`  
+**Depends on:** PR12 (backend contract tests) and PR13 (frontend tests) merged  
+**Size:** Small–Medium (~300 lines)  
+**Estimated Time:** 5–7 hours  
 
 ### Purpose
 
-The final PR implements the Playwright E2E test suite, Playwright visual regression tests, the `check-bundle-size.js` CI script, axe-core accessibility CI, and Lighthouse CI configuration. This is primarily test and CI code — no production logic changes.
+The capstone PR: first-run mode end-to-end test (boot with no config -> wizard -> save -> running mode transition -> dashboard), reconfigure flow test, cross-branch verification, update Open Questions in the design doc with resolutions, and update the Decision Log. This PR touches both the backend (end-to-end test) and the frontend (any polish items found during verification).
+
+Design doc references: Section 10.8 (Standalone Wizard Mode Tests), Section 14 (Open Questions), Appendix: Decision Log.
 
 ### Tasks
 
 | # | Task | Detail | File(s) |
 |---|------|--------|---------|
-| 14.1 | Implement E2E tests: Dashboard | Playwright: load dashboard → verify server cards render → click card → verify navigation to detail. | `ui/tests/e2e/dashboard.spec.ts` |
-| 14.2 | Implement E2E tests: Explorer | Playwright: load explorer → apply filter → verify table updates → open drawer → verify data. | `ui/tests/e2e/explorer.spec.ts` |
-| 14.3 | Implement E2E tests: Config | Playwright: load config → change value → diff preview → save → verify toast. | `ui/tests/e2e/config.spec.ts` |
-| 14.4 | Implement E2E tests: Playground | Playwright: load playground → send message → verify streaming response renders. | `ui/tests/e2e/playground.spec.ts` |
-| 14.5 | Implement MSW mock backend | Mock Service Worker intercepting all API endpoints and SSE for E2E tests. Realistic data volumes: 8 server cards, 1000 table rows, 3 chat messages with code blocks. Design doc Section 11.2. | `ui/tests/mocks/handlers.ts` |
-| 14.6 | Implement visual regression tests | Playwright screenshot comparison for: dashboard (3 servers), explorer with data, config with validation errors, playground with streaming — each in light and dark themes. Threshold: 0.1% pixel diff. Design doc Section 11.3. | `ui/tests/visual/` |
-| 14.7 | Implement `check-bundle-size.js` | Reads chunks from `.vite/manifest.json` (auto-discovery). Enforces per-route limits from Section 8.2 and 250 KB aggregate. Compares against `bundle-baseline.json` with 5 KB drift threshold. Design doc Section 11.5. | `ui/scripts/check-bundle-size.js` |
-| 14.8 | Create `bundle-baseline.json` | Initial baseline from current build. Committed to version control. | `ui/bundle-baseline.json` |
-| 14.9 | Implement axe-core CI | `@axe-core/playwright` runs on every page in both themes. Zero violations = pass. Design doc Section 11.4. | `ui/tests/a11y/axe.spec.ts` |
-| 14.10 | Configure Lighthouse CI | Run on dashboard, explorer, playground. Fail thresholds: Performance < 90, Accessibility < 95, Best Practices < 90. Design doc Section 11.5. | `ui/.lighthouserc.js` |
-| 14.11 | Implement CI pipeline config | GitHub Actions (or equivalent): `npm ci`, `npm run check`, `npm run lint`, `npm run test:unit`, `npm run build`, `node scripts/check-bundle-size.js`, E2E tests, visual regression, axe-core, Lighthouse. Design doc Appendix C CI Pipeline. | `.github/workflows/ui.yml` |
-| 14.12 | Final audit: no raw fetch | `grep -rn "fetch(" ui/src/ --include="*.ts" --include="*.svelte"` — only in `client.ts`. | — |
-| 14.13 | Final audit: no bare {@html} | `grep -rn "{@html" ui/src/ --include="*.svelte"` — only with `renderMarkdown()`. ESLint rule also enforces. | — |
-| 14.14 | Final audit: no unwanted dependencies | `npm ls --production` — verify no unexpected packages. All runtime deps match Section 8.1 budget methodology. | — |
+| 14.1 | E2E test: first-run mode full lifecycle | Start `llamaforge serve` with no config. Navigate to `/ui/setup`. Walk through all wizard steps with mocked hardware/models. Save config. Verify mode transitions to Running. Navigate to dashboard. Verify dashboard loads. | `crates/llamaforge-e2e/tests/wizard_e2e.rs` |
+| 14.2 | E2E test: reconfigure flow | Start in Running mode. Navigate to setup wizard with `X-Setup-Reconfigure` header. Re-scan hardware. Add a model. Save. Verify config updated (merged, not replaced). | `crates/llamaforge-e2e/tests/wizard_e2e.rs` |
+| 14.3 | E2E test: standalone save + shutdown | Start `llamaforge init --interactive`. Complete wizard. Save config. Verify server exits 0. Verify config file written. | `crates/llamaforge-e2e/tests/wizard_e2e.rs` |
+| 14.4 | E2E test: Ctrl+C during build | Start wizard. Initiate build. Send SIGINT. Verify process group killed. Verify no orphan processes. Verify exit 130. | `crates/llamaforge-e2e/tests/wizard_e2e.rs` |
+| 14.5 | E2E test: concurrent tabs | Open wizard in two sessions. Complete and save from both. Verify first saves, second gets 409 or waits. Verify no config corruption. | `crates/llamaforge-e2e/tests/wizard_e2e.rs` |
+| 14.6 | Update Open Questions | Verify Open Questions #1-#5 were implemented as decided in Pre-Implementation Decisions. Update design doc Section 14 to mark each as resolved with the implementation PR reference. | `docs/component-designs/08_SETUP_WIZARD.md` |
+| 14.7 | Update Decision Log | Add implementation decisions to the Appendix: Decision Log table. | `docs/component-designs/08_SETUP_WIZARD.md` |
+| 14.8 | Cross-branch type sync audit | Verify all TypeScript types in `ui/src/lib/api/types.ts` match the backend response structs. Document any discrepancies. | manual verification |
 
 ### PR14 Acceptance Criteria
 
-- [ ] All 4 E2E test suites pass against MSW mock backend
-- [ ] Visual regression screenshots captured for 8 screens (4 pages × 2 themes)
-- [ ] `check-bundle-size.js` enforces per-route + aggregate limits
-- [ ] axe-core reports zero violations on all pages in both themes
-- [ ] Lighthouse scores: Performance ≥ 90, Accessibility ≥ 95, Best Practices ≥ 90
-- [ ] CI pipeline passes end-to-end
-- [ ] No raw `fetch()` outside `client.ts`
-- [ ] No bare `{@html}` outside `renderMarkdown()`
-- [ ] Bundle sizes within Section 8.2 budgets
+- [ ] First-run E2E: no config -> wizard -> save -> running mode -> dashboard
+- [ ] Reconfigure E2E: running mode -> wizard -> add model -> merge config
+- [ ] Standalone E2E: init --interactive -> complete -> exit 0
+- [ ] Ctrl+C E2E: no orphan processes, exit 130
+- [ ] Concurrent tabs E2E: no config corruption
+- [ ] Open Questions resolved in design doc
+- [ ] Decision Log updated
+- [ ] TypeScript types match backend structs
+- [ ] All E2E test suites pass
 
 ### PR14 Creation Steps
 
 ```bash
-git checkout -b ui/14-verification frontend
-# ... implement tasks 14.1–14.14 ...
-git add -A && git commit -m "ui: add E2E tests, visual regression, bundle size CI, axe-core, and Lighthouse"
-git push -u origin ui/14-verification
-# Open PR: "Web UI PR14: Test Suite, Bundle Size CI & Final Polish"
-# Description: "Pure test and CI PR. Playwright E2E tests (4 suites), visual regression (8
-# screenshots), check-bundle-size.js with Vite manifest auto-discovery and baseline drift
-# tracking, axe-core accessibility CI in both themes, Lighthouse CI.
-# MSW mock backend with realistic data volumes. Final codebase audits.
-# No production code changes."
+# Backend E2E tests
+git checkout -b setup/14-final-polish main
+# ... implement tasks 14.1–14.5 ...
+git add -A && git commit -m "setup: add end-to-end tests for first-run, reconfigure, standalone, and concurrent flows"
+git push -u origin setup/14-final-polish
+
+# Doc updates (same branch or separate, depending on review preference)
+# ... implement tasks 14.6–14.8 ...
+git add -A && git commit -m "setup: resolve open questions, update decision log, type sync audit"
+git push origin setup/14-final-polish
+
+# Open PR: "Setup Wizard PR14: Final Polish + End-to-End Verification"
+# Description: "Capstone PR. E2E tests: first-run lifecycle (no config -> wizard -> running -> dashboard),
+# reconfigure flow, standalone save+shutdown, Ctrl+C build cleanup, concurrent tab safety.
+# Open Questions #1-#5 resolved. Decision Log updated. Cross-branch type sync audit."
 ```
 
 ---
 
-## VC-5: Final Sign-Off Checkpoint
+## VC-4: Final Sign-Off Checkpoint
 
-**Gate:** All 14 PRs merged. LlamaForge Web UI is complete.
+**Gate:** All 14 PRs merged. Setup Wizard is complete.
 
 | # | Check | Method | Pass Criteria |
 |---|-------|--------|---------------|
-| VC-5.1 | All tests pass | `npm run test && npm run test:e2e` | Zero failures |
-| VC-5.2 | Zero lint warnings | `npm run check && npm run lint` | Exit code 0 |
-| VC-5.3 | Bundle size within budget | `node scripts/check-bundle-size.js` | All routes pass, aggregate < 250 KB |
-| VC-5.4 | axe-core clean | All pages, both themes | Zero violations |
-| VC-5.5 | Lighthouse green | Dashboard, Explorer, Playground | Perf ≥ 90, A11y ≥ 95, BP ≥ 90 |
-| VC-5.6 | Single binary serves UI | `cargo build --release && ./target/release/llamaforge` → navigate `/ui/` | UI renders correctly |
-| VC-5.7 | CSP active | Check response headers in browser DevTools | All headers present |
-| VC-5.8 | CSRF enforced | `curl -X POST http://localhost:8000/api/servers/1/restart` → 403 | Rejected without header |
-| VC-5.9 | No XSS vectors | Inject `<script>alert(1)</script>` in playground → verify stripped | Alert never fires |
-| VC-5.10 | No raw fetch audit | `grep -rn "fetch(" ui/src/ --include="*.ts" --include="*.svelte"` | Only in `client.ts` |
-| VC-5.11 | No bare {@html} audit | ESLint rule + manual grep | Only with `renderMarkdown()` |
-| VC-5.12 | Keyboard-only audit | Complete every user flow (dashboard, server action, queue cancel, explorer filter/export, config save, playground chat, comparison) without a mouse | All flows possible |
-| VC-5.13 | Screen reader audit | VoiceOver walkthrough of dashboard, playground, and explorer | Announcements are correct, no flooding |
-| VC-5.14 | Dark mode audit | Visual inspection of every page in dark mode | No contrast issues, no invisible elements |
-| VC-5.15 | Design doc compliance | Cross-check every Section in `FRONTEND_ARCHITECTURE.md` against implementation | Checklist complete |
+| VC-4.1 | All backend tests pass | `cargo test` in workspace root | Zero failures |
+| VC-4.2 | All frontend tests pass | `npm run test && npm run test:e2e` in `ui/` | Zero failures |
+| VC-4.3 | Zero lint warnings | `cargo clippy` + `npm run check && npm run lint` | Exit code 0 |
+| VC-4.4 | Wizard bundle < 40 KB | `node scripts/check-bundle-size.js` | Wizard chunk passes |
+| VC-4.5 | axe-core clean | All wizard steps, both themes | Zero violations |
+| VC-4.6 | First-run E2E | Boot with no config -> wizard -> save -> dashboard | Full lifecycle works |
+| VC-4.7 | Standalone E2E | `llamaforge init --interactive` -> complete -> exit 0 | Clean lifecycle |
+| VC-4.8 | Build flow E2E | Binary not found -> build -> SSE streams -> success | Full build lifecycle |
+| VC-4.9 | Hardware detection accuracy | Run on test machine with known GPU | Correct GPU/VRAM/CPU/RAM |
+| VC-4.10 | Model scan accuracy | Scan directory with known .gguf files | All files found, metadata correct |
+| VC-4.11 | Config validity | Generated config passes `llamaforge validate` | Zero errors |
+| VC-4.12 | Keyboard-only wizard | Complete all steps without mouse | All flows possible |
+| VC-4.13 | Screen reader audit | VoiceOver walkthrough of full wizard flow | Step announcements, error announcements, build progress correct |
+| VC-4.14 | Dark mode audit | Visual inspection of every wizard step in dark mode | No contrast issues |
+| VC-4.15 | Design doc compliance | Cross-check every Section in `08_SETUP_WIZARD.md` against implementation | Checklist complete |
+| VC-4.16 | No raw fetch | `grep -rn "fetch(" ui/src/ --include="*.ts" --include="*.svelte"` — only in `client.ts` | Zero matches outside `client.ts` |
+| VC-4.17 | No bare {@html} | `grep -rn "{@html" ui/src/ --include="*.svelte"` — only with `renderMarkdown()` | Zero bare `{@html}` usages |
+| VC-4.18 | No Svelte 4 API | `grep -rn "onMount\|onDestroy\|writable\|readable" ui/src/ --include="*.ts" --include="*.svelte"` | Zero matches |
 
 ---
 
-## Summary: PR → File Mapping
+## Summary: PR -> File Mapping
 
 | PR | Key Files Created/Modified | LOC (est.) |
 |----|---------------------------|------------|
-| PR1 | `ui/package.json`, `svelte.config.js`, `vite.config.ts`, `tsconfig.json`, `app.html`, `app.css` | ~150 |
-| PR2 | `lib/stores/preferences.ts`, `lib/stores/theme.ts`, `lib/components/shared/*.svelte`, `lib/utils/format.ts` | ~400 |
-| PR3 | `lib/api/client.ts`, `lib/api/types.ts`, `lib/api/queries.ts`, `lib/stores/liveData.ts` | ~500 |
-| PR4 | `routes/+layout.svelte`, `lib/components/layout/*.svelte`, `routes/*/+page.svelte` (stubs) | ~450 |
-| PR5 | `routes/+page.svelte`, `lib/components/dashboard/*.svelte` | ~450 |
-| PR6 | `lib/components/shared/EChartsWrapper.svelte`, `lib/components/dashboard/*Chart.svelte` | ~350 |
-| PR7 | `routes/servers/[id]/+page.svelte`, `lib/components/server/*.svelte` | ~350 |
-| PR8 | `routes/queue/+page.svelte`, `lib/components/queue/*.svelte` | ~250 |
-| PR9 | `routes/explorer/+page.svelte`, `lib/components/explorer/*.svelte` | ~550 |
-| PR10 | `routes/config/*/+page.svelte`, `lib/components/config/*.svelte`, `lib/utils/configForm.ts` | ~450 |
-| PR11 | `routes/playground/+page.svelte`, `lib/components/playground/*.svelte`, `lib/utils/markdown.ts` | ~550 |
-| PR12 | `lib/components/playground/ComparisonPane.svelte`, `routes/models/+page.svelte`, `lib/components/models/ModelCard.svelte` | ~350 |
-| PR13 | `src/transport/ui.rs`, `build.rs`, `ui/vite.config.ts` additions | ~300 |
-| PR14 | `ui/tests/**`, `ui/scripts/check-bundle-size.js`, `.github/workflows/ui.yml` | ~400 |
-| **Total** | | **~5,500** |
+| PR1 | `crates/llamaforge-server/src/hardware.rs`, tests | ~400 |
+| PR2 | `crates/llamaforge-server/src/model_scanner.rs`, tests | ~350 |
+| PR3 | `crates/llamaforge-server/src/binary_scanner.rs`, tests | ~200 |
+| PR4 | `crates/llamaforge-server/src/recommendation.rs`, tests | ~350 |
+| PR5 | `crates/llamaforge-api/src/setup/*.rs` (8 handler files + mod + state), tests | ~600 |
+| PR6 | `crates/llamaforge-server/src/build.rs`, `crates/llamaforge-api/src/setup/build_*.rs`, tests | ~700 |
+| PR7 | `crates/llamaforge/src/init.rs`, `crates/llamaforge/src/serve.rs`, `crates/llamaforge-api/src/setup/guard.rs`, tests | ~500 |
+| PR8 | `ui/src/routes/setup/**`, `ui/src/lib/stores/setup.svelte.ts`, `ui/src/lib/components/setup/StepIndicator.svelte`, `ui/src/lib/components/setup/StepNavigation.svelte`, `ui/src/lib/api/types.ts`, `ui/src/lib/api/queries.ts` | ~400 |
+| PR9 | `ui/src/routes/setup/hardware/+page.svelte`, `ui/src/routes/setup/binary/+page.svelte`, `ui/src/lib/components/setup/HardwareCard.svelte`, `ui/src/lib/components/setup/BuildProgress.svelte`, `ui/src/lib/components/shared/LogViewer.svelte`, `ui/src/lib/components/shared/ProgressBar.svelte` | ~550 |
+| PR10 | `ui/src/routes/setup/models/+page.svelte`, `ui/src/routes/setup/configure/+page.svelte`, `ui/src/lib/components/setup/ModelTable.svelte`, `ui/src/lib/components/setup/ServerConfigForm.svelte`, `ui/src/lib/components/setup/DirectorySelector.svelte` | ~450 |
+| PR11 | `ui/src/routes/setup/review/+page.svelte`, `ui/src/lib/components/setup/TomlPreview.svelte`, `ui/src/lib/components/setup/SavePathSelector.svelte`, `ui/src/lib/components/setup/CompletionScreen.svelte` | ~400 |
+| PR12 | `crates/llamaforge-api/tests/contract_tests.rs`, `crates/llamaforge-api/tests/validation_boundary_tests.rs`, `crates/llamaforge-api/tests/snapshots/*.json` | ~350 |
+| PR13 | `ui/tests/components/*.test.ts`, `ui/tests/integration/*.test.ts`, `ui/tests/e2e/wizard-keyboard.spec.ts`, `ui/tests/visual/wizard.spec.ts`, `ui/tests/a11y/wizard-axe.spec.ts` | ~600 |
+| PR14 | `crates/llamaforge-e2e/tests/wizard_e2e.rs`, `docs/component-designs/08_SETUP_WIZARD.md` (updates) | ~300 |
+| **Total** | | **~6,150** |
 
-> Note: LOC estimate includes ~1,700 lines of tests. Production code is ~3,800 lines. Total may reach ~6,500 with CSS, config files, and test fixtures.
+> Note: Table totals ~6,150 lines of core implementation. With type definitions, configuration, test fixtures, and CI scripts, the total reaches ~8,200. Breakdown: ~3,550 backend production + ~2,050 frontend production + ~2,600 tests.
 
 ---
 
@@ -978,36 +1145,39 @@ git push -u origin ui/14-verification
 
 | Day | Work | PRs |
 |-----|------|-----|
-| Day 1 | Project scaffold + design system + shared primitives | PR1, PR2 |
-| Day 2 | API client, SSE LiveDataStore, TanStack Query | PR3 |
-| Day 3 | App shell — layout, sidebar, header, routing | PR4 |
-| Day 4 | Dashboard page — ServerGrid, ServerCard, gauges | PR5 |
-| Day 5 | EChartsWrapper + dashboard charts | PR6 |
-| Day 6 | Server detail page | PR7 |
-| Day 7 | Queue inspector | PR8 |
-| Day 8–9 | Request explorer (TanStack Table, virtual scroll, drawer) | PR9 |
-| Day 10 | Configuration pages (forms, diff preview, concurrent editing) | PR10 |
-| Day 11–12 | Playground core (streaming, markdown, DOMPurify) | PR11 |
-| Day 13 | Playground comparison + model registry | PR12 |
-| Day 14 | Security hardening + Rust build integration | PR13 |
-| Day 15–16 | Test suite, bundle CI, Lighthouse, final audits | PR14 |
-| Day 17 | Final verification (VC-5), code review fixes | — |
+| Day 1 | Hardware detection module | PR1 |
+| Day 2 | Model scanner module | PR2 |
+| Day 3 | Binary scanner module (morning) + start recommendation engine | PR3, PR4 start |
+| Day 4 | Finish recommendation engine | PR4 |
+| Day 5–6 | Setup API endpoints | PR5 |
+| Day 7–8 | Build orchestrator (SSE, process groups, timeouts) | PR6 |
+| Day 9 | CLI changes + first-run mode | PR7 |
+| Day 10 | VC-1 + VC-2 verification, fix any issues | — |
+| Day 11 | Wizard scaffold + step navigation | PR8 |
+| Day 12–13 | Hardware step + Binary step (build SSE UI) | PR9 |
+| Day 14 | Model step + Config step | PR10 |
+| Day 15 | Review step + Completion | PR11 |
+| Day 16 | VC-3 verification, fix any issues | — |
+| Day 17 | Backend contract tests | PR12 |
+| Day 18–19 | Frontend test suite + CI | PR13 |
+| Day 20–21 | Final polish + E2E verification | PR14 |
+| Day 22 | VC-4 final sign-off, code review fixes | — |
 
 ## Timeline (Two Engineers)
 
-| Day | Engineer A | Engineer B |
-|-----|-----------|-----------|
-| Day 1 | PR1 (scaffold) + PR2 (design system) | Reviews PR1/PR2, writes shared test fixtures, MSW mock setup |
-| Day 2 | PR3 (data layer) | Reviews PR3, starts mock backend handlers |
-| Day 3 | PR4 (app shell) | PR7 (server detail — can start with app shell stub) |
-| Day 4 | PR5 (dashboard) | PR8 (queue) |
-| Day 5 | PR6 (charts) | PR9 part 1 (explorer table + virtual scroll) |
-| Day 6 | PR10 (config pages) | PR9 part 2 (explorer drawer, export, tests) |
-| Day 7 | PR11 part 1 (playground streaming + markdown) | Reviews PR10, starts PR12 (comparison + model registry) |
-| Day 8 | PR11 part 2 (ESLint rule, parameter sync, tests) | PR12 complete |
-| Day 9 | PR13 (security + build) | PR14 part 1 (E2E tests, visual regression) |
-| Day 10 | PR14 part 2 (bundle CI, axe-core, Lighthouse) | VC-5 verification, docs |
-| Day 11 | Code review fixes | Code review fixes |
+| Day | Engineer A (Backend-focused) | Engineer B (Frontend-focused) |
+|-----|-----|-----|
+| Day 1 | PR1 (hardware detection) | PR2 (model scanner) |
+| Day 2 | PR3 (binary scanner) | PR4 (recommendation engine) |
+| Day 3–4 | PR5 (setup API endpoints) | Reviews PR1–PR4, writes mock fixtures |
+| Day 5–6 | PR6 (build orchestrator) | Reviews PR5, prepares frontend TypeScript types |
+| Day 7 | PR7 (CLI + first-run mode) | PR8 (wizard scaffold) — starts after frontend rebase |
+| Day 8 | Reviews PR8, VC-1 + VC-2 verification | PR9 (hardware + binary steps) |
+| Day 9 | PR12 (backend contract tests) | PR10 (model + config steps) |
+| Day 10 | Reviews PR9, PR10 | PR11 (review + completion) |
+| Day 11 | PR14 part 1 (E2E backend tests) | PR13 (frontend test suite) |
+| Day 12 | PR14 part 2 (doc updates, audits) | Reviews PR12, PR14 |
+| Day 13 | VC-3 + VC-4 verification | Code review fixes |
 
 ---
 
@@ -1015,27 +1185,33 @@ git push -u origin ui/14-verification
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
-| ECharts bundle exceeds 200 KB budget | Medium | Medium | Custom build with tree-shaking (`echarts/core` + only used chart types). Verify with `vite-plugin-compression` output. Fallback: replace bar charts with CSS-based gauges. |
-| TanStack Virtual performance on 10K+ rows | Low | High | Virtual scroll tested in PR9 with 10K rows. If jank occurs, reduce overscan, simplify row rendering, or paginate server-side. |
-| SSE EventSource reconnection inconsistency across browsers | Medium | Low | Firefox and Chrome handle `Last-Event-ID` differently. Integration test with each target browser. Fallback: polling catches up within 5s. |
-| Bits UI component accessibility gaps | Low | Medium | axe-core CI catches regressions. Manual VoiceOver testing in VC-5. Replace individual primitives with custom ARIA implementations if needed. |
-| Tailwind CSS 4 breaking changes (new major version) | Low | Low | Pin version in `package.json`. Tailwind 4 stable since late 2025. |
-| DOMPurify bypass via new HTML spec elements | Low | High | FORBID_TAGS uses an explicit allowlist pattern — new elements are forbidden by default. Keep DOMPurify updated. |
-| `adapter-static` limitations for dynamic routes | Low | Low | All routes use `[id]` params resolved client-side. `fallback: 'index.html'` handles all paths. No SSR needed. |
-| Vite build manifest format changes | Low | Low | `check-bundle-size.js` reads `.vite/manifest.json` — format stable since Vite 5. Pin Vite version. |
-| Svelte 5 runes API changes before stable | Low | Medium | Svelte 5 stable since late 2024. Pin SvelteKit version. |
-| `prefers-reduced-motion` not fully tested | Medium | Low | CI runs with motion enabled. Manual testing with `prefers-reduced-motion: reduce` in VC-5. Document which animations are affected. |
+| `nvidia-smi` / `system_profiler` output format changes between versions | Medium | Medium | Parse with flexible regex. Unit tests with fixture outputs from multiple OS/driver versions. Graceful fallback to manual entry on parse failure. |
+| Build process takes > 20 minutes on slow hardware | Medium | Low | Per-phase timeouts prevent infinite hangs. UI shows factual progress (target count + elapsed), not ETAs. User can cancel and provide binary manually. |
+| SSE `EventSource` reconnection behavior differs across browsers | Medium | Low | Custom reconnection logic (not browser-native retry). Exponential backoff with jitter. Terminal event replay on reconnect. Integration tests with mock disconnect. |
+| GGUF filename heuristics fail for non-standard naming | High | Low | Heuristic is best-effort — `"unknown"` for unrecognized patterns. GGUF header parser is a documented fast-follow (Open Question #1). |
+| Wizard bundle exceeds 40 KB gzipped | Low | Medium | Wizard has no heavy dependencies (no ECharts, no TanStack Table). LogViewer and ProgressBar are lightweight. CI check enforces budget. |
+| Process group cleanup fails on some Linux kernels | Low | High | `setsid` + `kill(-pgid)` is POSIX standard. Integration test verifies no orphan processes. Fallback: individual PID kill of known children. |
+| Port availability check races with other processes | Medium | Low | Port check is advisory (documented in design doc). Validation-launch is the authoritative test — it actually binds the port. |
+| macOS Gatekeeper blocks built binary | Medium | Medium | Document: built-from-source binaries may require `xattr -d com.apple.quarantine`. Wizard could run this automatically post-build. |
+| Wizard state lost on page refresh | Low | Low | By design — the design doc explicitly states wizard state is session-scoped. TanStack Query re-fetches on mount. User re-scans, which is correct behavior (hardware/files may have changed). |
+| `walkdir` follows symlink cycles despite detection | Low | Medium | Track canonical paths in a `HashSet`. Skip already-visited paths. Report as warning. Integration test with symlink cycle fixture. |
+| `humantime` Duration parsing rejects valid inputs | Low | Low | Pin `humantime` version. Test common formats (`30m`, `1h`, `45m`, `2h30m`). |
+| First-run mode hot-reload fails for non-obvious reasons | Medium | Medium | Detailed error messages in `reload.error`. Mode reverts to `Setup`, not crash. User can retry or adjust config. |
 
 ---
 
 ## Integration Points (for other components)
 
-After the Web UI is complete, the following integration seams are ready:
+After the Setup Wizard is complete, the following integration seams are ready:
 
-1. **Rust Backend API** must serve all `/api/*` endpoints matching the TypeScript types in `lib/api/types.ts`. The UI's TanStack Query definitions (`queries.ts`) document every endpoint, expected response shape, and caching behavior.
-2. **SSE Endpoint** (`GET /api/events`) must emit the 5 event types documented in the Section 7.1 event type table. Sequential event IDs for `Last-Event-ID` resumption are recommended.
-3. **CSRF Middleware** must reject mutating requests without `X-LlamaForge-Request: 1`. The UI's `client.ts` auto-attaches this header.
-4. **`build.rs`** runs `npm ci && npm run build` in the `ui/` directory and `rust-embed` includes `ui/build/` in the binary. `debug-embed = false` serves from filesystem during development.
-5. **CSP and response headers** are set by the Rust UI handler (`transport/ui.rs`), not by the frontend build process.
-6. **Config Manager** provides the data for all three config editors. The UI uses `If-Match` with ETags for optimistic concurrency — the backend must support this.
-7. **Model Registry** API provides the model list for playground model selection and the model registry page.
+1. **Config Manager** — The wizard's `save-config` endpoint assembles `AppConfig` using the existing config types from `llamaforge-core`. The saved config must pass `llamaforge validate` and be loadable by the config manager's hot-reload path.
+
+2. **Server Manager** — The `validate-launch` endpoint (Section 13.5) spawns a `llama-server` process using the same process management primitives as the server manager (`llamaforge-server`). The wizard reuses `vram_estimate.rs` for recommendations.
+
+3. **Transport Layer** — The first-run `SetupModeGuard` middleware integrates with the existing transport layer (axum + tonic). Setup endpoints coexist with inference endpoints on the same router, gated by the `Mode` state machine.
+
+4. **Frontend Web UI** — The wizard routes (`/ui/setup/*`) are code-split from the main UI routes (`/ui/*`). They share: `app.css` (design tokens), shared components (`StatusBadge`, `Skeleton`, `ErrorBanner`, `EmptyState`, `Toast`, `ConfirmDialog`), `client.ts` (API client), theme system. New shared components introduced: `LogViewer`, `ProgressBar`, `StepIndicator`.
+
+5. **Metrics & Storage** — No direct dependency. The wizard does not write metrics. Future: the setup session could be logged as a metric event for telemetry.
+
+6. **Status Endpoint** — `GET /api/status` gains the `setup_required` boolean field. The main UI's root layout checks this on mount and redirects to the wizard when `true`.

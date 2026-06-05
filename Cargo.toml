@@ -42,6 +42,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 nix = { version = "0.29", features = ["fs", "signal", "process"] }
 tempfile = "3"
+walkdir = "2"
+sha2 = "0.10"
+humantime = "2"
 proptest = "1"
 typed-builder = "0.20"
 parking_lot = "0.12"
