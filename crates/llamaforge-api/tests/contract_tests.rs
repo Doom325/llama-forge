@@ -9,11 +9,21 @@
 //! `#[derive(TS)]` on every struct (and wiring its generation into CI) is more
 //! machinery than the contract warrants. These shape assertions pin the same
 //! field-name/type/nesting contract that ts-rs would, with no new dependency.
+//!
+//! TS type sync (task 12.10): with ts-rs deferred, **this file is the
+//! source of truth for the `/api/setup/*` contract**. Each test below is
+//! annotated `// pins ui types.ts: <TypeName>` naming the TypeScript type
+//! (`ui/src/lib/api/types.ts` / the `queries.ts` response interfaces) it pins.
+//! When a backend response struct changes, the matching test fails here, which
+//! is the signal to update the corresponding TS type. There is no automated
+//! cross-language diff (would require parsing TS); the annotations make the
+//! one-to-one mapping explicit and greppable instead.
 
 #![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 use axum::body::Body;
 use axum::http::Request;
@@ -56,8 +66,36 @@ fn assert_object_keys(value: &Value, required: &[&str], optional: &[&str]) {
     }
 }
 
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+/// Real model + binary files so save/preview pre-validation (which checks the
+/// paths exist) passes. Returns a server-config-draft JSON value.
+fn server_draft(dir: &Path) -> Value {
+    let model = dir.join("model.gguf");
+    let binary = dir.join("llama-server");
+    fs::write(&model, b"GGUF\x00").unwrap();
+    fs::write(&binary, b"#!/bin/sh\n").unwrap();
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    json!({
+        "model_path": model.display().to_string(),
+        "alias": "test-model",
+        "binary_path": binary.display().to_string(),
+        "port": free_port(),
+        "gpu_layers": -1,
+        "parallel_slots": 2,
+        "ctx_size": 8192,
+        "cache_type_k": "q8_0",
+        "cache_type_v": "q8_0",
+        "flash_attn": "auto",
+        "estimated_vram_mb": 6000
+    })
+}
+
 // --- Hardware -------------------------------------------------------------
 
+// pins ui types.ts: HardwareInfo (GpuInfo, CpuInfo)
 #[tokio::test]
 async fn hardware_response_shape() {
     let app = setup_router(SetupState::new());
@@ -78,6 +116,7 @@ async fn hardware_response_shape() {
 
 // --- Binary scanner (both variants of the discriminated union) ------------
 
+// pins ui types.ts: BinaryScanResult (found variant)
 #[tokio::test]
 async fn scan_binary_found_shape() {
     let dir = tempfile::tempdir().unwrap();
@@ -100,6 +139,7 @@ async fn scan_binary_found_shape() {
     assert!(body["backends"].is_array());
 }
 
+// pins ui types.ts: BinaryScanResult (not-found variant)
 #[tokio::test]
 async fn scan_binary_not_found_shape() {
     let dir = tempfile::tempdir().unwrap();
@@ -122,6 +162,7 @@ async fn scan_binary_not_found_shape() {
 
 // --- Model scanner --------------------------------------------------------
 
+// pins ui types.ts: ModelScanResult (DiscoveredModel)
 #[tokio::test]
 async fn scan_models_response_shape() {
     let dir = tempfile::tempdir().unwrap();
@@ -165,6 +206,7 @@ async fn scan_models_response_shape() {
 
 // --- Recommendation -------------------------------------------------------
 
+// pins ui types.ts: RecommendationResult (ServerRecommendation, ConfigRecommendation)
 #[tokio::test]
 async fn recommend_response_shape() {
     let app = setup_router(SetupState::new());
@@ -200,8 +242,45 @@ async fn recommend_response_shape() {
     );
 }
 
+// --- Preview + Save config (success shapes the wizard's Review step reads) --
+
+// pins ui queries.ts: PreviewConfigResponse
+#[tokio::test]
+async fn preview_config_response_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = setup_router(SetupState::new());
+    let request = json!({
+        "path": dir.path().join("llamaforge.toml"),
+        "force": false,
+        "servers": [server_draft(dir.path())]
+    });
+    let body =
+        body_json(app.oneshot(post("/api/setup/preview-config", &request)).await.unwrap()).await;
+    assert_object_keys(&body, &["version", "toml"], &[]);
+    assert!(body["toml"].is_string());
+}
+
+// pins ui queries.ts: SaveConfigResponse
+#[tokio::test]
+async fn save_config_response_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = setup_router(SetupState::new());
+    let request = json!({
+        "path": dir.path().join("llamaforge.toml"),
+        "force": false,
+        "servers": [server_draft(dir.path())]
+    });
+    let body =
+        body_json(app.oneshot(post("/api/setup/save-config", &request)).await.unwrap()).await;
+    // backup_path is omitted when no prior file was replaced (skip_serializing_if).
+    assert_object_keys(&body, &["version", "path", "replaced_existing"], &["backup_path"]);
+    assert!(body["path"].is_string());
+    assert!(body["replaced_existing"].is_boolean());
+}
+
 // --- Build SSE events (the `{event, data}` shapes the frontend parses) -----
 
+// pins ui types.ts: BuildStatus + buildStatus.ts BuildEventInput
 #[test]
 fn build_sse_event_shapes() {
     let phase = serde_json::to_value(BuildEvent::Phase {
@@ -250,6 +329,7 @@ fn build_sse_event_shapes() {
 
 // --- Error envelope -------------------------------------------------------
 
+// pins ui api/client.ts: ApiError envelope (error/message)
 #[tokio::test]
 async fn error_responses_are_json_with_message() {
     let app = setup_router(SetupState::new());

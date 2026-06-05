@@ -15,6 +15,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use llamaforge_api::{setup_router, SetupState};
+use llamaforge_server::effective_jobs;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -117,6 +118,17 @@ async fn build_negative_jobs_is_rejected() {
         .await
         .unwrap();
     assert!(res.status().is_client_error(), "got {}", res.status());
+}
+
+#[test]
+fn build_jobs_over_cpu_count_is_clamped() {
+    // An absurd jobs request is clamped (≤ logical cores, ≥ 1) rather than
+    // spawning thousands of compile jobs — no overflow, no panic.
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let clamped = effective_jobs(100_000);
+    assert!(clamped >= 1, "clamp floor");
+    assert!(clamped <= cores, "expected ≤ {cores} cores, got {clamped}");
+    assert!(effective_jobs(0) >= 1, "0 (auto) resolves to at least 1 job");
 }
 
 // --- Recommendation boundary ----------------------------------------------
