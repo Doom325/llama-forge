@@ -78,6 +78,21 @@ impl ConfigHandle {
         })
     }
 
+    /// Construct a handle seeded with `initial` instead of loading from
+    /// `source`. Used by first-run / setup mode (08_SETUP_WIZARD.md Section
+    /// 13.4), where there is no config file yet: the orchestrator boots with an
+    /// empty config and later [`reload`](Self::reload)s from `source` once the
+    /// wizard has written the file.
+    pub fn with_initial_config(initial: AppConfig, source: Arc<dyn ConfigSource>) -> Self {
+        let (change_tx, _) = broadcast::channel(16);
+        Self {
+            source,
+            inner: Arc::new(ArcSwap::from_pointee(initial)),
+            reload_mutex: tokio::sync::Mutex::new(()),
+            change_tx,
+        }
+    }
+
     /// Export the current configuration as a TOML string.
     pub fn export_toml(&self) -> Result<String, WritebackError> {
         let snapshot = self.inner.load();

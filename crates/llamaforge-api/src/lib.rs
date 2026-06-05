@@ -28,7 +28,10 @@ pub mod transport;
 // These are the symbols `llamaforge::build::*` and `llamaforge-e2e`
 // import; surfacing them at the crate root is convenience, not policy.
 pub use transport::streaming::StreamingInferenceService;
-pub use transport::{start_servers, InferenceEngine, TransportDeps, TransportHandles};
+pub use transport::{
+    start_servers, start_servers_with_setup, InferenceEngine, SetupMount, TransportDeps,
+    TransportHandles,
+};
 
 pub use dispatch::client::ReqwestClientStore;
 pub use dispatch::dispatcher::Dispatcher;
@@ -38,3 +41,10 @@ pub use adapters::queue::QueueSubmitterAdapter;
 pub use adapters::server_control::ServerControlAdapter;
 
 pub use setup::{setup_router, SetupState};
+
+/// Router for the standalone setup wizard (08_SETUP_WIZARD.md Section 12): the
+/// embedded web UI plus the `/api/setup/*` surface, with no inference, gRPC, or
+/// config handle. Used by `llamaforge init --interactive`.
+pub fn wizard_router(state: SetupState) -> axum::Router {
+    transport::ui::ui_router().merge(setup_router(state))
+}

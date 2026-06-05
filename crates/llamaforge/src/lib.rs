@@ -17,4 +17,4 @@ pub(crate) mod serve;
 pub(crate) mod tracing_init;
 
 pub use build::{build, BackgroundTasks};
-pub use serve::run;
+pub use serve::{run, run_first_run};

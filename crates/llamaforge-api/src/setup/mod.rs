@@ -60,6 +60,10 @@ pub struct SetupState {
     build_disconnect_grace: Option<Duration>,
     /// Minimum free disk (GB) required to start a build; `None` → `MIN_DISK_GB`.
     build_min_disk_gb: Option<u64>,
+    /// Notified by `validate-launch` on success so a host (standalone wizard
+    /// server, or first-run serve loop) can react to a completed setup
+    /// (Sections 12.2 / 13.4). Re-armable so reload-retry works. `None` outside.
+    completion: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl SetupState {
@@ -89,6 +93,21 @@ impl SetupState {
         self.build_disconnect_grace = Some(disconnect_grace);
         self.build_min_disk_gb = Some(min_disk_gb);
         self
+    }
+
+    /// Set the notifier signaled when a setup completes (`validate-launch`
+    /// succeeds), so a host can react (shut down, or hot-reload into running
+    /// mode). Sections 12.2 / 13.4.
+    pub fn with_completion(mut self, notify: Arc<tokio::sync::Notify>) -> Self {
+        self.completion = Some(notify);
+        self
+    }
+
+    /// Signal that setup completed successfully.
+    pub(crate) fn signal_complete(&self) {
+        if let Some(notify) = &self.completion {
+            notify.notify_one();
+        }
     }
 }
 

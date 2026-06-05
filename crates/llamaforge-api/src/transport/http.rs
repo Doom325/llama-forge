@@ -9,6 +9,7 @@ use llamaforge_core::config::{ConfigReader, ConfigWriter};
 use llamaforge_core::types::traits::{
     MetricsExporter, QueueSubmitter, RouteValidator, ServerControl,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tower_http::{catch_panic::CatchPanicLayer, limit::RequestBodyLimitLayer};
@@ -708,7 +709,69 @@ where
     (axum::http::StatusCode::OK, text).into_response()
 }
 
-pub(crate) fn build_router<CW, RMS, SM>(state: HttpAppState<CW, RMS, SM>) -> Router
+/// Optional first-run wizard integration mounted onto the main HTTP app
+/// (08_SETUP_WIZARD.md Section 13): the `/api/setup/*` router, a flag that is
+/// `true` while in setup mode, and the wizard URL surfaced in 503 responses.
+pub struct SetupMount {
+    pub setup_router: Router,
+    pub setup_active: Arc<AtomicBool>,
+    pub setup_url: String,
+}
+
+#[derive(Clone)]
+struct SetupGuardState {
+    active: Arc<AtomicBool>,
+    setup_url: String,
+}
+
+/// Mode guard (Section 13.3 / 13.8): in setup mode, inference (`/v1/*`)
+/// returns `503` with a `setup_url`; in running mode, `/api/setup/*` requires
+/// the `X-Setup-Reconfigure: true` header (else `403`).
+async fn setup_mode_guard(
+    State(guard): State<SetupGuardState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let path = req.uri().path();
+    let in_setup = guard.active.load(Ordering::Relaxed);
+
+    if in_setup && path.starts_with("/v1/") {
+        // §13.3 error envelope: nested object with message/type/setup_url.
+        let body = axum::Json(serde_json::json!({
+            "error": {
+                "message": "Complete setup before sending inference requests.",
+                "type": "service_unavailable",
+                "setup_url": guard.setup_url,
+            }
+        }));
+        let mut res = (axum::http::StatusCode::SERVICE_UNAVAILABLE, body).into_response();
+        res.headers_mut()
+            .insert(axum::http::header::RETRY_AFTER, axum::http::HeaderValue::from_static("60"));
+        return res;
+    }
+
+    if !in_setup && path.starts_with("/api/setup/") {
+        let allowed = req
+            .headers()
+            .get("x-setup-reconfigure")
+            .map(|v| v.as_bytes() == b"true")
+            .unwrap_or(false);
+        if !allowed {
+            let body = axum::Json(serde_json::json!({
+                "error": "reconfigure_required",
+                "message": "Setup endpoints require the X-Setup-Reconfigure header in running mode.",
+            }));
+            return (axum::http::StatusCode::FORBIDDEN, body).into_response();
+        }
+    }
+
+    next.run(req).await
+}
+
+pub(crate) fn build_router<CW, RMS, SM>(
+    state: HttpAppState<CW, RMS, SM>,
+    setup: Option<SetupMount>,
+) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
     RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
@@ -758,23 +821,43 @@ where
         .layer(axum::middleware::from_fn_with_state(state.config_reader.clone(), auth_middleware))
         .layer(super::middleware::build_cors_layer(state.config_reader.clone()));
 
+    // `/api/status` is unauthenticated (Section 13.6) so the frontend can poll
+    // first-run state; `setup_required` is false unless a SetupMount is present.
+    let setup_active: super::status::SetupActive = setup.as_ref().map(|s| s.setup_active.clone());
+    let status_router = Router::new()
+        .route("/api/status", get(super::status::status_handler))
+        .with_state(setup_active);
+
     // The web UI is mounted OUTSIDE the API middleware stack — no auth, no CORS;
-    // its handlers set their own CSP + security headers. CatchPanic wraps the
-    // whole app so a panic in any route can't take down the connection.
-    api_router.merge(super::ui::ui_router()).layer(CatchPanicLayer::new())
+    // its handlers set their own CSP + security headers.
+    let mut app = api_router.merge(super::ui::ui_router()).merge(status_router);
+
+    // First-run wizard: merge the setup router and apply the mode guard.
+    if let Some(setup) = setup {
+        let guard =
+            SetupGuardState { active: setup.setup_active.clone(), setup_url: setup.setup_url };
+        app = app
+            .merge(setup.setup_router)
+            .layer(axum::middleware::from_fn_with_state(guard, setup_mode_guard));
+    }
+
+    // CatchPanic wraps the whole app so a panic in any route can't take down
+    // the connection.
+    app.layer(CatchPanicLayer::new())
 }
 
 pub async fn start_http_server<CW, RMS, SM>(
     state: HttpAppState<CW, RMS, SM>,
     listener: tokio::net::TcpListener,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
+    setup: Option<SetupMount>,
 ) -> Result<(), TransportError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
     RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
     SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
-    let router = build_router(state);
+    let router = build_router(state, setup);
 
     let mut rx = shutdown_rx.clone();
     axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
@@ -918,7 +1001,112 @@ mod tests {
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        build_router(state)
+        build_router(state, None)
+    }
+
+    fn build_test_router_with_setup(active: bool) -> Router {
+        let mut config = AppConfig::default();
+        config.global.queue_default_timeout_secs = 1;
+        let handle =
+            Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(config))).unwrap());
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidator),
+            inference_engine: Arc::new(MockEngine {
+                chunks: std::sync::Mutex::new(vec![]),
+                sleep_ms: 0,
+            }),
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
+        };
+        let setup_router = Router::new().route("/api/setup/ping", get(|| async { "ok" }));
+        let mount = SetupMount {
+            setup_router,
+            setup_active: Arc::new(AtomicBool::new(active)),
+            setup_url: "http://127.0.0.1:8000/ui/setup".to_string(),
+        };
+        build_router(state, Some(mount))
+    }
+
+    async fn json_body(res: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn setup_mode_blocks_inference_and_reports_status() {
+        let app = build_test_router_with_setup(true);
+
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(json_body(res).await["setup_required"], true);
+
+        // Inference is refused with 503 + setup_url before the body is parsed.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(res.headers().get("retry-after").unwrap(), "60");
+        let body = json_body(res).await;
+        assert_eq!(body["error"]["type"], "service_unavailable");
+        assert!(body["error"]["setup_url"].as_str().unwrap().contains("/ui/setup"));
+
+        // Setup endpoints are reachable while in setup mode.
+        let res = app
+            .oneshot(Request::builder().uri("/api/setup/ping").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn running_mode_guards_setup_endpoints_and_clears_status() {
+        let app = build_test_router_with_setup(false);
+
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(json_body(res).await["setup_required"], false);
+
+        // Reconfigure requires the X-Setup-Reconfigure header in running mode.
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/setup/ping").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/setup/ping")
+                    .header("x-setup-reconfigure", "true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]
@@ -1247,7 +1435,7 @@ mod tests {
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state);
+        let app = build_router(state, None);
 
         let body = serde_json::json!({
             "model": "test",
@@ -1295,7 +1483,7 @@ mod tests {
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state);
+        let app = build_router(state, None);
 
         let body_str = "x".repeat(101);
         let req = Request::builder()
@@ -1363,7 +1551,7 @@ mod tests {
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state);
+        let app = build_router(state, None);
 
         let body = serde_json::json!({
             "model": "test",
