@@ -1506,6 +1506,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -1514,6 +1515,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "typed-builder",
+ "walkdir",
 ]
 
 [[package]]
