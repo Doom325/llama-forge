@@ -736,10 +736,13 @@ async fn setup_mode_guard(
     let in_setup = guard.active.load(Ordering::Relaxed);
 
     if in_setup && path.starts_with("/v1/") {
+        // §13.3 error envelope: nested object with message/type/setup_url.
         let body = axum::Json(serde_json::json!({
-            "error": "setup_required",
-            "message": "Complete setup before sending inference requests.",
-            "setup_url": guard.setup_url,
+            "error": {
+                "message": "Complete setup before sending inference requests.",
+                "type": "service_unavailable",
+                "setup_url": guard.setup_url,
+            }
         }));
         let mut res = (axum::http::StatusCode::SERVICE_UNAVAILABLE, body).into_response();
         res.headers_mut()
@@ -1062,7 +1065,9 @@ mod tests {
             .unwrap();
         assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(res.headers().get("retry-after").unwrap(), "60");
-        assert_eq!(json_body(res).await["error"], "setup_required");
+        let body = json_body(res).await;
+        assert_eq!(body["error"]["type"], "service_unavailable");
+        assert!(body["error"]["setup_url"].as_str().unwrap().contains("/ui/setup"));
 
         // Setup endpoints are reachable while in setup mode.
         let res = app

@@ -41,3 +41,4 @@ telemetry-amdgpu = ["llamaforge-server/telemetry-amdgpu"]
 
 [dev-dependencies]
 tempfile = { workspace = true }
+nix = { workspace = true, features = ["signal"] }

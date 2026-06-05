@@ -114,25 +114,9 @@ pub async fn run_first_run(paths: ConfigPaths) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("transport start (setup): {}", e))?;
     tracing::info!(setup_url = %setup_url, "lifecycle.first_run.ready");
 
-    // On each completion (validate-launch ok), hot-reload the written config.
-    // Success → flip to running mode in-place; failure → stay in setup and let
-    // the user retry. A shutdown signal before completing exits cleanly.
-    let cancelled = loop {
-        tokio::select! {
-            _ = completion.notified() => match config.reload().await {
-                Ok(diff) => {
-                    setup_active.store(false, std::sync::atomic::Ordering::Relaxed);
-                    tracing::info!(
-                        changes = diff.changes.len(),
-                        "lifecycle.first_run.transition.running"
-                    );
-                    break false;
-                }
-                Err(e) => tracing::warn!(error = %e, "lifecycle.first_run.reload_failed"),
-            },
-            _ = wait_for_signal() => break true,
-        }
-    };
+    // Drive the setup→running transition until it completes or is cancelled.
+    let cancelled =
+        run_setup_transition(&config, &setup_active, &completion, wait_for_signal()).await;
 
     // In running mode, keep serving (honoring SIGHUP reloads) until shutdown.
     if !cancelled {
@@ -149,6 +133,37 @@ pub async fn run_first_run(paths: ConfigPaths) -> anyhow::Result<()> {
     let _ = bg.scheduler.await;
     tracing::info!("lifecycle.first_run.completed");
     Ok(())
+}
+
+/// The setup→running transition loop, factored out of [`run_first_run`] so it
+/// can be tested without a transport or ports (08_SETUP_WIZARD.md §13.2/13.5):
+/// on each `completion` notification, hot-reload `config`; on success flip
+/// `setup_active` to `false` and return `false` (running); on a failed reload
+/// stay in setup and await the next completion (retry). Returns `true` if
+/// `cancel` fires before the transition completes.
+async fn run_setup_transition(
+    config: &ConfigHandle,
+    setup_active: &AtomicBool,
+    completion: &tokio::sync::Notify,
+    cancel: impl std::future::Future<Output = ()>,
+) -> bool {
+    tokio::pin!(cancel);
+    loop {
+        tokio::select! {
+            _ = completion.notified() => match config.reload().await {
+                Ok(diff) => {
+                    setup_active.store(false, std::sync::atomic::Ordering::Relaxed);
+                    tracing::info!(
+                        changes = diff.changes.len(),
+                        "lifecycle.first_run.transition.running"
+                    );
+                    return false;
+                }
+                Err(e) => tracing::warn!(error = %e, "lifecycle.first_run.reload_failed"),
+            },
+            _ = &mut cancel => return true,
+        }
+    }
 }
 
 /// Wait for Ctrl-C or SIGTERM (setup mode has no SIGHUP reload).
@@ -252,5 +267,83 @@ async fn wait_for_shutdown_or_reload(config: &Arc<ConfigHandle>) {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// Round-trip a default `AppConfig` through the TOML source so a later
+    /// `reload()` of `path` succeeds.
+    fn write_valid_config(dir: &std::path::Path, path: &std::path::Path) {
+        let paths =
+            ConfigPaths::new(path.to_path_buf(), dir.join("no-rules.toml"), dir.to_path_buf());
+        let source = Arc::new(TomlFileConfigSource::new(paths));
+        let handle = ConfigHandle::with_initial_config(AppConfig::default(), source);
+        std::fs::write(path, handle.export_toml().unwrap()).unwrap();
+    }
+
+    fn setup_config(dir: &std::path::Path, cfg: &std::path::Path) -> Arc<ConfigHandle> {
+        let paths =
+            ConfigPaths::new(cfg.to_path_buf(), dir.join("no-rules.toml"), dir.to_path_buf());
+        Arc::new(ConfigHandle::with_initial_config(
+            AppConfig::default(),
+            Arc::new(TomlFileConfigSource::new(paths)),
+        ))
+    }
+
+    // Headline first-run transition (VC-2.7 / tasks 7.10, 7.17): a failed reload
+    // reverts (stays in setup), and a later valid config flips to running — the
+    // retry path the `Notify` permit makes race-safe.
+    #[tokio::test]
+    async fn transition_reverts_on_failed_reload_then_flips_on_valid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("llamaforge.toml"); // absent initially
+        let config = setup_config(dir.path(), &cfg);
+        let setup_active = Arc::new(AtomicBool::new(true));
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let cancel = CancellationToken::new();
+
+        let task = tokio::spawn({
+            let config = config.clone();
+            let setup_active = setup_active.clone();
+            let completion = completion.clone();
+            let cancel = cancel.clone();
+            async move {
+                run_setup_transition(&config, &setup_active, &completion, cancel.cancelled_owned())
+                    .await
+            }
+        });
+
+        // No config file yet → reload fails → stays in setup (revert path).
+        completion.notify_one();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert!(setup_active.load(Ordering::Relaxed), "stays in setup after a failed reload");
+        assert!(!task.is_finished(), "loop keeps waiting to retry");
+
+        // Valid config written → next completion → reload succeeds → running.
+        write_valid_config(dir.path(), &cfg);
+        completion.notify_one();
+        let cancelled = task.await.unwrap();
+        assert!(!cancelled);
+        assert!(!setup_active.load(Ordering::Relaxed), "flips to running after a valid reload");
+    }
+
+    #[tokio::test]
+    async fn transition_returns_cancelled_on_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = setup_config(dir.path(), &dir.path().join("llamaforge.toml"));
+        let setup_active = Arc::new(AtomicBool::new(true));
+        let completion = Arc::new(tokio::sync::Notify::new());
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        let cancelled =
+            run_setup_transition(&config, &setup_active, &completion, cancel.cancelled_owned())
+                .await;
+        assert!(cancelled);
+        assert!(setup_active.load(Ordering::Relaxed), "stays in setup when cancelled");
     }
 }
