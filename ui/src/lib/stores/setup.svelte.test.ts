@@ -4,8 +4,7 @@ import {
 	SetupWizardStore,
 	STEP_TRANSITIONS,
 	completedSteps,
-	invalidateDownstream,
-	allFieldsValid
+	invalidateDownstream
 } from './setup.svelte';
 
 function qc(): QueryClient {
@@ -65,12 +64,49 @@ describe('STEP_TRANSITIONS guards', () => {
 		expect(STEP_TRANSITIONS.models.canAdvance(c, store)).toBe(true);
 	});
 
-	it('configure requires non-empty, valid overrides', () => {
+	it('configure advances on accept-all (valid merged config, no edits) and blocks a bad edit', () => {
 		const c = qc();
 		const store = new SetupWizardStore('x');
+		// No selection / no recommendation yet → cannot advance.
 		expect(STEP_TRANSITIONS.configure.canAdvance(c, store)).toBe(false);
-		store.userOverrides.set('m1', { port: 8001 });
+
+		c.setQueryData(['setup', 'scan-models'], {
+			models: [
+				{
+					id: 'm1',
+					path: '/a.gguf',
+					filename: 'a.gguf',
+					size_bytes: 1,
+					quantization_hint: '',
+					architecture_hint: ''
+				}
+			]
+		});
+		c.setQueryData(['setup', 'recommend'], {
+			servers: [
+				{
+					model_path: '/a.gguf',
+					recommended: {
+						gpu_layers: 33,
+						ctx_size: 4096,
+						parallel_slots: 4,
+						cache_type_k: 'f16',
+						cache_type_v: 'f16',
+						flash_attn: 'auto',
+						estimated_vram_mb: 8000,
+						port: 8001
+					},
+					rationale: {}
+				}
+			],
+			warnings: []
+		});
+		store.selectedModelIds.add('m1');
+
+		// Accept-all: no overrides, but the merged config is valid → advance (G1).
 		expect(STEP_TRANSITIONS.configure.canAdvance(c, store)).toBe(true);
+
+		// A genuinely invalid edit blocks advancement.
 		store.userOverrides.set('m1', { port: 0 });
 		expect(STEP_TRANSITIONS.configure.canAdvance(c, store)).toBe(false);
 	});
@@ -108,19 +144,5 @@ describe('invalidateDownstream', () => {
 		store.userOverrides.set('m1', { port: 8001 });
 		invalidateDownstream(c, store, 'review');
 		expect(store.userOverrides.size).toBe(1);
-	});
-});
-
-describe('allFieldsValid', () => {
-	it('rejects non-positive port, ctx_size, slots, and blank alias', () => {
-		const store = new SetupWizardStore('x');
-		store.userOverrides.set('m', { port: -1 });
-		expect(allFieldsValid(store)).toBe(false);
-		store.userOverrides.set('m', { ctx_size: 0 });
-		expect(allFieldsValid(store)).toBe(false);
-		store.userOverrides.set('m', { alias: '  ' });
-		expect(allFieldsValid(store)).toBe(false);
-		store.userOverrides.set('m', { port: 8001, alias: 'ok' });
-		expect(allFieldsValid(store)).toBe(true);
 	});
 });
