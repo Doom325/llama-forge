@@ -7,6 +7,7 @@
 	import { queryClient } from '$lib/api/queryClient';
 	import { useSetupStore } from '$lib/stores/setup.svelte';
 	import ServerConfigCard from '$lib/components/setup/ServerConfigCard.svelte';
+	import { mergeServerDraft } from '$lib/components/setup/serverDraft';
 	import ErrorBanner from '$lib/components/shared/ErrorBanner.svelte';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
 	import Skeleton from '$lib/components/shared/Skeleton.svelte';
@@ -46,25 +47,9 @@
 		return result?.servers.find((s) => s.model_path === model.path)?.recommended;
 	}
 
-	function baseDraft(model: DiscoveredModel, rec: ConfigRecommendation): ServerConfigDraft {
-		return {
-			model_path: model.path,
-			alias: model.filename.replace(/\.gguf$/i, ''),
-			binary_path: binaryPath,
-			port: rec.port,
-			gpu_layers: rec.gpu_layers,
-			parallel_slots: rec.parallel_slots,
-			ctx_size: rec.ctx_size,
-			cache_type_k: rec.cache_type_k,
-			cache_type_v: rec.cache_type_v,
-			flash_attn: rec.flash_attn,
-			estimated_vram_mb: rec.estimated_vram_mb
-		};
-	}
-
 	// Merge recommendation (base) with the user's stored overrides at render time.
 	function valuesFor(model: DiscoveredModel, rec: ConfigRecommendation): ServerConfigDraft {
-		return { ...baseDraft(model, rec), ...(store.userOverrides.get(model.id) ?? {}) };
+		return mergeServerDraft(model, rec, binaryPath, store.userOverrides.get(model.id) ?? {});
 	}
 
 	function onchange(model: DiscoveredModel, next: ServerConfigDraft) {

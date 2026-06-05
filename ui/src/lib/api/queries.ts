@@ -16,6 +16,7 @@ import type {
 	RecommendationRequest,
 	RecommendationResult,
 	SaveConfigRequest,
+	ServerConfigDraft,
 	SetupBackend
 } from './types';
 
@@ -358,4 +359,31 @@ export function createBuildMutation(sessionId: string) {
 				headers: setupHeaders(sessionId)
 			})
 	}));
+}
+
+export interface ValidateLaunchResponse {
+	success: boolean;
+	message: string;
+	stderr?: string;
+}
+
+export function createValidateLaunchMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (servers: ServerConfigDraft[]) =>
+			apiFetch<ValidateLaunchResponse>('/api/setup/validate-launch', {
+				method: 'POST',
+				body: JSON.stringify({ servers }),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface SetupStatus {
+	setup_required: boolean;
+	version: string;
+}
+
+/** Unauthenticated status used by the completion screen's poll (§13.6). */
+export function fetchSetupStatus(): Promise<SetupStatus> {
+	return apiFetch<SetupStatus>('/api/status');
 }
