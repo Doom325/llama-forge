@@ -309,7 +309,10 @@ const STEP_TRANSITIONS: Record<WizardStep, {
   hardware:  { canAdvance: (qc) => qc.getQueryData(['setup', 'hardware']) != null, invalidatesOnReentry: ['configure', 'review'] },
   binary:    { canAdvance: (qc) => qc.getQueryData<BinaryScanResult>(['setup', 'scan-binary'])?.found === true, invalidatesOnReentry: ['configure', 'review'] },
   models:    { canAdvance: (_qc, store) => store.selectedModelIds.size > 0, invalidatesOnReentry: ['configure', 'review'] },
-  configure: { canAdvance: (_qc, store) => store.userOverrides.size > 0 && allFieldsValid(store), invalidatesOnReentry: ['review'] },
+  // Completion = a VALID MERGED config for every selected model (recommendation
+  // + override), NOT a non-empty override set — accepting the recommendation as-is
+  // must advance (goal G1: get running without hand-editing config).
+  configure: { canAdvance: (qc, store) => store.selectedModelIds.size > 0 && allSelectedConfigsValid(qc, store), invalidatesOnReentry: ['review'] },
   review:    { canAdvance: () => true, invalidatesOnReentry: [] },
 };
 ```

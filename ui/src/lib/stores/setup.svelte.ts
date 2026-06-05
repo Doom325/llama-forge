@@ -11,7 +11,14 @@
 import { getContext, setContext } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import type { QueryClient } from '@tanstack/svelte-query';
-import type { BinaryScanResult, ServerConfigDraft, WizardStep } from '$lib/api/types';
+import type {
+	BinaryScanResult,
+	ConfigRecommendation,
+	ModelScanResult,
+	RecommendationResult,
+	ServerConfigDraft,
+	WizardStep
+} from '$lib/api/types';
 
 /** Ordered wizard steps (also the URL order). */
 export const WIZARD_STEPS: readonly WizardStep[] = [
@@ -56,16 +63,55 @@ export function useSetupStore(): SetupWizardStore {
 
 // --- Step state machine (Section 5.3) ---------------------------------------
 
-/** Every present override field that is set must be valid. */
-export function allFieldsValid(store: SetupWizardStore): boolean {
-	for (const draft of store.userOverrides.values()) {
-		if (draft.port !== undefined && draft.port <= 0) return false;
-		if (draft.ctx_size !== undefined && draft.ctx_size <= 0) return false;
-		if (draft.gpu_layers !== undefined && draft.gpu_layers < 0) return false;
-		if (draft.parallel_slots !== undefined && draft.parallel_slots <= 0) return false;
-		if (draft.alias !== undefined && draft.alias.trim() === '') return false;
-	}
-	return true;
+/** Default alias for a model file (filename without the `.gguf` extension). */
+function defaultAlias(filename: string): string {
+	return filename.replace(/\.gguf$/i, '');
+}
+
+/**
+ * Validate one selected model's *effective* config — the recommendation with the
+ * user's override applied. Accepting the recommendation unedited is valid (goal
+ * G1: get running without hand-editing); only a genuinely bad edit fails.
+ */
+function configValid(
+	rec: ConfigRecommendation,
+	override: Partial<ServerConfigDraft>,
+	defaultAliasValue: string
+): boolean {
+	const port = override.port ?? rec.port;
+	const ctxSize = override.ctx_size ?? rec.ctx_size;
+	const gpuLayers = override.gpu_layers ?? rec.gpu_layers;
+	const slots = override.parallel_slots ?? rec.parallel_slots;
+	const alias = override.alias ?? defaultAliasValue;
+	return (
+		port > 0 &&
+		port < 65536 &&
+		ctxSize > 0 &&
+		gpuLayers >= 0 &&
+		slots > 0 &&
+		alias.trim().length > 0
+	);
+}
+
+/**
+ * True when a recommendation exists for every selected model and each merged
+ * (recommendation + override) config is valid. This is the configure-step
+ * completion check — it does not require any edits (§5.3 / G1), only that the
+ * resulting config is valid.
+ */
+export function allSelectedConfigsValid(qc: QueryClient, store: SetupWizardStore): boolean {
+	const models = qc.getQueryData<ModelScanResult>(['setup', 'scan-models'])?.models ?? [];
+	const recommendation = qc.getQueryData<RecommendationResult>(['setup', 'recommend']);
+	if (!recommendation) return false;
+
+	const selected = models.filter((m) => store.selectedModelIds.has(m.id));
+	if (selected.length === 0) return false;
+
+	return selected.every((model) => {
+		const rec = recommendation.servers.find((s) => s.model_path === model.path)?.recommended;
+		if (!rec) return false;
+		return configValid(rec, store.userOverrides.get(model.id) ?? {}, defaultAlias(model.filename));
+	});
 }
 
 export interface StepTransition {
@@ -90,7 +136,11 @@ export const STEP_TRANSITIONS: Record<WizardStep, StepTransition> = {
 		invalidatesOnReentry: ['configure', 'review']
 	},
 	configure: {
-		canAdvance: (_qc, store) => store.userOverrides.size > 0 && allFieldsValid(store),
+		// Completion = a valid MERGED config for every selected model, NOT a
+		// non-empty override set — accepting the recommendation as-is must advance
+		// (goal G1: get running without hand-editing config).
+		canAdvance: (qc, store) =>
+			store.selectedModelIds.size > 0 && allSelectedConfigsValid(qc, store),
 		invalidatesOnReentry: ['review']
 	},
 	review: { canAdvance: () => true, invalidatesOnReentry: [] }
