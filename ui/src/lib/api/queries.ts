@@ -270,10 +270,11 @@ export function createHardwareQuery(sessionId: string, enabled: () => boolean = 
 
 export function createBinaryScanMutation(sessionId: string) {
 	return createMutation(() => ({
-		mutationFn: (directories: string[]) =>
+		// `BinaryScanRequest.extra_paths` — extra dirs searched ahead of $PATH.
+		mutationFn: (extraPaths: string[]) =>
 			apiFetch<BinaryScanResult>('/api/setup/scan-binary', {
 				method: 'POST',
-				body: JSON.stringify({ directories }),
+				body: JSON.stringify({ extra_paths: extraPaths }),
 				headers: setupHeaders(sessionId)
 			}),
 		onSuccess: (data: BinaryScanResult) => queryClient.setQueryData(['setup', 'scan-binary'], data)

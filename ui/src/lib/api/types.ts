@@ -263,7 +263,8 @@ export interface DiscoveredModel {
 	size_bytes: number;
 	quantization_hint: string;
 	architecture_hint: string;
-	modified: string;
+	/** RFC 3339; absent when the filesystem doesn't report a mtime. */
+	modified?: string;
 }
 
 export type TruncationReason = 'timeout' | 'max_results' | 'max_depth' | null;
