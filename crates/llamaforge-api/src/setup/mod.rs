@@ -12,20 +12,23 @@
 //! `X-Setup-Session-Id` header is attached to each request's tracing span for
 //! correlation.
 
+mod build;
 mod config_assembly;
 mod handlers;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{extract::Request, Json, Router};
-use llamaforge_server::HardwareInfo;
+use llamaforge_server::{BuildCommands, HardwareInfo, PhaseTimeouts};
 use serde::Serialize;
 use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tracing::Instrument;
+use uuid::Uuid;
 
 pub use config_assembly::{GlobalOverrides, SaveConfigRequest, ServerConfigDraft};
 
@@ -43,11 +46,25 @@ pub struct SetupState {
     hardware_cache: Arc<RwLock<Option<HardwareInfo>>>,
     /// Serializes `save-config` writes so concurrent saves can't interleave.
     save_lock: Arc<Mutex<()>>,
+    /// In-flight and finished build jobs, keyed by build id (Section 11.4).
+    builds: Arc<RwLock<HashMap<Uuid, Arc<build::BuildJob>>>>,
+    /// git/cmake programs used by builds (overridable for tests).
+    build_commands: BuildCommands,
+    /// Per-phase build timeouts (overridable for tests).
+    build_timeouts: PhaseTimeouts,
 }
 
 impl SetupState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Override the build toolchain + timeouts (test seam for mock git/cmake).
+    #[doc(hidden)]
+    pub fn with_build_config(mut self, commands: BuildCommands, timeouts: PhaseTimeouts) -> Self {
+        self.build_commands = commands;
+        self.build_timeouts = timeouts;
+        self
     }
 }
 
@@ -64,6 +81,10 @@ pub fn setup_router(state: SetupState) -> Router {
         .route("/api/setup/preview-config", post(handlers::preview_config_handler))
         .route("/api/setup/save-config", post(handlers::save_config_handler))
         .route("/api/setup/validate-launch", post(handlers::validate_launch_handler))
+        .route("/api/setup/build", post(build::build_create_handler))
+        .route("/api/setup/build/{id}", get(build::build_status_handler))
+        .route("/api/setup/build/{id}", delete(build::build_cancel_handler))
+        .route("/api/setup/build/{id}/stream", get(build::build_stream_handler))
         .layer(axum::middleware::from_fn(crate::transport::middleware::csrf_middleware))
         .layer(axum::middleware::from_fn(session_span_middleware))
         .with_state(state)
