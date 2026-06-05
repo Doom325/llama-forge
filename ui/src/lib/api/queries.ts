@@ -8,7 +8,16 @@ import type {
 	QueueItem,
 	RequestRecord,
 	ModelInfo,
-	ConfigSection
+	ConfigSection,
+	HardwareInfo,
+	BinaryScanResult,
+	ModelScanRequest,
+	ModelScanResult,
+	RecommendationRequest,
+	RecommendationResult,
+	SaveConfigRequest,
+	ServerConfigDraft,
+	SetupBackend
 } from './types';
 
 // Queries
@@ -236,4 +245,145 @@ export function prefetchExplorerNextPage(filters: Record<string, string>, curren
 			return apiFetch<RequestRecord[]>(`/api/requests?${searchParams.toString()}`);
 		}
 	});
+}
+
+// ---------------------------------------------------------------------------
+// Setup wizard (08_SETUP_WIZARD.md). The session id is attached as the
+// `X-Setup-Session-Id` header on every call. /api/setup/* uses a FLAT version
+// envelope, so each query types the inner payload shape directly. Scan/recommend
+// are mutations (POST) whose results are written into the query cache so the
+// step state machine's `getQueryData` checks can read them.
+// ---------------------------------------------------------------------------
+
+function setupHeaders(sessionId: string): Record<string, string> {
+	return { 'X-Setup-Session-Id': sessionId };
+}
+
+export function createHardwareQuery(sessionId: string, enabled: () => boolean = () => true) {
+	return createQuery(() => ({
+		queryKey: ['setup', 'hardware'],
+		queryFn: () =>
+			apiFetch<HardwareInfo>('/api/setup/hardware', { headers: setupHeaders(sessionId) }),
+		enabled: enabled(),
+		staleTime: Infinity,
+		retry: false
+	}));
+}
+
+export function createBinaryScanMutation(sessionId: string) {
+	return createMutation(() => ({
+		// `BinaryScanRequest.extra_paths` — extra dirs searched ahead of $PATH.
+		mutationFn: (extraPaths: string[]) =>
+			apiFetch<BinaryScanResult>('/api/setup/scan-binary', {
+				method: 'POST',
+				body: JSON.stringify({ extra_paths: extraPaths }),
+				headers: setupHeaders(sessionId)
+			}),
+		onSuccess: (data: BinaryScanResult) => queryClient.setQueryData(['setup', 'scan-binary'], data)
+	}));
+}
+
+export function createModelScanMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: ModelScanRequest) =>
+			apiFetch<ModelScanResult>('/api/setup/scan-models', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			}),
+		onSuccess: (data: ModelScanResult) => queryClient.setQueryData(['setup', 'scan-models'], data)
+	}));
+}
+
+export function createRecommendationMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: RecommendationRequest) =>
+			apiFetch<RecommendationResult>('/api/setup/recommend', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			}),
+		onSuccess: (data: RecommendationResult) =>
+			queryClient.setQueryData(['setup', 'recommend'], data)
+	}));
+}
+
+export interface PreviewConfigResponse {
+	toml: string;
+}
+
+export function createPreviewConfigMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: SaveConfigRequest) =>
+			apiFetch<PreviewConfigResponse>('/api/setup/preview-config', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface SaveConfigResponse {
+	path: string;
+	replaced_existing: boolean;
+	backup_path?: string;
+}
+
+export function createSetupSaveConfigMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: SaveConfigRequest) =>
+			apiFetch<SaveConfigResponse>('/api/setup/save-config', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface BuildCreateRequest {
+	backend: SetupBackend;
+	install_dir: string;
+	jobs: number;
+}
+
+export interface BuildCreateResponse {
+	build_id: string;
+}
+
+export function createBuildMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (request: BuildCreateRequest) =>
+			apiFetch<BuildCreateResponse>('/api/setup/build', {
+				method: 'POST',
+				body: JSON.stringify(request),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface ValidateLaunchResponse {
+	success: boolean;
+	message: string;
+	stderr?: string;
+}
+
+export function createValidateLaunchMutation(sessionId: string) {
+	return createMutation(() => ({
+		mutationFn: (servers: ServerConfigDraft[]) =>
+			apiFetch<ValidateLaunchResponse>('/api/setup/validate-launch', {
+				method: 'POST',
+				body: JSON.stringify({ servers }),
+				headers: setupHeaders(sessionId)
+			})
+	}));
+}
+
+export interface SetupStatus {
+	setup_required: boolean;
+	version: string;
+}
+
+/** Unauthenticated status used by the completion screen's poll (§13.6). */
+export function fetchSetupStatus(): Promise<SetupStatus> {
+	return apiFetch<SetupStatus>('/api/status');
 }
