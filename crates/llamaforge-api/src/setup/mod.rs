@@ -60,9 +60,10 @@ pub struct SetupState {
     build_disconnect_grace: Option<Duration>,
     /// Minimum free disk (GB) required to start a build; `None` → `MIN_DISK_GB`.
     build_min_disk_gb: Option<u64>,
-    /// Fired by `validate-launch` on success so the standalone wizard server can
-    /// shut down after a completed setup (Section 12.2). `None` outside it.
-    completion: Option<tokio_util::sync::CancellationToken>,
+    /// Notified by `validate-launch` on success so a host (standalone wizard
+    /// server, or first-run serve loop) can react to a completed setup
+    /// (Sections 12.2 / 13.4). Re-armable so reload-retry works. `None` outside.
+    completion: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl SetupState {
@@ -94,17 +95,18 @@ impl SetupState {
         self
     }
 
-    /// Set the token fired when a setup completes (`validate-launch` succeeds),
-    /// so the standalone wizard server can shut itself down (Section 12.2).
-    pub fn with_completion(mut self, token: tokio_util::sync::CancellationToken) -> Self {
-        self.completion = Some(token);
+    /// Set the notifier signaled when a setup completes (`validate-launch`
+    /// succeeds), so a host can react (shut down, or hot-reload into running
+    /// mode). Sections 12.2 / 13.4.
+    pub fn with_completion(mut self, notify: Arc<tokio::sync::Notify>) -> Self {
+        self.completion = Some(notify);
         self
     }
 
     /// Signal that setup completed successfully.
     pub(crate) fn signal_complete(&self) {
-        if let Some(token) = &self.completion {
-            token.cancel();
+        if let Some(notify) = &self.completion {
+            notify.notify_one();
         }
     }
 }

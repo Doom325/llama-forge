@@ -742,10 +742,8 @@ async fn setup_mode_guard(
             "setup_url": guard.setup_url,
         }));
         let mut res = (axum::http::StatusCode::SERVICE_UNAVAILABLE, body).into_response();
-        res.headers_mut().insert(
-            axum::http::header::RETRY_AFTER,
-            axum::http::HeaderValue::from_static("60"),
-        );
+        res.headers_mut()
+            .insert(axum::http::header::RETRY_AFTER, axum::http::HeaderValue::from_static("60"));
         return res;
     }
 
@@ -833,7 +831,8 @@ where
 
     // First-run wizard: merge the setup router and apply the mode guard.
     if let Some(setup) = setup {
-        let guard = SetupGuardState { active: setup.setup_active.clone(), setup_url: setup.setup_url };
+        let guard =
+            SetupGuardState { active: setup.setup_active.clone(), setup_url: setup.setup_url };
         app = app
             .merge(setup.setup_router)
             .layer(axum::middleware::from_fn_with_state(guard, setup_mode_guard));
@@ -1000,6 +999,109 @@ mod tests {
         };
 
         build_router(state, None)
+    }
+
+    fn build_test_router_with_setup(active: bool) -> Router {
+        let mut config = AppConfig::default();
+        config.global.queue_default_timeout_secs = 1;
+        let handle =
+            Arc::new(ConfigHandle::load(Arc::new(InMemoryConfigSource::new(config))).unwrap());
+        let state = HttpAppState {
+            config_reader: handle.clone(),
+            config_writer: handle.clone(),
+            route_validator: Arc::new(MockRouteValidator),
+            inference_engine: Arc::new(MockEngine {
+                chunks: std::sync::Mutex::new(vec![]),
+                sleep_ms: 0,
+            }),
+            metrics_exporter: Arc::new(MockMetricsExporter),
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
+        };
+        let setup_router = Router::new().route("/api/setup/ping", get(|| async { "ok" }));
+        let mount = SetupMount {
+            setup_router,
+            setup_active: Arc::new(AtomicBool::new(active)),
+            setup_url: "http://127.0.0.1:8000/ui/setup".to_string(),
+        };
+        build_router(state, Some(mount))
+    }
+
+    async fn json_body(res: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn setup_mode_blocks_inference_and_reports_status() {
+        let app = build_test_router_with_setup(true);
+
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(json_body(res).await["setup_required"], true);
+
+        // Inference is refused with 503 + setup_url before the body is parsed.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/chat/completions")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(res.headers().get("retry-after").unwrap(), "60");
+        assert_eq!(json_body(res).await["error"], "setup_required");
+
+        // Setup endpoints are reachable while in setup mode.
+        let res = app
+            .oneshot(Request::builder().uri("/api/setup/ping").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn running_mode_guards_setup_endpoints_and_clears_status() {
+        let app = build_test_router_with_setup(false);
+
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(json_body(res).await["setup_required"], false);
+
+        // Reconfigure requires the X-Setup-Reconfigure header in running mode.
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri("/api/setup/ping").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/setup/ping")
+                    .header("x-setup-reconfigure", "true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     #[tokio::test]

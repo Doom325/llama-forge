@@ -19,10 +19,8 @@ use serde_json::json;
 pub(crate) type SetupActive = Option<Arc<AtomicBool>>;
 
 pub(crate) async fn status_handler(State(setup_active): State<SetupActive>) -> impl IntoResponse {
-    let setup_required = setup_active
-        .as_ref()
-        .map(|flag| flag.load(Ordering::Relaxed))
-        .unwrap_or(false);
+    let setup_required =
+        setup_active.as_ref().map(|flag| flag.load(Ordering::Relaxed)).unwrap_or(false);
     Json(json!({
         "setup_required": setup_required,
         "version": env!("CARGO_PKG_VERSION"),

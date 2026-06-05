@@ -107,9 +107,21 @@ async fn wizard_main(idle_timeout: Duration) -> i32 {
     init_wizard_logging();
 
     let last_activity = Arc::new(AtomicU64::new(now_secs()));
-    let completion = CancellationToken::new();
 
-    let state = SetupState::new().with_completion(completion.clone());
+    // `validate-launch` notifies `completion`; mirror it into a token so the
+    // server's graceful-shutdown and the post-run banner can observe it.
+    let completion = Arc::new(tokio::sync::Notify::new());
+    let setup_done = CancellationToken::new();
+    {
+        let completion = completion.clone();
+        let setup_done = setup_done.clone();
+        tokio::spawn(async move {
+            completion.notified().await;
+            setup_done.cancel();
+        });
+    }
+
+    let state = SetupState::new().with_completion(completion);
     let router = wizard_router(state)
         .layer(axum::middleware::from_fn_with_state(last_activity.clone(), track_activity));
 
@@ -138,13 +150,13 @@ async fn wizard_main(idle_timeout: Duration) -> i32 {
     spawn_idle_monitor(last_activity, idle_timeout, url, shutdown.clone());
 
     let graceful = shutdown.clone();
-    let completion_for_serve = completion.clone();
+    let setup_done_for_serve = setup_done.clone();
     let server =
         axum::serve(listener, router.into_make_service()).with_graceful_shutdown(async move {
             // Shut down on idle/expiry OR a completed setup (validate-launch ok).
             tokio::select! {
                 _ = graceful.cancelled() => {}
-                _ = completion_for_serve.cancelled() => {}
+                _ = setup_done_for_serve.cancelled() => {}
             }
         });
 
@@ -158,7 +170,7 @@ async fn wizard_main(idle_timeout: Duration) -> i32 {
         _ = tokio::signal::ctrl_c() => return 130,
     }
 
-    if completion.is_cancelled() {
+    if setup_done.is_cancelled() {
         println!("Setup complete. Run `llamaforge serve` to start the orchestrator.");
     }
     0
@@ -183,8 +195,11 @@ fn spawn_idle_monitor(
     url: String,
     shutdown: CancellationToken,
 ) {
+    // Poll often enough to honor a short timeout (e.g. --timeout=2s in tests)
+    // but no more than once a second for the common multi-minute case.
+    let poll = idle_timeout.clamp(Duration::from_secs(1), Duration::from_secs(60));
     tokio::spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(60));
+        let mut tick = tokio::time::interval(poll);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut since_reminder = Duration::ZERO;
         loop {
@@ -203,7 +218,7 @@ fn spawn_idle_monitor(
                 shutdown.cancel();
                 break;
             }
-            since_reminder += Duration::from_secs(60);
+            since_reminder += poll;
             if since_reminder >= REMINDER_INTERVAL {
                 since_reminder = Duration::ZERO;
                 println!("Setup wizard still running at {url}");
@@ -217,7 +232,11 @@ fn now_secs() -> u64 {
 }
 
 /// Best-effort browser launch (`open` on macOS, `xdg-open` elsewhere).
+/// Set `LLAMAFORGE_NO_BROWSER` to suppress it (tests, headless servers).
 fn open_browser(url: &str) {
+    if std::env::var_os("LLAMAFORGE_NO_BROWSER").is_some() {
+        return;
+    }
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     let _ = std::process::Command::new(opener)
         .arg(url)

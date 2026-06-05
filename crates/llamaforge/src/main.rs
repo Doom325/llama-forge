@@ -285,26 +285,32 @@ fn run_serve(config_path: PathBuf, rules_path: PathBuf, state_dir: PathBuf) {
     check_state_dir(&state_dir);
 
     let paths = ConfigPaths::new(config_path, rules_path, state_dir);
-    let source = Arc::new(TomlFileConfigSource::new(paths));
+    let source = Arc::new(TomlFileConfigSource::new(paths.clone()));
 
-    match ConfigHandle::load(source) {
-        Ok(handle) => {
-            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    let msg = format!("failed to construct tokio runtime: {}", e);
-                    emit_boot_error("RUNTIME_INIT_FAILED", &msg);
-                    process::exit(70);
-                }
-            };
-            if let Err(e) = rt.block_on(llamaforge::run(Arc::new(handle))) {
-                let msg = format!("{}", e);
-                emit_boot_error("FATAL_ERROR", &msg);
-                process::exit(1);
-            }
+    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(e) => {
+            emit_boot_error(
+                "RUNTIME_INIT_FAILED",
+                &format!("failed to construct tokio runtime: {e}"),
+            );
+            process::exit(70);
         }
-        Err(err) => {
-            handle_config_error(err);
+    };
+
+    // Config-load triage (08_SETUP_WIZARD.md Section 13.1): a missing or empty
+    // config means first-run → launch the setup wizard in-process; a parse
+    // error is a real misconfiguration and exits 78.
+    let result = match ConfigHandle::load(source) {
+        Ok(handle) => rt.block_on(llamaforge::run(Arc::new(handle))),
+        Err(ConfigLoadError::NotFound { .. }) | Err(ConfigLoadError::EmptyFile { .. }) => {
+            rt.block_on(llamaforge::run_first_run(paths))
         }
+        Err(err) => handle_config_error(err),
+    };
+
+    if let Err(e) = result {
+        emit_boot_error("FATAL_ERROR", &format!("{e}"));
+        process::exit(1);
     }
 }
