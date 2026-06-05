@@ -93,6 +93,9 @@
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
 		const handle = (name: string) => (event: MessageEvent) => {
+			// An event arrived → the connection is healthy; reset the
+			// consecutive-failure counter (design: 3 *consecutive* disconnects).
+			attempts = 0;
 			const input = toEventInput(name, JSON.parse(event.data));
 			if (!input) return;
 			buildStatus = applyBuildEvent(buildStatus, id, input);
@@ -111,6 +114,16 @@
 		};
 
 		const open = () => {
+			// The backend replays the FULL backlog on every connection (no
+			// per-client cursor), so rebuild state from scratch on each (re)connect
+			// — otherwise the replayed `log` events would double the log lines.
+			buildStatus = {
+				status: 'running',
+				build_id: id,
+				phase: 'cloning',
+				percent: null,
+				logLines: []
+			};
 			source = new EventSource(`/api/setup/build/${id}/stream`);
 			for (const name of ['phase', 'progress', 'log', 'complete', 'failed']) {
 				source.addEventListener(name, handle(name) as EventListener);
