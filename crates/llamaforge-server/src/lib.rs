@@ -19,6 +19,7 @@ pub mod hardware;
 pub(crate) mod health;
 pub(crate) mod instrumented;
 pub(crate) mod manager;
+pub mod model_scanner;
 pub(crate) mod observability;
 pub(crate) mod process;
 pub(crate) mod state;
@@ -38,6 +39,10 @@ pub use hardware::{
 };
 pub use instrumented::InstrumentedServerManager;
 pub use manager::ServerManager;
+pub use model_scanner::{
+    scan_models, scan_models_with_deadline, DiscoveredModel, ModelScanError, ModelScanRequest,
+    ModelScanResult, ModelSource, TruncationReason,
+};
 pub use observability::{register_metrics, spawn_metrics_poller, DomainMetricsLayer};
 pub use state::ServerStateSnapshot;
 pub use telemetry::{create_telemetry, GpuDevice, GpuTelemetry, StubTelemetry, TelemetryError};
