@@ -638,6 +638,84 @@ mod tests {
         Arc::new(ConfigHandle::load(source).unwrap())
     }
 
+    fn config_with_one_server(tmp: &TempDir) -> Arc<ConfigHandle> {
+        let main_path = tmp.path().join("llamaforge.toml");
+        let state_dir = tmp.path().join("state");
+        std::fs::create_dir_all(&state_dir).unwrap();
+        std::fs::write(
+            &main_path,
+            b"[global]\n[servers.\"00000000-0000-0000-0000-000000000001\"]\n\
+              binary_path=\"does-not-exist\"\nmodel_path=\"m1\"\nport=8190\nctx_size=1\n",
+        )
+        .unwrap();
+        let paths = ConfigPaths::new(main_path, tmp.path().join("priority_rules.toml"), state_dir);
+        let source = Arc::new(TomlFileConfigSource::new(paths));
+        Arc::new(ConfigHandle::load(source).unwrap())
+    }
+
+    fn manager_with(config: Arc<ConfigHandle>, tmp: &TempDir) -> Arc<ServerManager> {
+        let telemetry = Arc::new(MockTelemetry { free_vram: 0, is_unavailable: true });
+        let db_path = tmp.path().join("restart_metrics.db");
+        let pipeline = llamaforge_metrics::create_metrics_pipeline(
+            &llamaforge_metrics::MetricsConfig { db_path, ..Default::default() },
+            config.clone(),
+        )
+        .unwrap();
+        Arc::new(ServerManager::new(
+            telemetry,
+            config,
+            pipeline.ingest,
+            pipeline.store,
+            CancellationToken::new(),
+        ))
+    }
+
+    #[tokio::test]
+    async fn request_restart_unknown_server_is_not_found() {
+        let tmp = TempDir::new().unwrap();
+        let manager = manager_with(get_test_config(&tmp), &tmp);
+        let unknown = ServerId::from_config_id("nope");
+        assert!(matches!(
+            manager.request_restart(&unknown).await,
+            Err(ServerManagerError::ServerNotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn request_restart_waits_for_drain_then_restarts() {
+        let tmp = TempDir::new().unwrap();
+        let manager = manager_with(config_with_one_server(&tmp), &tmp);
+        let id = ServerId::from_config_id("00000000-0000-0000-0000-000000000001");
+
+        // A server the supervisor currently reports as Running (no real task behind it).
+        let cfg = manager.config.snapshot().servers.get(&id).unwrap().clone();
+        let mut state = ServerState::new_starting(id.clone(), &cfg, None);
+        state.lifecycle = ServerLifecycle::Running;
+        manager.servers.insert(id.clone(), state);
+
+        // Mimic the supervisor draining to Stopped shortly after the stop signal. The
+        // poll MUST wait for this — request_start rejects a still-Running server, so a
+        // restart that didn't wait would fail with "already running".
+        let m2 = manager.clone();
+        let id2 = id.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            if let Some(mut s) = m2.servers.get_mut(&id2) {
+                s.lifecycle = ServerLifecycle::Stopped;
+            }
+        });
+
+        // Returns Ok (drain observed within the bounded poll, not the 10s timeout) and
+        // request_start ran — the server left Running (it re-spawns; the doomed exec of
+        // the missing binary then fails, which is fine: the point is restart proceeded).
+        manager.request_restart(&id).await.unwrap();
+        assert_ne!(
+            manager.servers.get(&id).map(|s| s.lifecycle),
+            Some(ServerLifecycle::Running),
+            "restart should have cycled the server off Running"
+        );
+    }
+
     #[tokio::test]
     async fn test_vram_ledger() {
         let _tmp_db = tempfile::TempDir::new().unwrap();
