@@ -96,9 +96,12 @@ POST /api/servers/{id}/stop  → stop_server
 POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
 GET  /api/queue              → queue_status
 DELETE /api/queue/{id}       → cancel_request
+GET  /api/models             → list_models         // ModelInfo[] from the routing registry
 GET  /api/requests           → query_requests      // explorer: RequestRecord[] projection
 POST /api/requests/{id}/cancel → cancel_request    // same QueueSubmitter::cancel as DELETE /api/queue/{id}
 POST /api/config/reload      → reload_config
+GET  /api/config/{section}   → get_config_section  // read section JSON + ETag (servers|priority|global)
+GET  /api/events             → events_handler      // SSE live feed (named events + Last-Event-ID replay)
 GET  /api/metrics/requests   → query_request_metrics
 GET  /api/metrics/aggregated → query_aggregated
 GET  /api/metrics/summary    → query_summary       // dashboard {throughput_total, latency}
@@ -137,6 +140,58 @@ projection of `RequestMetrics` over the same filter/pagination query params as
 `/api/metrics/requests`, which by contrast returns the full raw record for
 analysis). `POST /api/requests/{id}/cancel` is the explorer's cancel action; it
 delegates to the same `QueueSubmitter::cancel` as `DELETE /api/queue/{id}`.
+
+`GET /api/models` returns the frontend `ModelInfo` shape
+`{id, name, loaded, assignedServers, capabilities}`, projected from the routing
+`ServerStateView` (threaded into the management layer via `TransportDeps`/
+`HttpAppState`) and grouped by model alias: a model is `loaded` if any server
+serving it is `Running`; `assignedServers` lists those server ids;
+`capabilities` is the lowercase union of each server's routing `Capability` set
+plus its modality flags (`multimodal`/`embedding`/`reranking`). This is the
+management registry view; the OpenAI-discovery `GET /v1/models` (config aliases,
+OpenAI list envelope) is a separate, narrower surface.
+
+`GET /api/config/{section}` (`section` ∈ `servers | priority | global`) returns
+that section of the live config snapshot as JSON, with an `ETag` response header
+the frontend captures (`apiFetchWithMeta`) for later optimistic-concurrency
+writes. The JSON is routed through `serde_json::Value` so the `servers` map's key
+order — and therefore the ETag — is stable regardless of `HashMap` iteration
+order. Unknown section → `404 not_found`.
+
+**SSE live feed (`GET /api/events`, #290).** Fixes the dashboard's permanent
+"Reconnecting" pill (the endpoint was never registered). An `SseHub` fans events
+out to every connection over a `tokio::broadcast` and retains the most recent
+replayable events in a bounded ring. Each event carries a monotonic `id:`; on
+reconnect the client sends `?last_event_id=<id>` and the handler replays the
+buffered events newer than that id before switching to the live stream. Named
+events match the frontend `LiveDataStore` listeners:
+- `server-update` — a single `ServerState` (the changed server), and
+- `model-update` — the full `ModelInfo[]`,
+
+both emitted **push-on-change**: background producers poll the existing
+`ServerControl` / `ServerStateView` ports on a short interval and publish only
+when the projected JSON changed (no new domain subscription surface). A
+`heartbeat` named event every 15s keeps the client's connection-health timer
+alive (the client treats ~30s of silence as a disconnect; SSE *comment* keepalive
+pings are invisible to `EventSource` listeners, so the heartbeat is a real named
+event). `/api/events` inherits the `/api/*` middleware stack; with an `api_key`
+configured, browser `EventSource` (which can't set an `Authorization` header)
+can't authenticate — a known limitation for the authenticated deployment.
+
+> **Deferred — live `metrics-update` / `queue-update` pushes.** Per-server
+> metrics have no change signal (a push would be periodic polling) and the
+> `/api/queue` items list is itself deferred, so these two SSE event types are
+> not emitted yet; the frontend still refreshes them via TanStack polling.
+
+> **Deferred — `PUT /api/config/{section}` (runtime section writes).** The
+> frontend assumes a generic editable section, but LlamaForge's config model is
+> restart-required for every field except LoRA adapters: the only runtime
+> `ConfigMutation` is `SetLoraAdapters`, and `/api/config/reload` explicitly
+> rejects diffs touching restart-required fields. A generic section-write
+> endpoint therefore needs its own config-layer design (which fields are
+> runtime-mutable, how restart-required edits are surfaced, validation, and the
+> `If-Match` precondition). Until that lands, the read endpoint ships alone and
+> the save action is a no-op on the backend.
 
 ### 2.4 Protocol Translation Types
 

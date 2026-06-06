@@ -214,6 +214,7 @@ pub async fn build(
         store_maintenance: metrics_store,
         route_validator: router.clone(),
         inference_engine,
+        server_state_view,
     };
 
     Ok((deps, BackgroundTasks { scheduler: scheduler_handle, server_manager }))

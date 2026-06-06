@@ -7,6 +7,7 @@
 
 pub(crate) mod anthropic;
 pub(crate) mod error;
+pub(crate) mod events;
 pub(crate) mod grpc;
 pub(crate) mod http;
 pub(crate) mod management;
@@ -43,6 +44,21 @@ pub trait InferenceEngine: Send + Sync + 'static {
     >;
 }
 
+/// Shared empty `ServerStateView` for transport unit tests that build a
+/// `HttpAppState`/`ManagementState`/`TransportDeps` but don't exercise
+/// `GET /api/models`. Tests that need populated snapshots define their own.
+#[cfg(test)]
+pub(crate) fn test_empty_server_state_view(
+) -> Arc<dyn llamaforge_core::routing::types::ServerStateView> {
+    struct EmptyView;
+    impl llamaforge_core::routing::types::ServerStateView for EmptyView {
+        fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
+            vec![]
+        }
+    }
+    Arc::new(EmptyView)
+}
+
 pub struct TransportDeps<CW, RMS, SM>
 where
     CW: ConfigWriter + 'static,
@@ -58,6 +74,9 @@ where
     pub store_maintenance: Arc<SM>,
     pub route_validator: Arc<dyn RouteValidator>,
     pub inference_engine: Arc<dyn InferenceEngine>,
+    /// Read-only routing view of all servers, used by `GET /api/models` to
+    /// project the model registry (aliases + capabilities + assignment).
+    pub server_state_view: Arc<dyn llamaforge_core::routing::types::ServerStateView>,
 }
 
 pub struct TransportHandles {
@@ -139,6 +158,7 @@ where
         config_writer: deps.config_writer.clone(),
         request_metrics_store: deps.request_metrics_store.clone(),
         store_maintenance: deps.store_maintenance.clone(),
+        server_state_view: deps.server_state_view.clone(),
         large_body_limit,
     };
 
@@ -173,11 +193,23 @@ where
         "transport.started"
     );
 
+    // SSE live feed (#290): a fan-out hub plus background change-detecting
+    // producers. Producers poll the existing ServerControl/ServerStateView ports
+    // and stop on shutdown.
+    let sse_hub = events::SseHub::new();
+    events::spawn_producers(
+        sse_hub.clone(),
+        deps.server_control.clone(),
+        deps.server_state_view.clone(),
+        shutdown_rx.clone(),
+    );
+
     // Start HTTP server
     let http_shutdown_rx = shutdown_rx.clone();
     let http_handle = tokio::spawn(async move {
         if let Err(e) =
-            http::start_http_server(http_state, http_listener, http_shutdown_rx, setup).await
+            http::start_http_server(http_state, http_listener, http_shutdown_rx, setup, sse_hub)
+                .await
         {
             tracing::error!(
                 error = %e,
@@ -327,6 +359,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: store.clone(),
             store_maintenance: store,
+            server_state_view: test_empty_server_state_view(),
         }
     }
 

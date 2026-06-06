@@ -37,6 +37,7 @@ pub struct HttpAppState<CW, RMS, SM> {
     pub config_writer: Arc<CW>,
     pub request_metrics_store: Arc<RMS>,
     pub store_maintenance: Arc<SM>,
+    pub server_state_view: Arc<dyn llamaforge_core::routing::types::ServerStateView>,
     pub large_body_limit: LargeBodyConcurrencyLimit,
 }
 
@@ -52,6 +53,7 @@ impl<CW, RMS, SM> Clone for HttpAppState<CW, RMS, SM> {
             config_writer: self.config_writer.clone(),
             request_metrics_store: self.request_metrics_store.clone(),
             store_maintenance: self.store_maintenance.clone(),
+            server_state_view: self.server_state_view.clone(),
             large_body_limit: self.large_body_limit.clone(),
         }
     }
@@ -763,6 +765,7 @@ async fn setup_mode_guard(
 pub(crate) fn build_router<CW, RMS, SM>(
     state: HttpAppState<CW, RMS, SM>,
     setup: Option<SetupMount>,
+    sse_hub: Arc<super::events::SseHub>,
 ) -> Router
 where
     CW: ConfigWriter + Send + Sync + 'static,
@@ -776,6 +779,7 @@ where
         config_writer: state.config_writer.clone(),
         request_metrics_store: state.request_metrics_store.clone(),
         store_maintenance: state.store_maintenance.clone(),
+        server_state_view: state.server_state_view.clone(),
     };
 
     let management_router = super::management::management_routes(management_state);
@@ -797,8 +801,14 @@ where
         .route("/metrics", get(prometheus_export::<CW, RMS, SM>))
         .with_state(state.clone());
 
+    // SSE live feed (#290). Merged into the API router so `/api/events` inherits
+    // the shared middleware stack (request-id, CORS, auth). It carries its own
+    // `Arc<SseHub>` state, so it's a `Router<()>` by the time it merges in.
+    let events_router = super::events::events_router(sse_hub);
+
     let api_router = inference_router
         .merge(management_router)
+        .merge(events_router)
         .layer(axum::middleware::from_fn(metrics_middleware))
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(axum::middleware::from_fn_with_state(
@@ -843,13 +853,14 @@ pub async fn start_http_server<CW, RMS, SM>(
     listener: tokio::net::TcpListener,
     shutdown_rx: tokio::sync::watch::Receiver<()>,
     setup: Option<SetupMount>,
+    sse_hub: Arc<super::events::SseHub>,
 ) -> Result<(), TransportError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
     RMS: llamaforge_metrics::RequestMetricsStore + Send + Sync + 'static,
     SM: llamaforge_metrics::StoreMaintenance + Send + Sync + 'static,
 {
-    let router = build_router(state, setup);
+    let router = build_router(state, setup, sse_hub);
 
     let mut rx = shutdown_rx.clone();
     axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>())
@@ -996,10 +1007,11 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        build_router(state, None)
+        build_router(state, None, crate::transport::events::SseHub::new())
     }
 
     fn build_test_router_with_setup(active: bool) -> Router {
@@ -1020,6 +1032,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
         let setup_router = Router::new().route("/api/setup/ping", get(|| async { "ok" }));
@@ -1028,7 +1041,7 @@ mod tests {
             setup_active: Arc::new(AtomicBool::new(active)),
             setup_url: "http://127.0.0.1:8000/ui/setup".to_string(),
         };
-        build_router(state, Some(mount))
+        build_router(state, Some(mount), crate::transport::events::SseHub::new())
     }
 
     async fn json_body(res: axum::response::Response) -> serde_json::Value {
@@ -1339,6 +1352,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -1430,10 +1444,11 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitterFull),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state, None);
+        let app = build_router(state, None, crate::transport::events::SseHub::new());
 
         let body = serde_json::json!({
             "model": "test",
@@ -1478,10 +1493,11 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state, None);
+        let app = build_router(state, None, crate::transport::events::SseHub::new());
 
         let body_str = "x".repeat(101);
         let req = Request::builder()
@@ -1546,10 +1562,11 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
-        let app = build_router(state, None);
+        let app = build_router(state, None, crate::transport::events::SseHub::new());
 
         let body = serde_json::json!({
             "model": "test",
