@@ -100,8 +100,9 @@ pub(super) struct PreviewResponse {
 }
 
 pub(super) async fn preview_config_handler(
-    Json(request): Json<SaveConfigRequest>,
+    Json(mut request): Json<SaveConfigRequest>,
 ) -> Result<Versioned<PreviewResponse>, SetupError> {
+    request.path = expand_tilde(&request.path);
     let existing = load_existing(Path::new(&request.path)).await;
     let active_ports = active_config_ports(&existing);
     let config = assemble_config(existing, &request).map_err(SetupError::BadRequest)?;
@@ -126,11 +127,12 @@ pub(super) struct SaveResponse {
 
 pub(super) async fn save_config_handler(
     State(state): State<SetupState>,
-    Json(request): Json<SaveConfigRequest>,
+    Json(mut request): Json<SaveConfigRequest>,
 ) -> Result<Versioned<SaveResponse>, SetupError> {
     // Serialize concurrent saves so backups/writes can't interleave.
     let _guard = state.save_lock.lock().await;
 
+    request.path = expand_tilde(&request.path);
     let path = PathBuf::from(&request.path);
     let existing = load_existing(&path).await;
     let active_ports = active_config_ports(&existing);
@@ -417,6 +419,16 @@ async fn prune_backups(path: &Path) {
             let _ = tokio::fs::remove_file(stale).await;
         }
     }
+}
+
+/// Expand a leading `~` or `~/` to the user's home directory.
+fn expand_tilde(path: &str) -> String {
+    if path == "~" || path.starts_with("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}{}", home.to_string_lossy(), &path[1..]);
+        }
+    }
+    path.to_string()
 }
 
 /// Map a filesystem write error to the right HTTP status: permission → 403.

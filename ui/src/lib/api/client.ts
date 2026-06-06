@@ -56,6 +56,10 @@ async function requestJson<T>(
 				const errorData = await response.json();
 				if (errorData && typeof errorData.message === 'string') {
 					errorMessage = errorData.message;
+				} else if (errorData && Array.isArray(errorData.details)) {
+					errorMessage = errorData.details
+						.map((d: { field: string; error: string }) => `${d.field}: ${d.error}`)
+						.join('; ');
 				}
 			} catch {
 				// Ignore JSON parse errors for error responses
