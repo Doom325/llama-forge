@@ -538,6 +538,15 @@ async fn test_vc3_10_management_api_round_trip() {
     // Queue status
     let res = client.get(http_url(&handles, "/api/queue")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    // Metrics summary (#291): the dashboard hits /api/metrics/summary (not the
+    // old /api/metrics). Empty store → throughput 0, latency omitted (the optional
+    // frontend field), matching the `AggregatedMetrics` TS shape.
+    let res = client.get(http_url(&handles, "/api/metrics/summary")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let summary: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(summary["throughput_total"], 0.0);
+    assert!(summary.get("latency").is_none(), "latency omitted when there are no samples");
 }
 
 #[tokio::test]
