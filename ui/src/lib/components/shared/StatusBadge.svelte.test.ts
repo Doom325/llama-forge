@@ -30,4 +30,15 @@ describe('StatusBadge', () => {
 		expect(screen.getByText('Pending')).toBeInTheDocument();
 		expect(screen.getByText('⟳')).toBeInTheDocument();
 	});
+
+	// #292: an undefined/unknown status (e.g. a backend shape drift) must degrade
+	// to a triple-redundant "Unknown" badge instead of throwing on
+	// statusConfig[undefined].label and aborting the dashboard render.
+	it('degrades gracefully on an undefined status', () => {
+		render(StatusBadge, { status: undefined });
+		const badge = screen.getByText('Unknown');
+		expect(badge).toBeInTheDocument();
+		expect(screen.getByText('?')).toBeInTheDocument();
+		expect(badge.parentElement).toHaveAttribute('aria-label', 'Status: Unknown');
+	});
 });

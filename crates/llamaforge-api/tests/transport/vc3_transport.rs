@@ -506,11 +506,15 @@ async fn test_vc3_10_management_api_round_trip() {
     assert_eq!(servers.len(), 1);
     let srv = &servers[0];
 
+    // DTO matches the frontend `ServerState` contract (#292): {id, name, status,
+    // uptime}, status in the lowercase `ServerStatus` vocabulary (not Debug).
     assert!(srv.get("id").is_some(), "missing id");
-    assert!(srv.get("model").is_some(), "missing model");
-    assert!(srv.get("state").is_some(), "missing state");
-    assert!(srv.get("slots_total").is_some(), "missing slots_total");
-    assert!(srv.get("slots_busy").is_some(), "missing slots_busy");
+    assert_eq!(srv["name"], "test_model", "name should be the model alias");
+    assert_eq!(srv["status"], "running", "status should be lowercase-mapped, not Debug");
+    assert_eq!(srv["uptime"], 0, "uptime is 0 when started_at is None");
+    assert!(srv.get("model").is_none(), "pre-#292 'model' key removed");
+    assert!(srv.get("state").is_none(), "pre-#292 'state' key removed");
+    assert!(srv.get("slots_total").is_none(), "slots moved to /api/servers/{{id}}/metrics");
     assert!(srv.get("port").is_none(), "port should not be exposed in DTO");
 
     // Start server (mutating /api/* requires the CSRF header, as the UI sends).

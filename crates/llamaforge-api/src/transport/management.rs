@@ -6,8 +6,8 @@ use axum::{
 };
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
 use llamaforge_core::types::{
-    traits::{QueueSubmitter, ServerControl},
-    RequestId, ServerId,
+    traits::{QueueSubmitter, ServerControl, ServerSummary},
+    RequestId, ServerId, ServerLifecycle,
 };
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
 use std::sync::Arc;
@@ -16,13 +16,51 @@ use super::error::ApiError;
 
 use serde::Serialize;
 
+/// `/api/servers` list item. Matches the frontend `ServerState` contract
+/// (FRONTEND_ARCHITECTURE.md §5.2): `{id, name, status, uptime}`, with `status`
+/// drawn from the UI's lowercase `ServerStatus` vocabulary rather than the `Debug`
+/// rendering of the lifecycle enum — the dashboard's `StatusBadge` keys off the
+/// former and crashes on the latter. Per-server slot/throughput detail lives on
+/// `GET /api/servers/{id}/metrics`, not here.
 #[derive(Serialize)]
 pub(crate) struct ServerStatusResponse {
     pub id: String,
-    pub model: String,
-    pub state: String,
-    pub slots_total: u32,
-    pub slots_busy: u32,
+    pub name: String,
+    pub status: &'static str,
+    pub uptime: u64,
+}
+
+/// Map the internal lifecycle to the frontend `ServerStatus` vocabulary
+/// (FRONTEND_ARCHITECTURE.md §5.2). `Starting`/`Draining` have no exact UI
+/// counterpart, so they map to the nearest operational signal the badge renders;
+/// `ServerLifecycle` is `#[non_exhaustive]`, so a future variant falls back to the
+/// neutral `pending` rather than an inaccurate health signal.
+fn lifecycle_status(state: ServerLifecycle) -> &'static str {
+    match state {
+        ServerLifecycle::Stopped => "stopped",
+        ServerLifecycle::Starting => "pending",
+        ServerLifecycle::Running => "running",
+        ServerLifecycle::Draining => "degraded",
+        ServerLifecycle::Restarting => "restarting",
+        ServerLifecycle::Failed => "failed",
+        _ => "pending",
+    }
+}
+
+/// Project a `ServerSummary` onto the frontend `ServerState` DTO. Shared by
+/// `GET /api/servers` and its `GET /v1/servers` alias so the two can't drift.
+pub(crate) fn server_summary_to_dto(s: ServerSummary) -> ServerStatusResponse {
+    ServerStatusResponse {
+        id: s.id.to_string(),
+        name: s.alias.into_inner().to_string(),
+        status: lifecycle_status(s.state),
+        // Seconds since the supervisor first reported the process up; 0 until the
+        // spawn task records `started_at` (clamped so clock skew can't go negative).
+        uptime: s
+            .started_at
+            .map(|t| (chrono::Utc::now() - t).num_seconds().max(0) as u64)
+            .unwrap_or(0),
+    }
 }
 
 pub struct ManagementState<CW, RMS, SM> {
@@ -53,16 +91,8 @@ pub(crate) async fn list_servers<CW, RMS, SM>(
     let summaries =
         state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let dtos: Vec<ServerStatusResponse> = summaries
-        .into_iter()
-        .map(|s| ServerStatusResponse {
-            id: s.id.to_string(),
-            model: s.alias.into_inner().to_string(),
-            state: format!("{:?}", s.state),
-            slots_total: s.slots_total,
-            slots_busy: s.slots_busy,
-        })
-        .collect();
+    let dtos: Vec<ServerStatusResponse> =
+        summaries.into_iter().map(server_summary_to_dto).collect();
 
     Ok(Json(dtos).into_response())
 }
@@ -319,6 +349,54 @@ mod tests {
             request_metrics_store: Arc::new(()),
             store_maintenance: Arc::new(()),
         }
+    }
+
+    struct OneRunningServer;
+    #[async_trait::async_trait]
+    impl ServerControl for OneRunningServer {
+        async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
+            Ok(vec![ServerSummary {
+                id: ServerId::new(uuid::Uuid::nil()),
+                alias: llamaforge_core::types::ModelAlias::new(std::sync::Arc::from("gemma-3-1b")),
+                state: ServerLifecycle::Running,
+                port: 8081,
+                slots_total: 2,
+                slots_busy: 0,
+                started_at: Some(chrono::Utc::now() - chrono::Duration::seconds(42)),
+                last_restart_at: None,
+            }])
+        }
+        async fn start_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+        async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn list_servers_emits_frontend_serverstate_shape() {
+        // Regression for #292: the dashboard's StatusBadge keys off a lowercase
+        // `status` and ServerCard reads `name`/`uptime`. The old `{model,
+        // state:Debug, slots_*}` shape left all three undefined → StatusBadge threw
+        // and the cards were stuck on skeletons.
+        let mut state = build_test_state();
+        state.server_control = Arc::new(OneRunningServer);
+
+        let res = list_servers(axum::extract::State(state)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let server = &body[0];
+
+        assert_eq!(server["name"], "gemma-3-1b");
+        assert_eq!(server["status"], "running"); // lowercase ServerStatus, not Debug "Running"
+        assert!(server["uptime"].as_u64().unwrap() >= 42);
+        // The pre-#292 keys must be gone so the shape can't silently regress back.
+        assert!(server.get("state").is_none());
+        assert!(server.get("model").is_none());
+        assert!(server.get("slots_total").is_none());
     }
 
     #[tokio::test]
