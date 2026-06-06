@@ -261,6 +261,74 @@ where
     Ok(Json(metrics).into_response())
 }
 
+/// Frontend `RequestRecord` shape (FRONTEND_ARCHITECTURE.md §5.2):
+/// `{id, timestamp, model, taskType, duration, status}` — the requests
+/// explorer's per-row view. Distinct from `GET /api/metrics/requests`, which
+/// returns the full raw `RequestMetrics` for analysis; this is the trimmed,
+/// UI-facing projection.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RequestRecordResponse {
+    id: String,
+    /// RFC3339 receive time.
+    timestamp: String,
+    model: String,
+    task_type: String,
+    /// Total request latency in ms.
+    duration: f64,
+    status: &'static str,
+}
+
+/// Lowercase string for a request status (`RequestStatus` is `#[non_exhaustive]`,
+/// so an unknown future variant maps to `"unknown"` rather than failing to build).
+fn request_status_str(s: llamaforge_metrics::RequestStatus) -> &'static str {
+    use llamaforge_metrics::RequestStatus::*;
+    match s {
+        Queued => "queued",
+        Processing => "processing",
+        Completed => "completed",
+        Failed => "failed",
+        Evicted => "evicted",
+        Cancelled => "cancelled",
+        Timeout => "timeout",
+        _ => "unknown",
+    }
+}
+
+impl From<llamaforge_metrics::RequestMetrics> for RequestRecordResponse {
+    fn from(m: llamaforge_metrics::RequestMetrics) -> Self {
+        RequestRecordResponse {
+            id: m.request_id.to_string(),
+            timestamp: m.received_at.to_rfc3339(),
+            model: m.model_name,
+            task_type: m.task_type.to_string(),
+            duration: m.total_latency_ms,
+            status: request_status_str(m.status),
+        }
+    }
+}
+
+/// `GET /api/requests` — the requests explorer (FRONTEND_ARCHITECTURE.md §5.2).
+/// Queries the request-metrics store with the same filter/pagination surface as
+/// `/api/metrics/requests`, then projects each record onto the trimmed
+/// `RequestRecord` shape the table renders.
+pub(crate) async fn query_requests<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Query(params): Query<MetricsQueryParams>,
+) -> Result<Response, ApiError>
+where
+    RMS: RequestMetricsStore + Send + Sync + 'static,
+{
+    let metrics = state
+        .request_metrics_store
+        .query_request_metrics(&params.filter, params.limit, params.offset)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let records: Vec<RequestRecordResponse> =
+        metrics.into_iter().map(RequestRecordResponse::from).collect();
+    Ok(Json(records).into_response())
+}
+
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct AggregatedQueryParams {
     /// Comma-separated list of fields to group by, e.g. `?group_by=server_id,hour`.
@@ -460,6 +528,10 @@ where
         .route("/api/queue", get(queue_status::<CW, RMS, SM>))
         .route("/api/queue/{id}", delete(cancel_request::<CW, RMS, SM>))
         .route("/api/config/reload", post(reload_config::<CW, RMS, SM>))
+        .route("/api/requests", get(query_requests::<CW, RMS, SM>))
+        // Cancel reuses the queue submitter's cancel (same as DELETE /api/queue/{id});
+        // the explorer drives it via POST per the frontend client.
+        .route("/api/requests/{id}/cancel", post(cancel_request::<CW, RMS, SM>))
         .route("/api/metrics/requests", get(query_request_metrics::<CW, RMS, SM>))
         .route("/api/metrics/aggregated", get(query_aggregated::<CW, RMS, SM>))
         .route("/api/metrics/summary", get(query_summary::<CW, RMS, SM>))
@@ -742,5 +814,111 @@ mod tests {
                 .await
                 .unwrap_err();
         assert!(matches!(err, ApiError::NotFound(_)));
+    }
+
+    fn mk_request_metrics(
+        id: &str,
+        task: &str,
+        status: llamaforge_metrics::RequestStatus,
+    ) -> llamaforge_metrics::RequestMetrics {
+        use llamaforge_core::config::{RequestorId, TaskTypeId};
+        llamaforge_metrics::RequestMetrics {
+            request_id: llamaforge_metrics::RequestId(id.to_string()),
+            model_name: "gemma-3-27b".to_string(),
+            server_id: None,
+            slot_id: None,
+            task_type: TaskTypeId(task.to_string()),
+            requestor: RequestorId("anon".to_string()),
+            effective_priority: 0,
+            received_at: chrono::DateTime::parse_from_rfc3339("2026-06-06T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            dispatched_at: None,
+            first_token_at: None,
+            completed_at: None,
+            queue_wait_ms: 0.0,
+            ttft_ms: None,
+            generation_duration_ms: None,
+            total_latency_ms: 123.0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            prompt_tps: None,
+            generation_tps: None,
+            status,
+            finish_reason: None,
+            was_evicted: false,
+            eviction_count: 0,
+            error_message: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn query_requests_projects_requestrecord_shape() {
+        // #293: GET /api/requests returns the trimmed RequestRecord projection,
+        // not the raw RequestMetrics. `taskType` is camelCase; `status` is the
+        // lowercase string.
+        use llamaforge_metrics::RequestMetricsStore;
+        let store = Arc::new(llamaforge_metrics::InMemoryStore::default());
+        store
+            .insert_request_metrics(vec![mk_request_metrics(
+                "req-1",
+                "chat",
+                llamaforge_metrics::RequestStatus::Completed,
+            )])
+            .await
+            .unwrap();
+
+        let config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+        let state = ManagementState {
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            config_reader: handle.clone(),
+            config_writer: handle,
+            request_metrics_store: store,
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+        };
+
+        let res = query_requests(
+            axum::extract::State(state),
+            axum::extract::Query(MetricsQueryParams::default()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let row = &body[0];
+        assert_eq!(row["id"], "req-1");
+        assert_eq!(row["model"], "gemma-3-27b");
+        assert_eq!(row["taskType"], "chat"); // camelCase, not task_type
+        assert!(row.get("task_type").is_none());
+        assert_eq!(row["duration"], 123.0);
+        assert_eq!(row["status"], "completed");
+        assert_eq!(row["timestamp"], "2026-06-06T00:00:00+00:00");
+        // Trimmed projection — raw RequestMetrics fields must not leak.
+        assert!(row.get("completion_tokens").is_none());
+        assert!(row.get("requestor").is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_request_via_post_route_parses_and_delegates() {
+        // POST /api/requests/{id}/cancel reuses cancel_request: a valid UUID
+        // delegates to the queue submitter (200), a malformed id is a 400.
+        let state = build_test_state();
+        let id = uuid::Uuid::now_v7().to_string();
+        let res = cancel_request(axum::extract::State(state.clone()), axum::extract::Path(id))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bad = cancel_request(
+            axum::extract::State(state),
+            axum::extract::Path("not-a-uuid".to_string()),
+        )
+        .await;
+        assert!(matches!(bad.unwrap_err(), ApiError::InvalidBody(_)));
     }
 }
