@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
 	saveMutateAsync: vi.fn(),
 	validateMutateAsync: vi.fn(),
 	fetchStatus: vi.fn(),
-	goto: vi.fn()
+	goto: vi.fn(),
+	reconfigure: false
 }));
 
 vi.mock('$app/navigation', () => ({ goto: mocks.goto }));
@@ -17,7 +18,8 @@ vi.mock('$lib/stores/setup.svelte', () => ({
 		sessionId: 's',
 		selectedModelIds: new Set(['m1']),
 		userOverrides: new Map(),
-		savePath: ''
+		savePath: '',
+		reconfigure: mocks.reconfigure
 	})
 }));
 vi.mock('$lib/api/queries', () => ({
@@ -75,6 +77,7 @@ beforeEach(() => {
 	mocks.saveMutateAsync = vi.fn().mockResolvedValue({ path: '/x', replaced_existing: false });
 	mocks.validateMutateAsync = vi.fn().mockResolvedValue({ success: true, message: 'ok' });
 	mocks.fetchStatus = vi.fn().mockResolvedValue({ setup_required: false, version: '0' });
+	mocks.reconfigure = false;
 });
 afterEach(() => vi.useRealTimers());
 
@@ -137,6 +140,22 @@ describe('ReviewStep', () => {
 		await vi.advanceTimersByTimeAsync(2000);
 		await tick();
 		expect(screen.getByRole('button', { name: 'Go to Dashboard' })).toBeInTheDocument();
+		vi.useRealTimers();
+	});
+
+	// #274 — in the reconfigure flow the config already exists, so the save must
+	// force-overwrite (the backend merges) rather than 409.
+	it('reconfigure save forces overwrite', async () => {
+		mocks.reconfigure = true;
+		mocks.saveMutateAsync = vi.fn().mockResolvedValue({ path: '/x', replaced_existing: true });
+		vi.useFakeTimers();
+		render(ReviewStep);
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Save & Launch' }));
+		await vi.advanceTimersByTimeAsync(0);
+		await tick();
+
+		expect(mocks.saveMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ force: true }));
 		vi.useRealTimers();
 	});
 });

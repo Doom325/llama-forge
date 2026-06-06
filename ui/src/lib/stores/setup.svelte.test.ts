@@ -18,6 +18,11 @@ describe('SetupWizardStore', () => {
 		expect(store.selectedModelIds.size).toBe(0);
 		expect(store.userOverrides.size).toBe(0);
 		expect(store.savePath).toBe('');
+		expect(store.reconfigure).toBe(false);
+	});
+
+	it('carries the reconfigure flag (Flow 4)', () => {
+		expect(new SetupWizardStore('s', true).reconfigure).toBe(true);
 	});
 });
 

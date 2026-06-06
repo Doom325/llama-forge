@@ -21,7 +21,7 @@
 	} from '$lib/api/types';
 
 	const store = useSetupStore();
-	const recommend = createRecommendationMutation(store.sessionId);
+	const recommend = createRecommendationMutation(store.sessionId, store.reconfigure);
 
 	const scanned = $derived(
 		queryClient.getQueryData<ModelScanResult>(['setup', 'scan-models'])?.models ?? []

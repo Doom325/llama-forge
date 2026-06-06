@@ -12,7 +12,7 @@
 	import type { HardwareInfo } from '$lib/api/types';
 
 	const store = useSetupStore();
-	const hw = createHardwareQuery(store.sessionId);
+	const hw = createHardwareQuery(store.sessionId, store.reconfigure);
 
 	let manualMode = $state(false);
 	let showManualPrompt = $state(false);
