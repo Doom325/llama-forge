@@ -1325,7 +1325,7 @@ _All five resolved during implementation (Phase 1–4). Each was implemented as 
    - **Resolved (PR5/PR7) as recommended:** reconfigure merges new `[servers.*]` entries while preserving global settings + priority rules; it stays in `Running` mode (§13.8).
 
 5. **Build prerequisites check.** Before attempting the build, should the wizard verify that `git`, `cmake`, and a C++ compiler are installed? (Recommendation: yes — check prerequisites first and show a clear "Install these first" message with platform-specific instructions rather than letting cmake fail with cryptic errors.)
-   - **Resolved (PR6) — narrower than recommended:** the build uses injectable `git`/`cmake` paths and surfaces a missing-tool spawn failure as a `failed` build event with the underlying error. A dedicated pre-flight prerequisites check with platform-specific install instructions is a tracked follow-up.
+   - **Resolved (PR6, completed in #283) as recommended:** `run_build` pre-flight-checks that `git` and `cmake` are present *before* cloning and fails fast with a `failed` event carrying a platform-specific install message (macOS / Debian-Ubuntu / Fedora). The C++ compiler is not probed separately — `cmake` validates it during configure, now with a clearer error since `cmake` itself is confirmed present.
 
 ### 14a. Cross-branch type-sync audit (PR14, task 14.8)
 

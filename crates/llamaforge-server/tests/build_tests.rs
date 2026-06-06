@@ -201,3 +201,29 @@ async fn build_phase_timeout_fails_with_message() {
     }
     assert!(matches!(events.last(), Some(BuildEvent::Failed(_))));
 }
+
+#[tokio::test]
+async fn build_fails_fast_when_a_prerequisite_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = dir.path().join("work");
+    let install = dir.path().join("install");
+    fs::create_dir_all(&work).unwrap();
+
+    // cmake is a valid mock; git points at a path that does not exist.
+    let mut cmds = commands(dir.path(), MOCK_GIT, MOCK_CMAKE);
+    cmds.git = dir.path().join("definitely-not-git");
+
+    let (outcome, events) =
+        run(&work, &install, &cmds, PhaseTimeouts::default(), CancellationToken::new(), None).await;
+
+    let failed = match outcome {
+        BuildOutcome::Failed(f) => f,
+        other => panic!("expected failure, got {other:?}"),
+    };
+    assert_eq!(failed.phase, BuildPhase::Cloning);
+    assert!(failed.error.contains("git"), "error should name the missing tool: {}", failed.error);
+    assert!(failed.error.contains("prerequisite"));
+    // The build short-circuited: nothing was cloned and the only terminal event is Failed.
+    assert!(!work.join("llama.cpp").exists());
+    assert!(matches!(events.last(), Some(BuildEvent::Failed(_))));
+}

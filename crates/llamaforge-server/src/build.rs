@@ -197,6 +197,34 @@ pub fn available_disk_gb(path: &Path) -> Option<u64> {
 // Orchestration.
 // ---------------------------------------------------------------------------
 
+/// Whether `program` resolves to an existing file. An explicit/injected path is
+/// checked directly; a bare command name is searched on `PATH`. Resolves rather
+/// than executes, so injected test doubles and the real toolchain both work.
+fn tool_on_path(program: &Path) -> bool {
+    if program.is_absolute() || program.components().count() > 1 {
+        return program.exists();
+    }
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(program).exists()))
+        .unwrap_or(false)
+}
+
+/// Required build tools that are not installed (Open Question #5 / issue #279).
+/// Checked before the clone so a missing `git`/`cmake` yields a clear, actionable
+/// error instead of a cryptic spawn failure partway through the build. The C++
+/// compiler is not probed directly — `cmake` validates it during configure, now
+/// with a clearer error since `cmake` itself is confirmed present.
+fn missing_prerequisites(commands: &BuildCommands) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if !tool_on_path(&commands.git) {
+        missing.push("git");
+    }
+    if !tool_on_path(&commands.cmake) {
+        missing.push("cmake");
+    }
+    missing
+}
+
 /// Run the full build pipeline (clone → configure → build → install) in
 /// `work_dir`, emitting events to `events` and honouring `cancel`. Returns the
 /// terminal [`BuildOutcome`]; the matching terminal `BuildEvent` is also sent.
@@ -211,6 +239,24 @@ pub async fn run_build(
     let started = Instant::now();
     let jobs = effective_jobs(request.jobs);
     let source_dir = work_dir.join("llama.cpp");
+
+    // --- Prerequisites (issue #279) ---
+    let missing = missing_prerequisites(commands);
+    if !missing.is_empty() {
+        let failed = BuildFailed {
+            phase: BuildPhase::Cloning,
+            error: format!(
+                "Missing build prerequisite(s): {}. Install them and retry — macOS: \
+                 `xcode-select --install` then `brew install cmake`; Debian/Ubuntu: \
+                 `sudo apt install git cmake build-essential`; Fedora: \
+                 `sudo dnf install git cmake gcc-c++`.",
+                missing.join(", ")
+            ),
+            last_lines: Vec::new(),
+            log_path: None,
+        };
+        return finish(Terminal::Failed(failed), &events).await;
+    }
 
     // --- Clone ---
     let clone_msg = format!("Cloning llama.cpp (effective jobs: {jobs})...");
