@@ -1331,7 +1331,7 @@ _All five resolved during implementation (Phase 1–4). Each was implemented as 
 
 `ui/src/lib/api/types.ts` (frontend, `frontend`/`main`) was audited against the backend response structs (`main`). They are in sync on the **flat** `Versioned<T>` envelope: every `/api/setup/*` response serializes as `{ "version": 1, ...fields }`, and the TS types model that inner shape directly.
 
-> **Doc correction:** the "Appendix: New TypeScript Types" below originally showed a *nested* `SetupApiResponse<T> { version, data }` envelope, which never matched the shipped flat envelope. The **envelope type has been corrected** to the flat `Versioned<T> = T & { version: 1 }`. The rest of that appendix still predates the implementation and should be regenerated wholesale — the **source of truth** for the contract is the backend structs plus the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12), each annotated `// pins ui types.ts: <Type>`. Full appendix regeneration is a tracked follow-up, out of scope for this PR.
+> **Doc correction (resolved #276).** The "Appendix: New TypeScript Types" below originally duplicated the wizard types inline — starting from a *nested* `SetupApiResponse<T> { version, data }` envelope that never matched the shipped flat one, and drifting elsewhere. Rather than maintain a copy that re-drifts, the appendix now **points to the source of truth**: `ui/src/lib/api/types.ts` + `queries.ts` for the types, and the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12, each annotated `// pins ui types.ts: <Type>`) for the JSON contract.
 
 ---
 
@@ -1383,135 +1383,26 @@ _All five resolved during implementation (Phase 1–4). Each was implemented as 
 
 ## Appendix: New TypeScript Types
 
-```typescript
-// $lib/api/types.ts additions
+These types are **not duplicated here** — a hand-maintained copy drifts from the
+implementation (as the original nested-`{version, data}` version of this appendix
+did). The source of truth is:
 
-/**
- * All /api/setup/* responses use a FLAT version envelope: `version` sits
- * alongside the payload fields, NOT nested under `data`. (Corrected to match the
- * shipped backend `Versioned<T>` — see §14a. The rest of this appendix predates
- * implementation and should be regenerated from the PR12 contract tests.)
- */
-export type Versioned<T> = T & { version: 1 };
+- **`ui/src/lib/api/types.ts`** — the shipped setup types (`HardwareInfo`,
+  `GpuInfo`, `CpuInfo`, `BinaryScanResult`, `DiscoveredModel`, `ModelScanResult`,
+  `ConfigRecommendation`, `ServerRecommendation`, `RecommendationResult`,
+  `ServerConfigDraft`, `SaveConfigRequest`, `BuildStatus`, `WizardStep`, …).
+- **`ui/src/lib/api/queries.ts`** — the response interfaces
+  (`PreviewConfigResponse`, `SaveConfigResponse`, `ValidateLaunchResponse`,
+  `SetupStatus`).
+- **`crates/llamaforge-api/tests/contract_tests.rs`** (PR12) — pins the JSON shape
+  (field names, types, nesting) of every `/api/setup/*` response against those TS
+  types; each test carries a `// pins ui types.ts: <Type>` annotation, giving a
+  greppable backend↔frontend map. The build SSE event shapes and the error
+  envelope are pinned there too.
 
-// --- Hardware Detection ---
-export interface GpuInfo {
-  index: number;
-  name: string;
-  vram_mb: number;
-}
-
-export interface CpuInfo {
-  name: string;
-  cores_physical: number;
-  cores_logical: number;
-}
-
-export interface HardwareInfo {
-  gpus: GpuInfo[];
-  cpu: CpuInfo;
-  ram_mb: number;
-  recommended_backend: 'cuda' | 'metal' | 'vulkan' | 'cpu';
-}
-
-// --- Binary Scanner ---
-export type BinaryScanResult =
-  | { found: true; path: string; binary_version: string; backends: string[] }
-  | { found: false; searched_paths: string[] };
-
-// --- Model Scanner ---
-export interface ModelScanRequest {
-  source: 'local';
-  directories: string[];
-  max_depth?: number;    // default 5
-  max_results?: number;  // default 100
-}
-
-export interface DiscoveredModel {
-  id: string;
-  path: string;
-  filename: string;
-  size_bytes: number;
-  quantization_hint: string;
-  architecture_hint: string;
-  modified: string;
-}
-
-export interface ModelScanResult {
-  models: DiscoveredModel[];
-  scan_duration_ms: number;
-  files_scanned: number;
-  truncated: boolean;
-  truncation_reason: 'timeout' | 'max_results' | 'max_depth' | null;
-  warnings: string[];
-}
-
-// --- Build ---
-export type BuildPhase = 'cloning' | 'configuring' | 'building';
-export type BuildBackend = 'cuda' | 'metal' | 'vulkan' | 'cpu';
-
-export type BuildStatus =
-  | { status: 'idle' }
-  | { status: 'running'; build_id: string; phase: BuildPhase; percent: number | null; logLines: string[] }
-  | { status: 'complete'; build_id: string; binary_path: string; duration_secs: number; log_path?: string; replaced_existing?: boolean; backup_path?: string | null }
-  | { status: 'failed'; build_id: string; phase: BuildPhase; error: string; lastLines: string[]; log_path?: string }
-  | { status: 'cancelled'; build_id: string };
-
-// --- Config Recommendation ---
-export interface RecommendationRequest {
-  models: Array<{ path: string; size_bytes: number }>;
-}
-
-export interface ConfigRecommendation {
-  gpu_layers: number;
-  ctx_size: number;
-  parallel_slots: number;
-  cache_type_k: string;
-  cache_type_v: string;
-  flash_attn: string;
-  estimated_vram_mb: number;
-  port: number;
-}
-
-export interface ServerRecommendation {
-  model_path: string;
-  recommended: ConfigRecommendation;
-  rationale: Record<string, string>;
-}
-
-export interface RecommendationResult {
-  servers: ServerRecommendation[];
-  warnings: string[];
-}
-
-// --- Save Config ---
-export interface SaveConfigRequest {
-  path: string;
-  force: boolean;
-  servers: ServerConfigDraft[];
-  global_overrides?: {
-    bind_address?: string;
-    http_port?: number;
-  };
-}
-
-// --- Wizard State ---
-export type WizardStep = 'welcome' | 'hardware' | 'binary' | 'models' | 'configure' | 'review';
-
-export interface ServerConfigDraft {
-  model_path: string;
-  alias: string;
-  binary_path: string;
-  port: number;
-  gpu_layers: number;
-  parallel_slots: number;
-  ctx_size: number;
-  cache_type_k: string;
-  cache_type_v: string;
-  flash_attn: string;
-  estimated_vram_mb: number;
-}
-```
+All `/api/setup/*` responses use the **flat** version envelope
+`Versioned<T> = T & { version: 1 }` — `version` alongside the payload fields, not
+nested under `data`.
 
 ---
 
