@@ -951,6 +951,12 @@ mod tests {
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {
             Ok(())
         }
+        async fn restart_server(
+            &self,
+            _id: &ServerId,
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
+            Ok(())
+        }
     }
 
     struct MockQueueSubmitter;

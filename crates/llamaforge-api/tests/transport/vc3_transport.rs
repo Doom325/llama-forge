@@ -489,6 +489,9 @@ async fn test_vc3_10_management_api_round_trip() {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
+        async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
     }
 
     let sc = Arc::new(MockServerControlImpl);

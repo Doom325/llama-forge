@@ -91,6 +91,7 @@ POST /v1/messages            → anthropic_messages_handler
 GET  /api/servers            → list_servers
 POST /api/servers/{id}/start → start_server
 POST /api/servers/{id}/stop  → stop_server
+POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
 GET  /api/queue              → queue_status
 DELETE /api/queue/{id}       → cancel_request
 POST /api/config/reload      → reload_config
