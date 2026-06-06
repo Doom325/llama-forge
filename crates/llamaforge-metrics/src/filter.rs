@@ -79,6 +79,11 @@ pub struct RequestMetricsSummary {
     pub latency_p50_ms: Option<f64>,
     pub latency_p90_ms: Option<f64>,
     pub latency_p99_ms: Option<f64>,
+    /// Fraction (0.0–1.0) of sampled requests that ended in a server-side
+    /// error — `Failed` or `Timeout`. Client `Cancelled` and scheduler
+    /// `Evicted`/in-flight states are not counted as errors. `0.0` for an
+    /// empty window.
+    pub error_rate: f64,
 }
 
 /// Summarise a window of request records into a [`RequestMetricsSummary`].
@@ -107,11 +112,18 @@ pub fn summarize_request_metrics(records: &[RequestMetrics]) -> RequestMetricsSu
         _ => 1.0,
     };
 
+    let errors = records
+        .iter()
+        .filter(|r| matches!(r.status, RequestStatus::Failed | RequestStatus::Timeout))
+        .count();
+    let error_rate = errors as f64 / records.len() as f64;
+
     RequestMetricsSummary {
         throughput_total: total_completion as f64 / span_secs,
         latency_p50_ms: pct(0.50),
         latency_p90_ms: pct(0.90),
         latency_p99_ms: pct(0.99),
+        error_rate,
     }
 }
 
@@ -190,5 +202,21 @@ mod tests {
         assert_eq!(s.latency_p50_ms, Some(60.0));
         assert_eq!(s.latency_p90_ms, Some(100.0));
         assert_eq!(s.latency_p99_ms, Some(100.0));
+        // All ten records are `Completed`, so the window has no errors.
+        assert_eq!(s.error_rate, 0.0);
+    }
+
+    #[test]
+    fn summarize_error_rate_counts_only_server_side_errors() {
+        // 10 records: 2 Failed + 1 Timeout (server-side errors), 1 Cancelled and
+        // 1 Evicted (not errors), 5 Completed → 3/10 = 0.3.
+        let mut recs: Vec<_> = (0..10).map(|i| mk(100, 10.0, i as i64)).collect();
+        recs[0].status = RequestStatus::Failed;
+        recs[1].status = RequestStatus::Failed;
+        recs[2].status = RequestStatus::Timeout;
+        recs[3].status = RequestStatus::Cancelled;
+        recs[4].status = RequestStatus::Evicted;
+        let s = summarize_request_metrics(&recs);
+        assert_eq!(s.error_rate, 0.3);
     }
 }

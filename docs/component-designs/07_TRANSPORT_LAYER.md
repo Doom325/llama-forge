@@ -89,6 +89,8 @@ POST /v1/messages            → anthropic_messages_handler
 
 // Management API
 GET  /api/servers            → list_servers
+GET  /api/servers/{id}       → get_server          // single ServerState (404 if unknown)
+GET  /api/servers/{id}/metrics → server_metrics    // ServerMetricsSummary {throughput, latency, errorRate, slots}
 POST /api/servers/{id}/start → start_server
 POST /api/servers/{id}/stop  → stop_server
 POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
@@ -110,8 +112,22 @@ the `ServerState` shape `{id, name, status, uptime}` (resolved #292), where
 `status` is the UI's lowercase `ServerStatus` vocabulary mapped from
 `ServerLifecycle` (`Running→running`, `Starting→pending`, `Draining→degraded`,
 `Restarting→restarting`, `Stopped→stopped`, `Failed→failed`) — never the `Debug`
-rendering of the enum, which the dashboard's `StatusBadge` cannot key off. Per-server
-slot/throughput detail is exposed separately on `GET /api/servers/{id}/metrics`.
+rendering of the enum, which the dashboard's `StatusBadge` cannot key off.
+`GET /api/servers/{id}` returns that same `ServerState` for one server (404
+`not_found` when the id is unknown).
+
+Per-server slot/throughput detail is exposed separately on
+`GET /api/servers/{id}/metrics`, which returns the frontend `ServerMetricsSummary`
+shape `{throughput, latency:{p50,p90,p99}, errorRate, slots:{total,idle,processing,loading}}`:
+- `throughput`/`latency`/`errorRate` come from the request-metrics store filtered
+  to that `server_id` (latency percentiles default to `0` when there are no
+  samples, since the frontend field is non-optional; `errorRate` is the fraction
+  of sampled requests that ended `Failed`/`Timeout`).
+- `slots` is projected from the live `ServerSummary`: `total=slots_total`,
+  `processing=slots_busy`, `idle=slots_total−slots_busy` (saturating).
+- **Known limitation:** `slots.loading` is always `0` — `ServerSummary` carries
+  no per-slot model-loading signal yet. When a slot-level state is added to the
+  summary, populate `loading` from it.
 
 ### 2.4 Protocol Translation Types
 
