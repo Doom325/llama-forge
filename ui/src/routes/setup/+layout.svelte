@@ -18,8 +18,13 @@
 
 	let { children }: { children: Snippet } = $props();
 
-	// One store per wizard session, provided to all steps via context.
-	const store = new SetupWizardStore(crypto.randomUUID());
+	// One store per wizard session, provided to all steps via context. The
+	// reconfigure flow (Flow 4) is entered from the running app via
+	// `/ui/setup?reconfigure=1`; the flag is read once and held for the session.
+	const store = new SetupWizardStore(
+		crypto.randomUUID(),
+		page.url.searchParams.get('reconfigure') === '1'
+	);
 	provideSetupStore(store);
 
 	const STEP_LABELS: Record<WizardStep, string> = {

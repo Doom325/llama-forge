@@ -9,6 +9,18 @@ export default defineConfig({
 	// Emit .vite/manifest.json so the bundle-size CI check (PR14) can map routes
 	// to chunks and enforce per-route budgets.
 	build: { manifest: true },
+	// Dev-only proxy so `npm run dev` on :5173 can reach the orchestrator on
+	// :8000. The API client uses absolute paths (`/api/...`, `/v1/...`); SSE
+	// lives at `/api/events` and is caught by the `/api` rule. This block is
+	// ignored by `vite build` — in production the Rust transport serves the UI
+	// and API from the same origin, so no CSP `connect-src` adjustment is
+	// needed there.
+	server: {
+		proxy: {
+			'/api': { target: 'http://localhost:8000', changeOrigin: true, ws: true },
+			'/v1': { target: 'http://localhost:8000', changeOrigin: true }
+		}
+	},
 	test: {
 		expect: { requireAssertions: true },
 		environment: 'jsdom',

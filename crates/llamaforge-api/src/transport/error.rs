@@ -22,6 +22,10 @@ pub enum ApiError {
     AuthFailure,
     #[error("Model not found")]
     ModelNotFound,
+    /// Surface as `404 Not Found`. Used for management lookups of a specific
+    /// entity by id (e.g. `GET /api/servers/{id}` for an unknown server).
+    #[error("Not found: {0}")]
+    NotFound(String),
     #[error("Queue full")]
     QueueFull { retry_after_secs: u32 },
     #[error("Backend error")]
@@ -110,6 +114,7 @@ impl IntoResponse for ApiError {
             ApiError::ModelNotFound => {
                 (StatusCode::NOT_FOUND, "model_not_found", "Model not found".to_string())
             }
+            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.clone()),
             ApiError::QueueFull { .. } => {
                 (StatusCode::TOO_MANY_REQUESTS, "queue_full", "Queue is full".to_string())
             }
@@ -166,6 +171,7 @@ impl From<ApiError> for tonic::Status {
             ApiError::InvalidBody(msg) => tonic::Status::invalid_argument(msg),
             ApiError::AuthFailure => tonic::Status::unauthenticated("Authentication failed"),
             ApiError::ModelNotFound => tonic::Status::not_found("Model not found"),
+            ApiError::NotFound(msg) => tonic::Status::not_found(msg),
             ApiError::QueueFull { .. } => tonic::Status::resource_exhausted("Queue is full"),
             ApiError::BackendError => tonic::Status::internal("Backend error"),
             ApiError::Timeout => tonic::Status::deadline_exceeded("Request timed out"),

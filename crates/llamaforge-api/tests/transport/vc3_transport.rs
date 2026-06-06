@@ -489,6 +489,9 @@ async fn test_vc3_10_management_api_round_trip() {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
+        async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
     }
 
     let sc = Arc::new(MockServerControlImpl);
@@ -506,11 +509,15 @@ async fn test_vc3_10_management_api_round_trip() {
     assert_eq!(servers.len(), 1);
     let srv = &servers[0];
 
+    // DTO matches the frontend `ServerState` contract (#292): {id, name, status,
+    // uptime}, status in the lowercase `ServerStatus` vocabulary (not Debug).
     assert!(srv.get("id").is_some(), "missing id");
-    assert!(srv.get("model").is_some(), "missing model");
-    assert!(srv.get("state").is_some(), "missing state");
-    assert!(srv.get("slots_total").is_some(), "missing slots_total");
-    assert!(srv.get("slots_busy").is_some(), "missing slots_busy");
+    assert_eq!(srv["name"], "test_model", "name should be the model alias");
+    assert_eq!(srv["status"], "running", "status should be lowercase-mapped, not Debug");
+    assert_eq!(srv["uptime"], 0, "uptime is 0 when started_at is None");
+    assert!(srv.get("model").is_none(), "pre-#292 'model' key removed");
+    assert!(srv.get("state").is_none(), "pre-#292 'state' key removed");
+    assert!(srv.get("slots_total").is_none(), "slots moved to /api/servers/{{id}}/metrics");
     assert!(srv.get("port").is_none(), "port should not be exposed in DTO");
 
     // Start server (mutating /api/* requires the CSRF header, as the UI sends).
@@ -534,6 +541,15 @@ async fn test_vc3_10_management_api_round_trip() {
     // Queue status
     let res = client.get(http_url(&handles, "/api/queue")).send().await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    // Metrics summary (#291): the dashboard hits /api/metrics/summary (not the
+    // old /api/metrics). Empty store → throughput 0, latency omitted (the optional
+    // frontend field), matching the `AggregatedMetrics` TS shape.
+    let res = client.get(http_url(&handles, "/api/metrics/summary")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let summary: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(summary["throughput_total"], 0.0);
+    assert!(summary.get("latency").is_none(), "latency omitted when there are no samples");
 }
 
 #[tokio::test]

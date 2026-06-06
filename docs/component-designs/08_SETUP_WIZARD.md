@@ -1304,19 +1304,34 @@ The setup endpoints remain mounted in `Running` mode to support the reconfigure 
 
 The reconfigure flow does not change the mode to `Setup`. It operates entirely within `Running` mode -- the existing config remains active while the user configures new servers. The save-config endpoint in reconfigure mode merges new server entries into the existing config rather than replacing it (see Open Question #4 in Section 14).
 
+> **Resolved (#273/#282 + #284).** `save-config` pre-validation now exempts ports already held by the **active** running config from the `is_port_available` probe (`active_config_ports`, #273/#282), so a running-mode reconfigure that re-submits an active server no longer 422s on its own in-use ports; genuinely-new ports are still checked. The reconfigure flow is wired into the frontend (#284): the Servers config page links to `/ui/setup?reconfigure=1`, the wizard sends `X-Setup-Reconfigure` on every setup call, and the Review step force-overwrites so the config merges.
+
 ---
 
 ## 14. Open Questions
 
+_All five resolved during implementation (Phase 1–4). Each was implemented as the original recommendation except #2 and #5, which shipped a narrower v1 behavior — noted inline._
+
 1. **GGUF header parser timeline.** The `sync_parse` function in `vram_estimate.rs` is stubbed. Model scanning currently infers metadata from filenames. Should we implement the real GGUF KV header parser as part of this feature, or ship with filename heuristics first? (Recommendation: filename heuristics for v1, real parser as fast-follow.)
+   - **Resolved (PR2, parser completed in #277) as recommended:** filename heuristics shipped first (`model_scanner.rs::quantization_hint`) for the wizard's model list; the real GGUF KV-header parser is now implemented (`vram_estimate.rs::sync_parse`) and feeds the runtime VRAM admission path (`task.rs` → `compute_vram_estimate`) with the model's true architecture/geometry, falling back to the `estimated_vram_mb` override when a header is unreadable. The scanner list still uses the fast filename hints (no per-file header read); enriching those from the parser is a tracked follow-up.
 
 2. **Build directory cleanup.** After a successful build, should the cloned llama.cpp source be deleted, or kept for future rebuilds? Keeping it allows `git pull && rebuild` for updates; deleting it saves disk space. (Recommendation: keep it in `$XDG_DATA_HOME/llamaforge/llama.cpp/`, with a "Clean up build files" option in the wizard completion screen.)
+   - **Resolved (PR6) — narrower than recommended:** v1 builds in a temp directory that is removed after the binary is copied to `install_dir` (favoring disk hygiene; see §11.5). Preserving the source for `git pull && rebuild` is a tracked future enhancement.
 
 3. **Multi-GPU support.** The recommendation engine needs to handle multi-GPU systems (e.g., 2× RTX 3090). Should it recommend splitting models across GPUs, or assign one model per GPU? (Recommendation: one model per GPU for v1 — multi-GPU tensor parallelism is a llama.cpp-level feature that's complex to configure.)
+   - **Resolved (PR4) as recommended:** the recommendation engine assigns one model per GPU for v1; tensor-parallel split is out of scope.
 
 4. **Existing config preservation.** In "reconfigure" mode (Flow 4), should the wizard merge new servers into the existing config, or replace the entire config? (Recommendation: merge — add new `[servers.*]` entries, preserve existing global settings and priority rules.)
+   - **Resolved (PR5/PR7) as recommended:** reconfigure merges new `[servers.*]` entries while preserving global settings + priority rules; it stays in `Running` mode (§13.8).
 
 5. **Build prerequisites check.** Before attempting the build, should the wizard verify that `git`, `cmake`, and a C++ compiler are installed? (Recommendation: yes — check prerequisites first and show a clear "Install these first" message with platform-specific instructions rather than letting cmake fail with cryptic errors.)
+   - **Resolved (PR6, completed in #283) as recommended:** `run_build` pre-flight-checks that `git` and `cmake` are present *before* cloning and fails fast with a `failed` event carrying a platform-specific install message (macOS / Debian-Ubuntu / Fedora). The C++ compiler is not probed separately — `cmake` validates it during configure, now with a clearer error since `cmake` itself is confirmed present.
+
+### 14a. Cross-branch type-sync audit (PR14, task 14.8)
+
+`ui/src/lib/api/types.ts` (frontend, `frontend`/`main`) was audited against the backend response structs (`main`). They are in sync on the **flat** `Versioned<T>` envelope: every `/api/setup/*` response serializes as `{ "version": 1, ...fields }`, and the TS types model that inner shape directly.
+
+> **Doc correction (resolved #276).** The "Appendix: New TypeScript Types" below originally duplicated the wizard types inline — starting from a *nested* `SetupApiResponse<T> { version, data }` envelope that never matched the shipped flat one, and drifting elsewhere. Rather than maintain a copy that re-drifts, the appendix now **points to the source of truth**: `ui/src/lib/api/types.ts` + `queries.ts` for the types, and the shape-pinning contract tests in `crates/llamaforge-api/tests/contract_tests.rs` (PR12, each annotated `// pins ui types.ts: <Type>`) for the JSON contract.
 
 ---
 
@@ -1358,138 +1373,36 @@ The reconfigure flow does not change the mode to `Setup`. It operates entirely w
 | Step navigation | Linear with back-navigation + completed-step click | Simple mental model; prerequisite data always available | 2026-06-03 |
 | TOML preview rendering | `renderMarkdown()` with code block | No `{@html}`; consistent with existing security convention | 2026-06-03 |
 | Build log streaming | SSE via `EventSource` | Same pattern as main UI's `LiveDataStore`; native browser API | 2026-06-03 |
+| Setup API envelope | **Flat** `Versioned<T>` (`{version, ...fields}`) | Matches the existing typed-response convention; simpler TS types than a nested `{version, data}` wrapper | 2026-06-05 |
+| Setup→running transition | Hot-reload via `ArcSwap` (`ConfigHandle::reload`), no process restart | The wizard writes the config and the running process picks it up in place (§13.5); a restart would drop the HTTP/gRPC listeners mid-setup | 2026-06-05 |
+| Build cancellation | Spawn the build in its own process group; cancel/SIGINT kills the whole tree | Prevents orphaned `git`/`cmake`/compiler children on Ctrl-C (exit 130) | 2026-06-05 |
+| Contract typing (backend↔frontend) | Shape-pinning contract tests annotated `// pins ui types.ts: <Type>`, not `ts-rs` | Pins field names/types/nesting without a build-time codegen dependency; the setup types are small and stable | 2026-06-05 |
+| Wizard step guards | Derive `canAdvance` from the TanStack cache via a `cacheVersion` counter bumped on `type==='updated'` events | `getQueryData()` is not a Svelte-reactive source; subscribing to all cache events instead loops (`effect_update_depth_exceeded`) | 2026-06-05 |
 
 ---
 
 ## Appendix: New TypeScript Types
 
-```typescript
-// $lib/api/types.ts additions
+These types are **not duplicated here** — a hand-maintained copy drifts from the
+implementation (as the original nested-`{version, data}` version of this appendix
+did). The source of truth is:
 
-/** All /api/setup/* responses include this envelope. */
-export interface SetupApiResponse<T> {
-  version: 1;
-  data: T;
-}
+- **`ui/src/lib/api/types.ts`** — the shipped setup types (`HardwareInfo`,
+  `GpuInfo`, `CpuInfo`, `BinaryScanResult`, `DiscoveredModel`, `ModelScanResult`,
+  `ConfigRecommendation`, `ServerRecommendation`, `RecommendationResult`,
+  `ServerConfigDraft`, `SaveConfigRequest`, `BuildStatus`, `WizardStep`, …).
+- **`ui/src/lib/api/queries.ts`** — the response interfaces
+  (`PreviewConfigResponse`, `SaveConfigResponse`, `ValidateLaunchResponse`,
+  `SetupStatus`).
+- **`crates/llamaforge-api/tests/contract_tests.rs`** (PR12) — pins the JSON shape
+  (field names, types, nesting) of every `/api/setup/*` response against those TS
+  types; each test carries a `// pins ui types.ts: <Type>` annotation, giving a
+  greppable backend↔frontend map. The build SSE event shapes and the error
+  envelope are pinned there too.
 
-// --- Hardware Detection ---
-export interface GpuInfo {
-  index: number;
-  name: string;
-  vram_mb: number;
-}
-
-export interface CpuInfo {
-  name: string;
-  cores_physical: number;
-  cores_logical: number;
-}
-
-export interface HardwareInfo {
-  gpus: GpuInfo[];
-  cpu: CpuInfo;
-  ram_mb: number;
-  recommended_backend: 'cuda' | 'metal' | 'vulkan' | 'cpu';
-}
-
-// --- Binary Scanner ---
-export type BinaryScanResult =
-  | { found: true; path: string; binary_version: string; backends: string[] }
-  | { found: false; searched_paths: string[] };
-
-// --- Model Scanner ---
-export interface ModelScanRequest {
-  source: 'local';
-  directories: string[];
-  max_depth?: number;    // default 5
-  max_results?: number;  // default 100
-}
-
-export interface DiscoveredModel {
-  id: string;
-  path: string;
-  filename: string;
-  size_bytes: number;
-  quantization_hint: string;
-  architecture_hint: string;
-  modified: string;
-}
-
-export interface ModelScanResult {
-  models: DiscoveredModel[];
-  scan_duration_ms: number;
-  files_scanned: number;
-  truncated: boolean;
-  truncation_reason: 'timeout' | 'max_results' | 'max_depth' | null;
-  warnings: string[];
-}
-
-// --- Build ---
-export type BuildPhase = 'cloning' | 'configuring' | 'building';
-export type BuildBackend = 'cuda' | 'metal' | 'vulkan' | 'cpu';
-
-export type BuildStatus =
-  | { status: 'idle' }
-  | { status: 'running'; build_id: string; phase: BuildPhase; percent: number | null; logLines: string[] }
-  | { status: 'complete'; build_id: string; binary_path: string; duration_secs: number; log_path?: string; replaced_existing?: boolean; backup_path?: string | null }
-  | { status: 'failed'; build_id: string; phase: BuildPhase; error: string; lastLines: string[]; log_path?: string }
-  | { status: 'cancelled'; build_id: string };
-
-// --- Config Recommendation ---
-export interface RecommendationRequest {
-  models: Array<{ path: string; size_bytes: number }>;
-}
-
-export interface ConfigRecommendation {
-  gpu_layers: number;
-  ctx_size: number;
-  parallel_slots: number;
-  cache_type_k: string;
-  cache_type_v: string;
-  flash_attn: string;
-  estimated_vram_mb: number;
-  port: number;
-}
-
-export interface ServerRecommendation {
-  model_path: string;
-  recommended: ConfigRecommendation;
-  rationale: Record<string, string>;
-}
-
-export interface RecommendationResult {
-  servers: ServerRecommendation[];
-  warnings: string[];
-}
-
-// --- Save Config ---
-export interface SaveConfigRequest {
-  path: string;
-  force: boolean;
-  servers: ServerConfigDraft[];
-  global_overrides?: {
-    bind_address?: string;
-    http_port?: number;
-  };
-}
-
-// --- Wizard State ---
-export type WizardStep = 'welcome' | 'hardware' | 'binary' | 'models' | 'configure' | 'review';
-
-export interface ServerConfigDraft {
-  model_path: string;
-  alias: string;
-  binary_path: string;
-  port: number;
-  gpu_layers: number;
-  parallel_slots: number;
-  ctx_size: number;
-  cache_type_k: string;
-  cache_type_v: string;
-  flash_attn: string;
-  estimated_vram_mb: number;
-}
-```
+All `/api/setup/*` responses use the **flat** version envelope
+`Versioned<T> = T & { version: 1 }` — `version` alongside the payload fields, not
+nested under `data`.
 
 ---
 
@@ -1528,7 +1441,7 @@ Search `$PATH` plus common install locations (`/usr/local/bin`, `/opt/homebrew/b
 
 ### Model Scanner
 
-Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). If the GGUF header parser is implemented by then (currently stubbed), use it for selected files.
+Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). The GGUF header parser is now implemented (#277, `vram_estimate.rs::sync_parse`) and feeds runtime VRAM admission (`task.rs`); enriching the scan-list hints from it for selected files is a tracked follow-up, kept off the scan path by design (per OQ#1).
 
 ### Build Process
 

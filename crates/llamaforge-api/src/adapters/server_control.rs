@@ -59,6 +59,23 @@ impl ServerControl for ServerControlAdapter {
             Err(e) => Err(ServerError::SpawnFailed { reason: e.to_string() }),
         }
     }
+
+    async fn restart_server(
+        &self,
+        id: &llamaforge_core::types::ServerId,
+    ) -> Result<(), ServerError> {
+        match self.manager.request_restart(id).await {
+            Ok(_) => Ok(()),
+            Err(llamaforge_server::ServerManagerError::ServerNotFound { id: _ }) => {
+                Err(ServerError::NotFound { id: *id })
+            }
+            Err(llamaforge_server::ServerManagerError::StartFailed { id: _, reason }) => {
+                Err(ServerError::SpawnFailed { reason })
+            }
+            // A drain/stop-phase failure isn't a spawn failure; keep the reason honest.
+            Err(e) => Err(ServerError::SpawnFailed { reason: format!("restart failed: {e}") }),
+        }
+    }
 }
 
 #[cfg(test)]

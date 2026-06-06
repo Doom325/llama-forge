@@ -10,7 +10,7 @@
 	import Skeleton from '$lib/components/shared/Skeleton.svelte';
 
 	const store = useSetupStore();
-	const scan = createModelScanMutation(store.sessionId);
+	const scan = createModelScanMutation(store.sessionId, store.reconfigure);
 
 	// Common model locations seeded on entry. The backend rejects an *empty*
 	// directory list (NoDirectories → 400) but silently skips ones that don't

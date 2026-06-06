@@ -5,7 +5,11 @@
 		status,
 		size = 'md',
 		customLabel
-	}: { status: ServerStatus; size?: 'sm' | 'md' | 'lg'; customLabel?: string } = $props();
+	}: {
+		status: ServerStatus | undefined;
+		size?: 'sm' | 'md' | 'lg';
+		customLabel?: string;
+	} = $props();
 
 	const statusConfig: Record<ServerStatus, { icon: string; label: string; colorClass: string }> = {
 		healthy: {
@@ -64,9 +68,18 @@
 		}
 	};
 
-	let config = $derived({
-		...statusConfig[status],
-		label: customLabel || statusConfig[status].label
+	// Degrade gracefully on an unexpected/undefined status (e.g. a backend shape
+	// drift) instead of throwing on `statusConfig[undefined].label` and aborting
+	// the whole reactive render. Still triple-redundant: icon + text + color.
+	const fallback = {
+		icon: '?',
+		label: 'Unknown',
+		colorClass:
+			'text-[var(--color-text-secondary)] bg-[var(--color-text-secondary)]/10 border-[var(--color-text-secondary)]/20'
+	};
+	let config = $derived.by(() => {
+		const base = (status && statusConfig[status]) || fallback;
+		return { ...base, label: customLabel || base.label };
 	});
 
 	let sizeClasses = $derived(

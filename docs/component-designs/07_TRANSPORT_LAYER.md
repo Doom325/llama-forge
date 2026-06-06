@@ -89,17 +89,54 @@ POST /v1/messages            → anthropic_messages_handler
 
 // Management API
 GET  /api/servers            → list_servers
+GET  /api/servers/{id}       → get_server          // single ServerState (404 if unknown)
+GET  /api/servers/{id}/metrics → server_metrics    // ServerMetricsSummary {throughput, latency, errorRate, slots}
 POST /api/servers/{id}/start → start_server
 POST /api/servers/{id}/stop  → stop_server
+POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
 GET  /api/queue              → queue_status
 DELETE /api/queue/{id}       → cancel_request
+GET  /api/requests           → query_requests      // explorer: RequestRecord[] projection
+POST /api/requests/{id}/cancel → cancel_request    // same QueueSubmitter::cancel as DELETE /api/queue/{id}
 POST /api/config/reload      → reload_config
 GET  /api/metrics/requests   → query_request_metrics
 GET  /api/metrics/aggregated → query_aggregated
+GET  /api/metrics/summary    → query_summary       // dashboard {throughput_total, latency}
 POST /api/maintenance/wal-checkpoint → wal_checkpoint
 GET  /health                 → health_check
 GET  /metrics                → prometheus_export
 ```
+
+**Management DTO contract.** Management responses are consumed by the web UI, so
+their JSON shapes are pinned to the frontend types in `FRONTEND_ARCHITECTURE.md`
+§5.2 — not to the internal Rust structs. In particular `GET /api/servers` returns
+the `ServerState` shape `{id, name, status, uptime}` (resolved #292), where
+`status` is the UI's lowercase `ServerStatus` vocabulary mapped from
+`ServerLifecycle` (`Running→running`, `Starting→pending`, `Draining→degraded`,
+`Restarting→restarting`, `Stopped→stopped`, `Failed→failed`) — never the `Debug`
+rendering of the enum, which the dashboard's `StatusBadge` cannot key off.
+`GET /api/servers/{id}` returns that same `ServerState` for one server (404
+`not_found` when the id is unknown).
+
+Per-server slot/throughput detail is exposed separately on
+`GET /api/servers/{id}/metrics`, which returns the frontend `ServerMetricsSummary`
+shape `{throughput, latency:{p50,p90,p99}, errorRate, slots:{total,idle,processing,loading}}`:
+- `throughput`/`latency`/`errorRate` come from the request-metrics store filtered
+  to that `server_id` (latency percentiles default to `0` when there are no
+  samples, since the frontend field is non-optional; `errorRate` is the fraction
+  of sampled requests that ended `Failed`/`Timeout`).
+- `slots` is projected from the live `ServerSummary`: `total=slots_total`,
+  `processing=slots_busy`, `idle=slots_total−slots_busy` (saturating).
+- **Known limitation:** `slots.loading` is always `0` — `ServerSummary` carries
+  no per-slot model-loading signal yet. When a slot-level state is added to the
+  summary, populate `loading` from it.
+
+`GET /api/requests` is the requests explorer and returns the trimmed
+`RequestRecord` shape `{id, timestamp, model, taskType, duration, status}` (a
+projection of `RequestMetrics` over the same filter/pagination query params as
+`/api/metrics/requests`, which by contrast returns the full raw record for
+analysis). `POST /api/requests/{id}/cancel` is the explorer's cancel action; it
+delegates to the same `QueueSubmitter::cancel` as `DELETE /api/queue/{id}`.
 
 ### 2.4 Protocol Translation Types
 

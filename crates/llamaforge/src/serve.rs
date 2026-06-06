@@ -86,7 +86,17 @@ pub async fn run_first_run(paths: ConfigPaths) -> anyhow::Result<()> {
     // Boot with an empty config backed by the (not-yet-existing) file source so
     // a later `reload()` reads the config the wizard writes.
     let file_source = Arc::new(TomlFileConfigSource::new(paths.clone()));
-    let config = Arc::new(ConfigHandle::with_initial_config(AppConfig::default(), file_source));
+    let mut initial = AppConfig::default();
+    // First-run has no config file to set the HTTP port, so it binds the default
+    // (8000). `LLAMAFORGE_HTTP_PORT` overrides it — lets tests/automation bind an
+    // ephemeral port instead of colliding on the fixed default (issue #281). The
+    // transport binds this once at startup; the later config reload doesn't rebind.
+    if let Some(port) =
+        std::env::var("LLAMAFORGE_HTTP_PORT").ok().and_then(|p| p.parse::<u16>().ok())
+    {
+        initial.global.http_port = port;
+    }
+    let config = Arc::new(ConfigHandle::with_initial_config(initial, file_source));
     let (deps, bg) = build::build(config.clone(), shutdown.clone()).await?;
 
     let server_manager = bg.server_manager.clone();

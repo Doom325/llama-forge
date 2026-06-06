@@ -18,9 +18,9 @@
 	import type { BuildPhase, BuildStatus, SetupBackend } from '$lib/api/types';
 
 	const store = useSetupStore();
-	const scan = createBinaryScanMutation(store.sessionId);
-	const build = createBuildMutation(store.sessionId);
-	const hw = createHardwareQuery(store.sessionId);
+	const scan = createBinaryScanMutation(store.sessionId, store.reconfigure);
+	const build = createBuildMutation(store.sessionId, store.reconfigure);
+	const hw = createHardwareQuery(store.sessionId, store.reconfigure);
 
 	let hasScanned = $state(false);
 	let manualPath = $state('');

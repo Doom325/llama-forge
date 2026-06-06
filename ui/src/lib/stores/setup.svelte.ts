@@ -39,9 +39,16 @@ export class SetupWizardStore {
 	savePath = $state<string>('');
 	/** Correlation id sent as `X-Setup-Session-Id` on every wizard API call. */
 	readonly sessionId: string;
+	/**
+	 * Reconfigure flow (Flow 4 / §13.8): the wizard was opened from the running
+	 * app to add servers, so setup calls must send `X-Setup-Reconfigure` and the
+	 * config save overwrites + merges the existing file.
+	 */
+	readonly reconfigure: boolean;
 
-	constructor(sessionId: string) {
+	constructor(sessionId: string, reconfigure = false) {
 		this.sessionId = sessionId;
+		this.reconfigure = reconfigure;
 	}
 }
 

@@ -685,16 +685,8 @@ pub(crate) async fn list_v1_servers<CW, RMS, SM>(
     let summaries =
         state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let dtos: Vec<super::management::ServerStatusResponse> = summaries
-        .into_iter()
-        .map(|s| super::management::ServerStatusResponse {
-            id: s.id.to_string(),
-            model: s.alias.into_inner().to_string(),
-            state: format!("{:?}", s.state),
-            slots_total: s.slots_total,
-            slots_busy: s.slots_busy,
-        })
-        .collect();
+    let dtos: Vec<super::management::ServerStatusResponse> =
+        summaries.into_iter().map(super::management::server_summary_to_dto).collect();
 
     Ok(axum::Json(dtos).into_response())
 }
@@ -954,6 +946,12 @@ mod tests {
             Ok(())
         }
         async fn stop_server(
+            &self,
+            _id: &ServerId,
+        ) -> Result<(), llamaforge_core::types::traits::ServerError> {
+            Ok(())
+        }
+        async fn restart_server(
             &self,
             _id: &ServerId,
         ) -> Result<(), llamaforge_core::types::traits::ServerError> {

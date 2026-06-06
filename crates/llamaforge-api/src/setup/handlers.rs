@@ -1,10 +1,10 @@
 //! Axum handlers for the `/api/setup/*` endpoints.
 
+use std::collections::HashSet;
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-
-use std::net::TcpListener;
 
 use axum::extract::{Json, Query, State};
 use axum::response::{IntoResponse, Response};
@@ -103,9 +103,10 @@ pub(super) async fn preview_config_handler(
     Json(request): Json<SaveConfigRequest>,
 ) -> Result<Versioned<PreviewResponse>, SetupError> {
     let existing = load_existing(Path::new(&request.path)).await;
+    let active_ports = active_config_ports(&existing);
     let config = assemble_config(existing, &request).map_err(SetupError::BadRequest)?;
 
-    let details = pre_validate(&config, &request).await;
+    let details = pre_validate(&config, &request, &active_ports).await;
     if !details.is_empty() {
         return Err(SetupError::PreValidation(details));
     }
@@ -132,10 +133,11 @@ pub(super) async fn save_config_handler(
 
     let path = PathBuf::from(&request.path);
     let existing = load_existing(&path).await;
+    let active_ports = active_config_ports(&existing);
     let config = assemble_config(existing, &request).map_err(SetupError::BadRequest)?;
 
     // Pre-validation (Section 13.5 Step 1): collect all failures and return 422.
-    let details = pre_validate(&config, &request).await;
+    let details = pre_validate(&config, &request, &active_ports).await;
     if !details.is_empty() {
         return Err(SetupError::PreValidation(details));
     }
@@ -289,13 +291,26 @@ pub(super) async fn validate_launch_handler(
 // Pre-validation (Section 13.5 Step 1).
 // ---------------------------------------------------------------------------
 
+/// Ports held by the currently-active config. In reconfigure mode the on-disk
+/// config IS the running instance's config, so its server ports are legitimately
+/// bound and must be exempt from the system port-availability probe — otherwise
+/// re-submitting an active server fails with "port already in use" (issue #273).
+fn active_config_ports(existing: &Option<AppConfig>) -> HashSet<u16> {
+    existing.iter().flat_map(|c| c.servers.values().map(|s| s.port)).collect()
+}
+
 /// Run the three pre-validation checks over the assembled config, collecting
 /// **all** failures (not short-circuiting) into `details`:
 /// 1. each server's `binary_path`/`model_path` resolves to an existing file;
-/// 2. each server's port is bindable (not already in use);
+/// 2. each server's port is bindable (not already in use), unless the port is
+///    already held by the active config (`active_ports`);
 /// 3. the config passes the core load-time validation pipeline (unique ports,
 ///    non-empty fields, `parallel_slots > 0` — design doc §11.6).
-async fn pre_validate(config: &AppConfig, request: &SaveConfigRequest) -> Vec<ValidationDetail> {
+async fn pre_validate(
+    config: &AppConfig,
+    request: &SaveConfigRequest,
+    active_ports: &HashSet<u16>,
+) -> Vec<ValidationDetail> {
     let mut details = Vec::new();
 
     for server in &request.servers {
@@ -311,7 +326,9 @@ async fn pre_validate(config: &AppConfig, request: &SaveConfigRequest) -> Vec<Va
                 error: format!("{} does not exist or is not a readable file", server.model_path),
             });
         }
-        if !is_port_available(server.port) {
+        // A port already held by the active config (reconfigure re-submitting an
+        // existing server) is not "in use" from the wizard's perspective.
+        if !active_ports.contains(&server.port) && !is_port_available(server.port) {
             details.push(ValidationDetail {
                 field: "port".to_string(),
                 error: format!("port {} is already in use", server.port),

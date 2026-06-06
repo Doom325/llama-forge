@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { mockApi } from './mocks/fixtures';
 import { mockSetupApi } from './mocks/setup-fixtures';
 
 const BASE = 'http://localhost:4173/ui';
@@ -108,6 +109,28 @@ test('hardware detection 500 → manual entry populates the hardware cache', asy
 
 	// applyManual writes ['setup','hardware'] → the cards re-render from the cache.
 	await expect(page.getByText('Manual GPU X')).toBeVisible();
+});
+
+// Reconfigure flow (#274 / Flow 4): the entry link on the Servers config page
+// opens the wizard in reconfigure mode, and setup calls then carry the
+// X-Setup-Reconfigure header the running-mode guard requires (§13.8).
+test('reconfigure entry opens the wizard and sends X-Setup-Reconfigure', async ({ page }) => {
+	await mockApi(page);
+	await mockSetupApi(page);
+	let reconfigureHeaderSeen = false;
+	page.on('request', (req) => {
+		if (req.url().includes('/api/setup/') && req.headers()['x-setup-reconfigure'] === 'true') {
+			reconfigureHeaderSeen = true;
+		}
+	});
+
+	await page.goto(`${BASE}/config/servers`);
+	await page.getByRole('link', { name: 'Add servers with the wizard' }).click();
+	await expect(page).toHaveURL(/\/setup\?reconfigure=1/);
+
+	await page.getByRole('button', { name: 'Start Setup' }).click();
+	await expect(page.getByText('NVIDIA RTX 4090')).toBeVisible({ timeout: 15_000 });
+	expect(reconfigureHeaderSeen, 'a /api/setup/* call carried X-Setup-Reconfigure').toBe(true);
 });
 
 async function runAxe(page: Page) {

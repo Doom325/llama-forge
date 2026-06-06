@@ -276,6 +276,12 @@ mod tests {
         ) -> Result<(), ServerError> {
             Ok(())
         }
+        async fn restart_server(
+            &self,
+            _id: &llamaforge_core::types::ServerId,
+        ) -> Result<(), ServerError> {
+            Ok(())
+        }
     }
 
     struct MockQueueSubmitter;

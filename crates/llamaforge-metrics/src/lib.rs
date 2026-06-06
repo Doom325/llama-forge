@@ -16,7 +16,10 @@ pub(crate) mod types;
 
 // Public API
 pub use error::{AuditSendError, StoreError};
-pub use filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
+pub use filter::{
+    summarize_request_metrics, AggregatedMetrics, EventFilter, GroupByField, MetricsFilter,
+    RequestMetricsSummary,
+};
 pub use ingest::{audit_drops, cmd_channel_drops, telemetry_drops, MetricsIngest};
 pub use instrumented::InstrumentedMetricsStore;
 pub use metrics_recording::{
