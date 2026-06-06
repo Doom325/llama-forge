@@ -255,53 +255,65 @@ export function prefetchExplorerNextPage(filters: Record<string, string>, curren
 // step state machine's `getQueryData` checks can read them.
 // ---------------------------------------------------------------------------
 
-function setupHeaders(sessionId: string): Record<string, string> {
-	return { 'X-Setup-Session-Id': sessionId };
+export function setupHeaders(sessionId: string, reconfigure: boolean): Record<string, string> {
+	const headers: Record<string, string> = { 'X-Setup-Session-Id': sessionId };
+	// In running mode the setup endpoints are gated behind this header (§13.8);
+	// the wizard sends it for the reconfigure flow (Flow 4).
+	if (reconfigure) {
+		headers['X-Setup-Reconfigure'] = 'true';
+	}
+	return headers;
 }
 
-export function createHardwareQuery(sessionId: string, enabled: () => boolean = () => true) {
+export function createHardwareQuery(
+	sessionId: string,
+	reconfigure: boolean,
+	enabled: () => boolean = () => true
+) {
 	return createQuery(() => ({
 		queryKey: ['setup', 'hardware'],
 		queryFn: () =>
-			apiFetch<HardwareInfo>('/api/setup/hardware', { headers: setupHeaders(sessionId) }),
+			apiFetch<HardwareInfo>('/api/setup/hardware', {
+				headers: setupHeaders(sessionId, reconfigure)
+			}),
 		enabled: enabled(),
 		staleTime: Infinity,
 		retry: false
 	}));
 }
 
-export function createBinaryScanMutation(sessionId: string) {
+export function createBinaryScanMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		// `BinaryScanRequest.extra_paths` — extra dirs searched ahead of $PATH.
 		mutationFn: (extraPaths: string[]) =>
 			apiFetch<BinaryScanResult>('/api/setup/scan-binary', {
 				method: 'POST',
 				body: JSON.stringify({ extra_paths: extraPaths }),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			}),
 		onSuccess: (data: BinaryScanResult) => queryClient.setQueryData(['setup', 'scan-binary'], data)
 	}));
 }
 
-export function createModelScanMutation(sessionId: string) {
+export function createModelScanMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (request: ModelScanRequest) =>
 			apiFetch<ModelScanResult>('/api/setup/scan-models', {
 				method: 'POST',
 				body: JSON.stringify(request),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			}),
 		onSuccess: (data: ModelScanResult) => queryClient.setQueryData(['setup', 'scan-models'], data)
 	}));
 }
 
-export function createRecommendationMutation(sessionId: string) {
+export function createRecommendationMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (request: RecommendationRequest) =>
 			apiFetch<RecommendationResult>('/api/setup/recommend', {
 				method: 'POST',
 				body: JSON.stringify(request),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			}),
 		onSuccess: (data: RecommendationResult) =>
 			queryClient.setQueryData(['setup', 'recommend'], data)
@@ -312,13 +324,13 @@ export interface PreviewConfigResponse {
 	toml: string;
 }
 
-export function createPreviewConfigMutation(sessionId: string) {
+export function createPreviewConfigMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (request: SaveConfigRequest) =>
 			apiFetch<PreviewConfigResponse>('/api/setup/preview-config', {
 				method: 'POST',
 				body: JSON.stringify(request),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			})
 	}));
 }
@@ -329,13 +341,13 @@ export interface SaveConfigResponse {
 	backup_path?: string;
 }
 
-export function createSetupSaveConfigMutation(sessionId: string) {
+export function createSetupSaveConfigMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (request: SaveConfigRequest) =>
 			apiFetch<SaveConfigResponse>('/api/setup/save-config', {
 				method: 'POST',
 				body: JSON.stringify(request),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			})
 	}));
 }
@@ -350,13 +362,13 @@ export interface BuildCreateResponse {
 	build_id: string;
 }
 
-export function createBuildMutation(sessionId: string) {
+export function createBuildMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (request: BuildCreateRequest) =>
 			apiFetch<BuildCreateResponse>('/api/setup/build', {
 				method: 'POST',
 				body: JSON.stringify(request),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			})
 	}));
 }
@@ -367,13 +379,13 @@ export interface ValidateLaunchResponse {
 	stderr?: string;
 }
 
-export function createValidateLaunchMutation(sessionId: string) {
+export function createValidateLaunchMutation(sessionId: string, reconfigure: boolean) {
 	return createMutation(() => ({
 		mutationFn: (servers: ServerConfigDraft[]) =>
 			apiFetch<ValidateLaunchResponse>('/api/setup/validate-launch', {
 				method: 'POST',
 				body: JSON.stringify({ servers }),
-				headers: setupHeaders(sessionId)
+				headers: setupHeaders(sessionId, reconfigure)
 			})
 	}));
 }

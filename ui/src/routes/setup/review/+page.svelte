@@ -28,11 +28,13 @@
 	const DEFAULT_PATH = '~/.config/llamaforge/llamaforge.toml';
 
 	const store = useSetupStore();
-	const preview = createPreviewConfigMutation(store.sessionId);
-	const save = createSetupSaveConfigMutation(store.sessionId);
-	const validate = createValidateLaunchMutation(store.sessionId);
+	const preview = createPreviewConfigMutation(store.sessionId, store.reconfigure);
+	const save = createSetupSaveConfigMutation(store.sessionId, store.reconfigure);
+	const validate = createValidateLaunchMutation(store.sessionId, store.reconfigure);
 
-	let force = $state(false);
+	// Reconfigure overwrites the existing config (the backend merges); default the
+	// overwrite toggle on so the save isn't blocked by the 409 conflict guard.
+	let force = $state(store.reconfigure);
 	let phase = $state<'review' | 'completion'>('review');
 	let completionState = $state<'polling' | 'success' | 'timeout'>('polling');
 	let actionError = $state<string | null>(null);

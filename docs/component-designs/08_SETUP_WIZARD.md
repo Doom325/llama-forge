@@ -1304,7 +1304,7 @@ The setup endpoints remain mounted in `Running` mode to support the reconfigure 
 
 The reconfigure flow does not change the mode to `Setup`. It operates entirely within `Running` mode -- the existing config remains active while the user configures new servers. The save-config endpoint in reconfigure mode merges new server entries into the existing config rather than replacing it (see Open Question #4 in Section 14).
 
-> **Known limitation (found during the PR14 first-run E2E; tracked follow-up).** `save-config` pre-validation runs `is_port_available` (a `TcpListener::bind`) over *every* server port in the request, with no exemption for ports already held by the **active** running config. So a running-mode reconfigure save that re-submits the active server(s) fails pre-validation with `422` — it reports the instance's own in-use ports as unavailable. This is latent in v1: the reconfigure flow is **not yet wired into the frontend** (no `X-Setup-Reconfigure` caller in `ui/src/**`), so it is unreachable from the UI. **Fix when the flow ships:** skip ports bound by the current active config (or validate only new/changed servers) rather than the full request set.
+> **Resolved (#273/#282 + #284).** `save-config` pre-validation now exempts ports already held by the **active** running config from the `is_port_available` probe (`active_config_ports`, #273/#282), so a running-mode reconfigure that re-submits an active server no longer 422s on its own in-use ports; genuinely-new ports are still checked. The reconfigure flow is wired into the frontend (#284): the Servers config page links to `/ui/setup?reconfigure=1`, the wizard sends `X-Setup-Reconfigure` on every setup call, and the Review step force-overwrites so the config merges.
 
 ---
 
