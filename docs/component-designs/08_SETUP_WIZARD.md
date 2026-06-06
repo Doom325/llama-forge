@@ -1550,7 +1550,7 @@ Search `$PATH` plus common install locations (`/usr/local/bin`, `/opt/homebrew/b
 
 ### Model Scanner
 
-Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). If the GGUF header parser is implemented by then (currently stubbed), use it for selected files.
+Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). The GGUF header parser is now implemented (#277, `vram_estimate.rs::sync_parse`) and feeds runtime VRAM admission (`task.rs`); enriching the scan-list hints from it for selected files is a tracked follow-up, kept off the scan path by design (per OQ#1).
 
 ### Build Process
 

@@ -160,6 +160,13 @@ fn skip_value<R: Read>(r: &mut R, t: u32) -> Result<(), GgufError> {
         }
         GGUF_ARRAY => {
             let elem = read_u32(r)?;
+            // GGUF arrays hold scalars/strings, never nested arrays (llama.cpp).
+            // Refusing array-of-array bounds skip_value's recursion to one level —
+            // otherwise a crafted/corrupt header could nest arrays unboundedly and
+            // overflow the stack (a hard crash, not the intended Malformed fallback).
+            if elem == GGUF_ARRAY {
+                return Err(GgufError::Malformed);
+            }
             let count = read_u64(r)?;
             if count > MAX_GGUF_COUNT {
                 return Err(GgufError::Malformed);
@@ -319,6 +326,9 @@ mod tests {
         U32(&'static str, u32),
         /// An array of u32 — used to exercise the array-skipping path.
         ArrU32(&'static str, &'static [u32]),
+        /// An array whose declared element type is itself ARRAY — illegal in
+        /// GGUF; used to prove the parser rejects it instead of recursing.
+        NestedArray(&'static str),
     }
 
     fn push_str(buf: &mut Vec<u8>, s: &str) {
@@ -347,6 +357,15 @@ mod tests {
                     for v in *vs {
                         buf.extend_from_slice(&v.to_le_bytes());
                     }
+                }
+                Kv::NestedArray(k) => {
+                    push_str(buf, k);
+                    buf.extend_from_slice(&9u32.to_le_bytes()); // ARRAY
+                    buf.extend_from_slice(&9u32.to_le_bytes()); // elem type = ARRAY (illegal)
+                    buf.extend_from_slice(&1u64.to_le_bytes()); // count
+                                                                // A would-be inner array; the parser must reject before reading it.
+                    buf.extend_from_slice(&4u32.to_le_bytes());
+                    buf.extend_from_slice(&0u64.to_le_bytes());
                 }
             }
         }
@@ -472,5 +491,19 @@ mod tests {
             parse_gguf(&make_unsupported_gguf(&tmp)).await,
             Err(GgufError::UnsupportedVersion(1))
         ));
+    }
+
+    #[tokio::test]
+    async fn parse_gguf_rejects_nested_arrays_without_recursing() {
+        // A nested-array element type must be refused (Malformed), never followed
+        // recursively — otherwise a crafted/corrupt header could overflow the stack.
+        let tmp = TempDir::new().unwrap();
+        let path = build_gguf(
+            &tmp,
+            "nested.gguf",
+            3,
+            &[Kv::Str("general.architecture", "llama"), Kv::NestedArray("tokenizer.ggml.merges")],
+        );
+        assert!(matches!(parse_gguf(&path).await, Err(GgufError::Malformed)));
     }
 }
