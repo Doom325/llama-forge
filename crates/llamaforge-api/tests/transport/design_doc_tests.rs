@@ -43,6 +43,7 @@ async fn setup_test_server(
         config_writer: handle,
         request_metrics_store: Arc::new(InMemoryStore::default()),
         store_maintenance: Arc::new(InMemoryStore::default()),
+        server_state_view: Arc::new(mocks::MockServerStateView),
     };
 
     let handles = start_servers(deps).await.unwrap();

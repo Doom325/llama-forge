@@ -70,6 +70,7 @@ pub struct ManagementState<CW, RMS, SM> {
     pub config_writer: Arc<CW>,
     pub request_metrics_store: Arc<RMS>,
     pub store_maintenance: Arc<SM>,
+    pub server_state_view: Arc<dyn llamaforge_core::routing::types::ServerStateView>,
 }
 
 impl<CW, RMS, SM> Clone for ManagementState<CW, RMS, SM> {
@@ -81,6 +82,7 @@ impl<CW, RMS, SM> Clone for ManagementState<CW, RMS, SM> {
             config_writer: self.config_writer.clone(),
             request_metrics_store: self.request_metrics_store.clone(),
             store_maintenance: self.store_maintenance.clone(),
+            server_state_view: self.server_state_view.clone(),
         }
     }
 }
@@ -149,6 +151,98 @@ where
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(ServerMetricsResponse::from_parts(&summary, metrics)).into_response())
+}
+
+/// Frontend `ModelInfo` shape (FRONTEND_ARCHITECTURE.md §5.2):
+/// `{id, name, loaded, assignedServers, capabilities}`. Projected from the
+/// routing `ServerStateView`, grouped by model alias.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelInfoResponse {
+    id: String,
+    name: String,
+    loaded: bool,
+    assigned_servers: Vec<String>,
+    capabilities: Vec<String>,
+}
+
+/// Lowercase capability tags for a server snapshot: the routing `Capability`
+/// set plus the boolean modality flags, deduped. `Capability` is exhaustive,
+/// so the match needs no catch-all.
+fn snapshot_capabilities(
+    snap: &llamaforge_core::routing::types::ServerSnapshot,
+) -> std::collections::BTreeSet<String> {
+    use llamaforge_core::types::Capability;
+    let mut caps = std::collections::BTreeSet::new();
+    for c in &snap.capabilities {
+        caps.insert(
+            match c {
+                Capability::CodeGeneration => "code_generation",
+                Capability::Chat => "chat",
+                Capability::Embedding => "embedding",
+            }
+            .to_string(),
+        );
+    }
+    if snap.multimodal {
+        caps.insert("multimodal".to_string());
+    }
+    if snap.embedding {
+        caps.insert("embedding".to_string());
+    }
+    if snap.reranking {
+        caps.insert("reranking".to_string());
+    }
+    caps
+}
+
+/// `GET /api/models` — the model registry (FRONTEND_ARCHITECTURE.md §5.2).
+/// Groups the routing `ServerStateView` snapshots by model alias: a model is
+/// `loaded` if any server serving it is `Running`, `assignedServers` lists those
+/// servers, and `capabilities` is the union of their capability tags. Ordering
+/// is deterministic (models and servers/caps are accumulated in sorted sets).
+pub(crate) async fn list_models<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+) -> Result<Response, ApiError> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    struct ModelAcc {
+        loaded: bool,
+        servers: Vec<String>,
+        capabilities: BTreeSet<String>,
+    }
+
+    let mut by_model: BTreeMap<String, ModelAcc> = BTreeMap::new();
+    for snap in state.server_state_view.all_servers() {
+        let running = snap.lifecycle == ServerLifecycle::Running;
+        let server_id = snap.id.to_string();
+        let caps = snapshot_capabilities(&snap);
+        for alias in &snap.models {
+            let entry = by_model.entry(alias.to_string()).or_insert_with(|| ModelAcc {
+                loaded: false,
+                servers: Vec::new(),
+                capabilities: BTreeSet::new(),
+            });
+            entry.loaded |= running;
+            if !entry.servers.contains(&server_id) {
+                entry.servers.push(server_id.clone());
+            }
+            entry.capabilities.extend(caps.iter().cloned());
+        }
+    }
+
+    let models: Vec<ModelInfoResponse> = by_model
+        .into_iter()
+        .map(|(name, acc)| ModelInfoResponse {
+            id: name.clone(),
+            name,
+            loaded: acc.loaded,
+            assigned_servers: acc.servers,
+            capabilities: acc.capabilities.into_iter().collect(),
+        })
+        .collect();
+
+    Ok(Json(models).into_response())
 }
 
 pub(crate) async fn start_server<CW, RMS, SM>(
@@ -528,6 +622,7 @@ where
         .route("/api/queue", get(queue_status::<CW, RMS, SM>))
         .route("/api/queue/{id}", delete(cancel_request::<CW, RMS, SM>))
         .route("/api/config/reload", post(reload_config::<CW, RMS, SM>))
+        .route("/api/models", get(list_models::<CW, RMS, SM>))
         .route("/api/requests", get(query_requests::<CW, RMS, SM>))
         // Cancel reuses the queue submitter's cancel (same as DELETE /api/queue/{id});
         // the explorer drives it via POST per the frontend client.
@@ -595,6 +690,7 @@ mod tests {
             config_writer: handle,
             request_metrics_store: Arc::new(()),
             store_maintenance: Arc::new(()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
         }
     }
 
@@ -616,6 +712,7 @@ mod tests {
             config_writer: handle,
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
         }
     }
 
@@ -878,6 +975,7 @@ mod tests {
             config_writer: handle,
             request_metrics_store: store,
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
         };
 
         let res = query_requests(
@@ -901,6 +999,96 @@ mod tests {
         // Trimmed projection — raw RequestMetrics fields must not leak.
         assert!(row.get("completion_tokens").is_none());
         assert!(row.get("requestor").is_none());
+    }
+
+    /// Two servers: one Running serving `gemma` (Chat + multimodal), one Stopped
+    /// serving `gemma` and `llama` (CodeGeneration + embedding). Drives the
+    /// model-registry grouping in `list_models`.
+    struct TwoServerView;
+    impl llamaforge_core::routing::types::ServerStateView for TwoServerView {
+        fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
+            use llamaforge_core::routing::types::ServerSnapshot;
+            use llamaforge_core::types::{Capability, ModelAlias};
+            let snap = |id: &str,
+                        lifecycle: ServerLifecycle,
+                        models: &[&str],
+                        caps: &[Capability],
+                        multimodal: bool,
+                        embedding: bool| ServerSnapshot {
+                id: ServerId::from_config_id(id),
+                lifecycle,
+                models: models.iter().map(|m| ModelAlias::new(std::sync::Arc::from(*m))).collect(),
+                capabilities: caps.iter().copied().collect(),
+                lora_adapters: std::collections::HashSet::new(),
+                multimodal,
+                embedding,
+                reranking: false,
+                architecture: llamaforge_core::types::ModelArchitecture::default(),
+                total_slots: 2,
+                idle_slots: 2,
+                kv_usage: 0.0,
+                deferred_ratio: 0.0,
+            };
+            vec![
+                snap(
+                    "srv-a",
+                    ServerLifecycle::Running,
+                    &["gemma"],
+                    &[Capability::Chat],
+                    true,
+                    false,
+                ),
+                snap(
+                    "srv-b",
+                    ServerLifecycle::Stopped,
+                    &["gemma", "llama"],
+                    &[Capability::CodeGeneration],
+                    false,
+                    true,
+                ),
+            ]
+        }
+    }
+
+    #[tokio::test]
+    async fn list_models_groups_by_alias_with_capabilities() {
+        // #293: GET /api/models projects the routing registry, grouped by model.
+        let mut state = build_test_state();
+        state.server_state_view = Arc::new(TwoServerView);
+
+        let res = list_models(axum::extract::State(state)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        // Sorted by alias: gemma, then llama.
+        assert_eq!(body[0]["id"], "gemma");
+        assert_eq!(body[0]["name"], "gemma");
+        // gemma is served by a Running server → loaded; both servers assigned.
+        assert_eq!(body[0]["loaded"], true);
+        assert_eq!(body[0]["assignedServers"].as_array().unwrap().len(), 2);
+        // Capability union (sorted BTreeSet): chat+multimodal (srv-a) ∪
+        // code_generation+embedding (srv-b).
+        assert_eq!(
+            body[0]["capabilities"],
+            serde_json::json!(["chat", "code_generation", "embedding", "multimodal"])
+        );
+
+        // llama is only on the Stopped server → not loaded, one server.
+        assert_eq!(body[1]["id"], "llama");
+        assert_eq!(body[1]["loaded"], false);
+        assert_eq!(body[1]["assignedServers"].as_array().unwrap().len(), 1);
+        assert_eq!(body[1]["capabilities"], serde_json::json!(["code_generation", "embedding"]));
+    }
+
+    #[tokio::test]
+    async fn list_models_empty_view_is_empty_array() {
+        let state = build_test_state(); // empty server_state_view
+        let res = list_models(axum::extract::State(state)).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body, serde_json::json!([]));
     }
 
     #[tokio::test]

@@ -37,6 +37,7 @@ pub struct HttpAppState<CW, RMS, SM> {
     pub config_writer: Arc<CW>,
     pub request_metrics_store: Arc<RMS>,
     pub store_maintenance: Arc<SM>,
+    pub server_state_view: Arc<dyn llamaforge_core::routing::types::ServerStateView>,
     pub large_body_limit: LargeBodyConcurrencyLimit,
 }
 
@@ -52,6 +53,7 @@ impl<CW, RMS, SM> Clone for HttpAppState<CW, RMS, SM> {
             config_writer: self.config_writer.clone(),
             request_metrics_store: self.request_metrics_store.clone(),
             store_maintenance: self.store_maintenance.clone(),
+            server_state_view: self.server_state_view.clone(),
             large_body_limit: self.large_body_limit.clone(),
         }
     }
@@ -776,6 +778,7 @@ where
         config_writer: state.config_writer.clone(),
         request_metrics_store: state.request_metrics_store.clone(),
         store_maintenance: state.store_maintenance.clone(),
+        server_state_view: state.server_state_view.clone(),
     };
 
     let management_router = super::management::management_routes(management_state);
@@ -996,6 +999,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -1020,6 +1024,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: LargeBodyConcurrencyLimit::new(10, 1),
         };
         let setup_router = Router::new().route("/api/setup/ping", get(|| async { "ok" }));
@@ -1339,6 +1344,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -1430,6 +1436,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitterFull),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -1478,6 +1485,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -1546,6 +1554,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
