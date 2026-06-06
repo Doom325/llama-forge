@@ -101,6 +101,16 @@ GET  /health                 → health_check
 GET  /metrics                → prometheus_export
 ```
 
+**Management DTO contract.** Management responses are consumed by the web UI, so
+their JSON shapes are pinned to the frontend types in `FRONTEND_ARCHITECTURE.md`
+§5.2 — not to the internal Rust structs. In particular `GET /api/servers` returns
+the `ServerState` shape `{id, name, status, uptime}` (resolved #292), where
+`status` is the UI's lowercase `ServerStatus` vocabulary mapped from
+`ServerLifecycle` (`Running→running`, `Starting→pending`, `Draining→degraded`,
+`Restarting→restarting`, `Stopped→stopped`, `Failed→failed`) — never the `Debug`
+rendering of the enum, which the dashboard's `StatusBadge` cannot key off. Per-server
+slot/throughput detail is exposed separately on `GET /api/servers/{id}/metrics`.
+
 ### 2.4 Protocol Translation Types
 
 ```rust
