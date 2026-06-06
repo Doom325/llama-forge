@@ -71,6 +71,9 @@ impl ServerControl for MockServerControl {
     async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
         Ok(())
     }
+    async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+        Ok(())
+    }
 }
 
 pub struct MockQueueSubmitter;

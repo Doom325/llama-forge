@@ -195,6 +195,9 @@ pub trait ServerControl: Send + Sync {
     async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError>;
     async fn start_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
     async fn stop_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
+    /// Gracefully stop then start a server (user-initiated). Distinct from the
+    /// supervisor's automatic crash-restart-with-backoff.
+    async fn restart_server(&self, id: &crate::types::ServerId) -> Result<(), ServerError>;
 }
 
 /// Open trait. RouteValidator

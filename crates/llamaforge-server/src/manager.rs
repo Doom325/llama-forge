@@ -450,6 +450,32 @@ impl ServerManager {
         Ok(())
     }
 
+    /// User-initiated restart: signal a graceful stop, wait (bounded) for the
+    /// supervisor to settle into a restartable state, then start again. Distinct
+    /// from the supervisor's automatic crash-restart-with-backoff — the
+    /// token-cancel stop path settles to `Stopped`, not `Failed`.
+    pub async fn request_restart(
+        self: &Arc<Self>,
+        server_id: &ServerId,
+    ) -> Result<(), ServerManagerError> {
+        if !self.servers.contains_key(server_id) {
+            return Err(ServerManagerError::ServerNotFound { id: server_id.clone() });
+        }
+        self.stop_server(server_id).await;
+
+        // `request_start` rejects a server that is still Running/Draining/Starting,
+        // so wait for the drain to reach a restartable state first.
+        const RESTART_DRAIN_POLLS: u32 = 100;
+        const RESTART_DRAIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+        for _ in 0..RESTART_DRAIN_POLLS {
+            match self.servers.get(server_id).map(|s| s.lifecycle) {
+                Some(ServerLifecycle::Stopped) | Some(ServerLifecycle::Failed) | None => break,
+                _ => tokio::time::sleep(RESTART_DRAIN_INTERVAL).await,
+            }
+        }
+        self.request_start(server_id).await
+    }
+
     // --- Task 3.4: Cumulative requests ---
 
     /// Gets the cumulative request count for a server.

@@ -127,6 +127,21 @@ pub(crate) async fn stop_server<CW, RMS, SM>(
     Ok(axum::http::StatusCode::OK.into_response())
 }
 
+pub(crate) async fn restart_server<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    llamaforge_core::config::validate_server_id_slug(&id)
+        .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
+    let server_id = ServerId::from_config_id(&id);
+    state
+        .server_control
+        .restart_server(&server_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(axum::http::StatusCode::OK.into_response())
+}
+
 pub(crate) async fn queue_status<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
 ) -> Result<Response, ApiError> {
@@ -336,6 +351,7 @@ where
         .route("/api/servers", get(list_servers::<CW, RMS, SM>))
         .route("/api/servers/{id}/start", post(start_server::<CW, RMS, SM>))
         .route("/api/servers/{id}/stop", post(stop_server::<CW, RMS, SM>))
+        .route("/api/servers/{id}/restart", post(restart_server::<CW, RMS, SM>))
         .route("/api/queue", get(queue_status::<CW, RMS, SM>))
         .route("/api/queue/{id}", delete(cancel_request::<CW, RMS, SM>))
         .route("/api/config/reload", post(reload_config::<CW, RMS, SM>))
@@ -365,6 +381,9 @@ mod tests {
             Ok(())
         }
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+        async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
     }
@@ -423,6 +442,9 @@ mod tests {
         async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
             Ok(())
         }
+        async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -464,6 +486,15 @@ mod tests {
         let res = start_server(axum::extract::State(state.clone()), axum::extract::Path(slug_id))
             .await
             .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // #293: the restart route is wired and parses the id the same way.
+        let res = restart_server(
+            axum::extract::State(state.clone()),
+            axum::extract::Path("gemma3-27b".to_string()),
+        )
+        .await
+        .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
 
         // Malformed slugs (leading `-`, whitespace, …) must still 400.
