@@ -234,6 +234,56 @@ where
     Ok(Json(metrics).into_response())
 }
 
+/// `GET /api/metrics/summary` query params — a bare `MetricsFilter`.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct SummaryQueryParams {
+    #[serde(flatten)]
+    pub filter: llamaforge_metrics::MetricsFilter,
+}
+
+/// Frontend `AggregatedMetrics` shape (`{throughput_total, latency:{p50,p90,p99}}`,
+/// FRONTEND_ARCHITECTURE.md §7.2). `latency` is omitted when there are no samples,
+/// matching the optional TS field. This is the dashboard summary — distinct from
+/// `/api/metrics/aggregated`, which is the explorer's grouped view.
+#[derive(Serialize)]
+struct SummaryResponse {
+    throughput_total: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latency: Option<LatencyPercentiles>,
+}
+
+#[derive(Serialize)]
+struct LatencyPercentiles {
+    p50: f64,
+    p90: f64,
+    p99: f64,
+}
+
+impl From<llamaforge_metrics::RequestMetricsSummary> for SummaryResponse {
+    fn from(s: llamaforge_metrics::RequestMetricsSummary) -> Self {
+        let latency = match (s.latency_p50_ms, s.latency_p90_ms, s.latency_p99_ms) {
+            (Some(p50), Some(p90), Some(p99)) => Some(LatencyPercentiles { p50, p90, p99 }),
+            _ => None,
+        };
+        SummaryResponse { throughput_total: s.throughput_total, latency }
+    }
+}
+
+pub(crate) async fn query_summary<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Query(params): Query<SummaryQueryParams>,
+) -> Result<Response, ApiError>
+where
+    RMS: RequestMetricsStore + Send + Sync + 'static,
+{
+    let summary = state
+        .request_metrics_store
+        .request_metrics_summary(&params.filter)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(SummaryResponse::from(summary)).into_response())
+}
+
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct WalCheckpointQuery {
     #[serde(default)]
@@ -291,6 +341,7 @@ where
         .route("/api/config/reload", post(reload_config::<CW, RMS, SM>))
         .route("/api/metrics/requests", get(query_request_metrics::<CW, RMS, SM>))
         .route("/api/metrics/aggregated", get(query_aggregated::<CW, RMS, SM>))
+        .route("/api/metrics/summary", get(query_summary::<CW, RMS, SM>))
         .route("/api/maintenance/wal-checkpoint", post(wal_checkpoint::<CW, RMS, SM>))
         .with_state(state)
 }

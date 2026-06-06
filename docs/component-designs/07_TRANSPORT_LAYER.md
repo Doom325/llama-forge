@@ -96,6 +96,7 @@ DELETE /api/queue/{id}       → cancel_request
 POST /api/config/reload      → reload_config
 GET  /api/metrics/requests   → query_request_metrics
 GET  /api/metrics/aggregated → query_aggregated
+GET  /api/metrics/summary    → query_summary       // dashboard {throughput_total, latency}
 POST /api/maintenance/wal-checkpoint → wal_checkpoint
 GET  /health                 → health_check
 GET  /metrics                → prometheus_export

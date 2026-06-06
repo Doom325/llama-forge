@@ -72,8 +72,11 @@ export function createAggregatedMetricsQuery(filters: Record<string, string>) {
 		queryKey: ['metrics', 'aggregated', filters],
 		queryFn: () => {
 			const searchParams = new URLSearchParams(filters);
+			// The dashboard summary lives at /api/metrics/summary ({throughput_total,
+			// latency}); /api/metrics/aggregated is the explorer's grouped view, a
+			// different shape. (#291 — the old `/api/metrics` path 404'd.)
 			return apiFetch<import('./types').AggregatedMetrics>(
-				`/api/metrics?${searchParams.toString()}`
+				`/api/metrics/summary?${searchParams.toString()}`
 			);
 		},
 		staleTime: 30_000,

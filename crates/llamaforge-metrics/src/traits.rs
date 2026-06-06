@@ -4,7 +4,10 @@ use chrono::{DateTime, Utc};
 use llamaforge_core::types::ServerId;
 
 use crate::error::StoreError;
-use crate::filter::{AggregatedMetrics, EventFilter, GroupByField, MetricsFilter};
+use crate::filter::{
+    summarize_request_metrics, AggregatedMetrics, EventFilter, GroupByField, MetricsFilter,
+    RequestMetricsSummary,
+};
 use crate::types::{AuditEvent, ConfigSnapshot, ManagedProcess, ProcessId, RequestMetrics};
 
 /// Storage operations for telemetry and audit events.
@@ -42,6 +45,20 @@ pub trait RequestMetricsStore: Send + Sync + private::Sealed {
         filter: &MetricsFilter,
         group_by: &[GroupByField],
     ) -> Result<Vec<AggregatedMetrics>, StoreError>;
+
+    /// Fleet-wide dashboard summary: one throughput figure + request-latency
+    /// percentiles (the frontend `AggregatedMetrics` shape). The default impl
+    /// samples the most recent matching records and summarises them in memory, so
+    /// every store gets it for free; a backend with native percentile support may
+    /// override for efficiency.
+    async fn request_metrics_summary(
+        &self,
+        filter: &MetricsFilter,
+    ) -> Result<RequestMetricsSummary, StoreError> {
+        const SUMMARY_SAMPLE: usize = 1000;
+        let records = self.query_request_metrics(filter, Some(SUMMARY_SAMPLE), None).await?;
+        Ok(summarize_request_metrics(&records))
+    }
 }
 
 /// Storage operations for managing the lifecycle of llama-server processes.
