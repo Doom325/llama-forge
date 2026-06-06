@@ -594,13 +594,38 @@ async fn monitor_loop(
                         }
                     }
                     Err(e) => {
-                        error!(server.id = %server_id, "Health check error: {}", e);
-                        consecutive_health_failures += 1;
-                        if consecutive_health_failures >= 3 {
-                            warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
-                            transition_to(mgr, server_id, ServerLifecycle::Restarting);
-                            info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
-                            return true; // Restart
+                        let is_starting = mgr
+                            .servers
+                            .get(server_id)
+                            .map(|s| s.lifecycle == ServerLifecycle::Starting)
+                            .unwrap_or(false);
+                        if is_starting {
+                            // Connection errors during startup are expected — the
+                            // server hasn't bound its port yet while loading model
+                            // weights. Use the same grace window as 503 responses.
+                            starting_503_ticks += 1;
+                            if starting_503_ticks % 5 == 1 {
+                                info!(
+                                    server.id = %server_id,
+                                    starting_503_ticks,
+                                    "Server not yet reachable, within startup grace window",
+                                );
+                            }
+                            if starting_503_ticks >= starting_503_cap {
+                                warn!(server.id = %server_id, server.health_fail = true, "Startup grace window exhausted while server unreachable");
+                                transition_to(mgr, server_id, ServerLifecycle::Failed);
+                                info!(server.id = %server_id, reason = "startup_timeout", "Server failed to start within timeout");
+                                return false;
+                            }
+                        } else {
+                            error!(server.id = %server_id, "Health check error: {}", e);
+                            consecutive_health_failures += 1;
+                            if consecutive_health_failures >= 3 {
+                                warn!(server.id = %server_id, server.health_fail = true, "Server failed health checks 3 times consecutively");
+                                transition_to(mgr, server_id, ServerLifecycle::Restarting);
+                                info!(server.id = %server_id, server.restarted = true, reason = "health_fail", "Server restarting");
+                                return true; // Restart
+                            }
                         }
                     }
                 }

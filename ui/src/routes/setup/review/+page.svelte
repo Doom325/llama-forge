@@ -140,6 +140,8 @@
 			<h2 class="text-sm font-medium text-[var(--color-text-primary)]">Generated configuration</h2>
 			{#if preview.isPending}
 				<Skeleton height="10rem" />
+			{:else if preview.error}
+				<ErrorBanner message={preview.error instanceof Error ? preview.error.message : 'Failed to generate preview'} />
 			{:else if preview.data}
 				<div class="overflow-auto rounded border border-[var(--color-border)] text-xs">
 					<!-- renderMarkdown() is the only sanitized {@html} source (enforced by

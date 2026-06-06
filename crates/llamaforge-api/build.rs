@@ -5,8 +5,9 @@
 //! runtime). On a fresh checkout / CI it does not exist yet, so we create it —
 //! an empty dir compiles fine and simply serves nothing until the UI is built.
 //!
-//! For RELEASE builds we additionally run the production UI build so the assets
-//! are present to embed. Debug / CI need neither node nor a pre-built UI.
+//! The UI is built automatically via `npm ci && npm run build` whenever node is
+//! available. Set `LLAMAFORGE_SKIP_UI_BUILD=1` to skip (e.g. CI that builds the
+//! UI in a separate step).
 
 use std::path::Path;
 use std::process::Command;
@@ -28,10 +29,6 @@ fn main() {
     // E0599 "no `get`" from the derive.
     std::fs::create_dir_all(ui_dir.join("build")).expect("create ui/build for rust-embed");
 
-    // Only build/populate the UI for release; debug serves from the filesystem.
-    if std::env::var("PROFILE").as_deref() != Ok("release") {
-        return;
-    }
     // Escape hatch for pipelines that build the UI in a separate step.
     if std::env::var("LLAMAFORGE_SKIP_UI_BUILD").is_ok() {
         return;
