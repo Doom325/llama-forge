@@ -97,6 +97,60 @@ pub(crate) async fn list_servers<CW, RMS, SM>(
     Ok(Json(dtos).into_response())
 }
 
+/// `GET /api/servers/{id}` — a single server's `ServerState`
+/// (FRONTEND_ARCHITECTURE.md §5.2). Reuses the shared `server_summary_to_dto`
+/// projection so the detail view can't drift from the list, and returns
+/// `404 not_found` when no server carries the requested id.
+pub(crate) async fn get_server<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    llamaforge_core::config::validate_server_id_slug(&id)
+        .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
+    let server_id = ServerId::from_config_id(&id);
+    let summaries =
+        state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let summary = summaries
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| ApiError::NotFound(format!("server not found: {id}")))?;
+    Ok(Json(server_summary_to_dto(summary)).into_response())
+}
+
+/// `GET /api/servers/{id}/metrics` — per-server `ServerMetricsSummary`
+/// (FRONTEND_ARCHITECTURE.md §5.2). Throughput, latency percentiles and the
+/// error rate come from the request-metrics store filtered to this server;
+/// slot occupancy comes from the live `ServerSummary`. Returns `404 not_found`
+/// when the server id is unknown.
+pub(crate) async fn server_metrics<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError>
+where
+    RMS: RequestMetricsStore + Send + Sync + 'static,
+{
+    llamaforge_core::config::validate_server_id_slug(&id)
+        .map_err(|e| ApiError::InvalidBody(e.to_string()))?;
+    let server_id = ServerId::from_config_id(&id);
+
+    let summaries =
+        state.server_control.list_servers().await.map_err(|e| ApiError::Internal(e.to_string()))?;
+    let summary = summaries
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| ApiError::NotFound(format!("server not found: {id}")))?;
+
+    let filter =
+        llamaforge_metrics::MetricsFilter { server_id: Some(server_id), ..Default::default() };
+    let metrics = state
+        .request_metrics_store
+        .request_metrics_summary(&filter)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(ServerMetricsResponse::from_parts(&summary, metrics)).into_response())
+}
+
 pub(crate) async fn start_server<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Path(id): Path<String>,
@@ -284,6 +338,55 @@ impl From<llamaforge_metrics::RequestMetricsSummary> for SummaryResponse {
     }
 }
 
+/// Frontend `ServerMetricsSummary` shape (FRONTEND_ARCHITECTURE.md §5.2):
+/// `{throughput, latency:{p50,p90,p99}, errorRate, slots:{total,idle,processing,loading}}`.
+/// Unlike the fleet `SummaryResponse`, `latency` is non-optional here (the
+/// frontend `ServerMetricsSummary.latency` is required), so absent percentiles
+/// surface as `0`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerMetricsResponse {
+    throughput: f64,
+    latency: LatencyPercentiles,
+    error_rate: f64,
+    slots: SlotBreakdown,
+}
+
+/// Per-server slot occupancy. `loading` is always `0`: the `ServerSummary`
+/// exposes only `slots_total`/`slots_busy`, with no per-slot model-loading
+/// signal yet (tracked in 07_TRANSPORT_LAYER.md). `idle` is the saturating
+/// remainder so a transient `busy > total` race can't underflow.
+#[derive(Serialize)]
+struct SlotBreakdown {
+    total: u32,
+    idle: u32,
+    processing: u32,
+    loading: u32,
+}
+
+impl ServerMetricsResponse {
+    fn from_parts(
+        summary: &ServerSummary,
+        metrics: llamaforge_metrics::RequestMetricsSummary,
+    ) -> Self {
+        ServerMetricsResponse {
+            throughput: metrics.throughput_total,
+            latency: LatencyPercentiles {
+                p50: metrics.latency_p50_ms.unwrap_or(0.0),
+                p90: metrics.latency_p90_ms.unwrap_or(0.0),
+                p99: metrics.latency_p99_ms.unwrap_or(0.0),
+            },
+            error_rate: metrics.error_rate,
+            slots: SlotBreakdown {
+                total: summary.slots_total,
+                idle: summary.slots_total.saturating_sub(summary.slots_busy),
+                processing: summary.slots_busy,
+                loading: 0,
+            },
+        }
+    }
+}
+
 pub(crate) async fn query_summary<CW, RMS, SM>(
     State(state): State<ManagementState<CW, RMS, SM>>,
     Query(params): Query<SummaryQueryParams>,
@@ -349,6 +452,8 @@ where
 {
     Router::new()
         .route("/api/servers", get(list_servers::<CW, RMS, SM>))
+        .route("/api/servers/{id}", get(get_server::<CW, RMS, SM>))
+        .route("/api/servers/{id}/metrics", get(server_metrics::<CW, RMS, SM>))
         .route("/api/servers/{id}/start", post(start_server::<CW, RMS, SM>))
         .route("/api/servers/{id}/stop", post(stop_server::<CW, RMS, SM>))
         .route("/api/servers/{id}/restart", post(restart_server::<CW, RMS, SM>))
@@ -418,6 +523,27 @@ mod tests {
             config_writer: handle,
             request_metrics_store: Arc::new(()),
             store_maintenance: Arc::new(()),
+        }
+    }
+
+    /// Like [`build_test_state`] but backed by a real (empty) `InMemoryStore`,
+    /// for handlers bounded on `RMS: RequestMetricsStore` (e.g. `server_metrics`).
+    fn build_test_state_with_store() -> ManagementState<
+        ConfigHandle,
+        llamaforge_metrics::InMemoryStore,
+        llamaforge_metrics::InMemoryStore,
+    > {
+        let config = AppConfig { global: GlobalConfig::default(), ..Default::default() };
+        let source = Arc::new(InMemoryConfigSource::new(config));
+        let handle = Arc::new(ConfigHandle::load(source).unwrap());
+
+        ManagementState {
+            server_control: Arc::new(MockServerControl),
+            queue_submitter: Arc::new(MockQueueSubmitter),
+            config_reader: handle.clone(),
+            config_writer: handle,
+            request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
         }
     }
 
@@ -511,5 +637,110 @@ mod tests {
         let state = build_test_state();
         let res = reload_config(axum::extract::State(state)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// A control that reports one Running server whose id is the UUIDv5 of the
+    /// slug `"gemma3-27b"`, so `from_config_id("gemma3-27b")` (the path-derived
+    /// id) matches it. Carries 4 slots with 1 busy for the slot-breakdown test.
+    struct ServerWithSlots;
+    #[async_trait::async_trait]
+    impl ServerControl for ServerWithSlots {
+        async fn list_servers(&self) -> Result<Vec<ServerSummary>, ServerError> {
+            Ok(vec![ServerSummary {
+                id: ServerId::from_config_id("gemma3-27b"),
+                alias: llamaforge_core::types::ModelAlias::new(std::sync::Arc::from("gemma-3-27b")),
+                state: ServerLifecycle::Running,
+                port: 8081,
+                slots_total: 4,
+                slots_busy: 1,
+                started_at: Some(chrono::Utc::now() - chrono::Duration::seconds(42)),
+                last_restart_at: None,
+            }])
+        }
+        async fn start_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+        async fn stop_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+        async fn restart_server(&self, _id: &ServerId) -> Result<(), ServerError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn get_server_returns_single_serverstate() {
+        // #293: GET /api/servers/{id} returns the same ServerState shape as the
+        // list, for the one matching server.
+        let mut state = build_test_state();
+        state.server_control = Arc::new(ServerWithSlots);
+
+        let res =
+            get_server(axum::extract::State(state), axum::extract::Path("gemma3-27b".to_string()))
+                .await
+                .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["name"], "gemma-3-27b");
+        assert_eq!(body["status"], "running");
+        assert!(body["uptime"].as_u64().unwrap() >= 42);
+        // Not the list — a single object, not an array.
+        assert!(body.is_object());
+    }
+
+    #[tokio::test]
+    async fn get_server_unknown_is_404() {
+        // The default MockServerControl reports no servers, so any id is absent.
+        let state = build_test_state();
+        let err = get_server(axum::extract::State(state), axum::extract::Path("ghost".to_string()))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ApiError::NotFound(_)));
+        assert_eq!(err.into_response().status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn server_metrics_assembles_summary_and_slots() {
+        // #293: GET /api/servers/{id}/metrics returns the frontend
+        // ServerMetricsSummary. With an empty metrics store the throughput/
+        // latency/errorRate are zero, while the slot breakdown comes from the
+        // live ServerSummary (4 total, 1 busy → 3 idle, 0 loading).
+        let mut state = build_test_state_with_store();
+        state.server_control = Arc::new(ServerWithSlots);
+
+        let res = server_metrics(
+            axum::extract::State(state),
+            axum::extract::Path("gemma3-27b".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(body["throughput"], 0.0);
+        assert_eq!(body["latency"]["p50"], 0.0);
+        assert_eq!(body["latency"]["p90"], 0.0);
+        assert_eq!(body["latency"]["p99"], 0.0);
+        // camelCase, matching the TS `ServerMetricsSummary.errorRate`.
+        assert_eq!(body["errorRate"], 0.0);
+        assert!(body.get("error_rate").is_none());
+        assert_eq!(body["slots"]["total"], 4);
+        assert_eq!(body["slots"]["idle"], 3);
+        assert_eq!(body["slots"]["processing"], 1);
+        assert_eq!(body["slots"]["loading"], 0);
+    }
+
+    #[tokio::test]
+    async fn server_metrics_unknown_is_404() {
+        let state = build_test_state_with_store();
+        let err =
+            server_metrics(axum::extract::State(state), axum::extract::Path("ghost".to_string()))
+                .await
+                .unwrap_err();
+        assert!(matches!(err, ApiError::NotFound(_)));
     }
 }
