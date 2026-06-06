@@ -96,6 +96,8 @@ POST /api/servers/{id}/stop  → stop_server
 POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
 GET  /api/queue              → queue_status
 DELETE /api/queue/{id}       → cancel_request
+GET  /api/requests           → query_requests      // explorer: RequestRecord[] projection
+POST /api/requests/{id}/cancel → cancel_request    // same QueueSubmitter::cancel as DELETE /api/queue/{id}
 POST /api/config/reload      → reload_config
 GET  /api/metrics/requests   → query_request_metrics
 GET  /api/metrics/aggregated → query_aggregated
@@ -128,6 +130,13 @@ shape `{throughput, latency:{p50,p90,p99}, errorRate, slots:{total,idle,processi
 - **Known limitation:** `slots.loading` is always `0` — `ServerSummary` carries
   no per-slot model-loading signal yet. When a slot-level state is added to the
   summary, populate `loading` from it.
+
+`GET /api/requests` is the requests explorer and returns the trimmed
+`RequestRecord` shape `{id, timestamp, model, taskType, duration, status}` (a
+projection of `RequestMetrics` over the same filter/pagination query params as
+`/api/metrics/requests`, which by contrast returns the full raw record for
+analysis). `POST /api/requests/{id}/cancel` is the explorer's cancel action; it
+delegates to the same `QueueSubmitter::cancel` as `DELETE /api/queue/{id}`.
 
 ### 2.4 Protocol Translation Types
 
