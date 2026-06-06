@@ -100,6 +100,7 @@ GET  /api/models             → list_models         // ModelInfo[] from the rou
 GET  /api/requests           → query_requests      // explorer: RequestRecord[] projection
 POST /api/requests/{id}/cancel → cancel_request    // same QueueSubmitter::cancel as DELETE /api/queue/{id}
 POST /api/config/reload      → reload_config
+GET  /api/config/{section}   → get_config_section  // read section JSON + ETag (servers|priority|global)
 GET  /api/metrics/requests   → query_request_metrics
 GET  /api/metrics/aggregated → query_aggregated
 GET  /api/metrics/summary    → query_summary       // dashboard {throughput_total, latency}
@@ -148,6 +149,23 @@ serving it is `Running`; `assignedServers` lists those server ids;
 plus its modality flags (`multimodal`/`embedding`/`reranking`). This is the
 management registry view; the OpenAI-discovery `GET /v1/models` (config aliases,
 OpenAI list envelope) is a separate, narrower surface.
+
+`GET /api/config/{section}` (`section` ∈ `servers | priority | global`) returns
+that section of the live config snapshot as JSON, with an `ETag` response header
+the frontend captures (`apiFetchWithMeta`) for later optimistic-concurrency
+writes. The JSON is routed through `serde_json::Value` so the `servers` map's key
+order — and therefore the ETag — is stable regardless of `HashMap` iteration
+order. Unknown section → `404 not_found`.
+
+> **Deferred — `PUT /api/config/{section}` (runtime section writes).** The
+> frontend assumes a generic editable section, but LlamaForge's config model is
+> restart-required for every field except LoRA adapters: the only runtime
+> `ConfigMutation` is `SetLoraAdapters`, and `/api/config/reload` explicitly
+> rejects diffs touching restart-required fields. A generic section-write
+> endpoint therefore needs its own config-layer design (which fields are
+> runtime-mutable, how restart-required edits are surfaced, validation, and the
+> `If-Match` precondition). Until that lands, the read endpoint ships alone and
+> the save action is a no-op on the backend.
 
 ### 2.4 Protocol Translation Types
 
