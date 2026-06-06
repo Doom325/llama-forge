@@ -1313,7 +1313,7 @@ The reconfigure flow does not change the mode to `Setup`. It operates entirely w
 _All five resolved during implementation (Phase 1–4). Each was implemented as the original recommendation except #2 and #5, which shipped a narrower v1 behavior — noted inline._
 
 1. **GGUF header parser timeline.** The `sync_parse` function in `vram_estimate.rs` is stubbed. Model scanning currently infers metadata from filenames. Should we implement the real GGUF KV header parser as part of this feature, or ship with filename heuristics first? (Recommendation: filename heuristics for v1, real parser as fast-follow.)
-   - **Resolved (PR2) as recommended:** filename heuristics shipped (`model_scanner.rs::quantization_hint`); the real GGUF KV-header parser remains a fast-follow. The module header documents the deferral.
+   - **Resolved (PR2, parser completed in #277) as recommended:** filename heuristics shipped first (`model_scanner.rs::quantization_hint`) for the wizard's model list; the real GGUF KV-header parser is now implemented (`vram_estimate.rs::sync_parse`) and feeds the runtime VRAM admission path (`task.rs` → `compute_vram_estimate`) with the model's true architecture/geometry, falling back to the `estimated_vram_mb` override when a header is unreadable. The scanner list still uses the fast filename hints (no per-file header read); enriching those from the parser is a tracked follow-up.
 
 2. **Build directory cleanup.** After a successful build, should the cloned llama.cpp source be deleted, or kept for future rebuilds? Keeping it allows `git pull && rebuild` for updates; deleting it saves disk space. (Recommendation: keep it in `$XDG_DATA_HOME/llamaforge/llama.cpp/`, with a "Clean up build files" option in the wizard completion screen.)
    - **Resolved (PR6) — narrower than recommended:** v1 builds in a temp directory that is removed after the binary is copied to `install_dir` (favoring disk hygiene; see §11.5). Preserving the source for `git pull && rebuild` is a tracked future enhancement.
@@ -1550,7 +1550,7 @@ Search `$PATH` plus common install locations (`/usr/local/bin`, `/opt/homebrew/b
 
 ### Model Scanner
 
-Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). If the GGUF header parser is implemented by then (currently stubbed), use it for selected files.
+Recursive directory walk (respecting symlinks, skipping hidden directories) with `.gguf` extension filter. `quantization_hint` and `architecture_hint` are parsed from the filename using common naming conventions (not GGUF header parsing -- that is too slow for a scan). The GGUF header parser is now implemented (#277, `vram_estimate.rs::sync_parse`) and feeds runtime VRAM admission (`task.rs`); enriching the scan-list hints from it for selected files is a tracked follow-up, kept off the scan path by design (per OQ#1).
 
 ### Build Process
 
