@@ -330,6 +330,52 @@ where
     }
 }
 
+/// Opaque ETag for a config section: a stable hash of its canonical JSON. The
+/// frontend captures it on GET to send back as `If-Match` once section writes
+/// land. `DefaultHasher` uses fixed keys, so the value is deterministic across
+/// runs for identical bytes; routing JSON through `serde_json::Value` (a
+/// `BTreeMap`-backed object) canonicalizes key order so the `servers` map hashes
+/// stably regardless of `HashMap` iteration order.
+fn config_section_etag(canonical_json: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    canonical_json.hash(&mut hasher);
+    format!("\"{:016x}\"", hasher.finish())
+}
+
+/// `GET /api/config/{section}` — read a config section as JSON with an `ETag`
+/// (FRONTEND_ARCHITECTURE.md §5.2; `ConfigSection` = `servers | priority |
+/// global`). Read-only: the matching `PUT` (runtime section writes) is deferred
+/// because LlamaForge's config model is restart-required for all fields except
+/// LoRA adapters (see `ConfigMutation` / the `/api/config/reload` gate), so a
+/// generic section write needs its own config-layer design. Tracked in
+/// 07_TRANSPORT_LAYER.md.
+pub(crate) async fn get_config_section<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+    Path(section): Path<String>,
+) -> Result<Response, ApiError> {
+    let snap = state.config_reader.snapshot();
+    let value = match section.as_str() {
+        "global" => serde_json::to_value(&snap.global),
+        "priority" => serde_json::to_value(&snap.priority_rules),
+        "servers" => serde_json::to_value(&snap.servers),
+        other => {
+            return Err(ApiError::NotFound(format!("unknown config section: {other}")));
+        }
+    }
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    // `value` is a canonical (BTreeMap-ordered) tree, so these bytes are stable.
+    let canonical = serde_json::to_vec(&value).map_err(|e| ApiError::Internal(e.to_string()))?;
+    let etag = config_section_etag(&canonical);
+
+    let mut resp = (axum::http::StatusCode::OK, Json(value)).into_response();
+    if let Ok(header) = axum::http::HeaderValue::from_str(&etag) {
+        resp.headers_mut().insert(axum::http::header::ETAG, header);
+    }
+    Ok(resp)
+}
+
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct MetricsQueryParams {
     #[serde(default)]
@@ -622,6 +668,7 @@ where
         .route("/api/queue", get(queue_status::<CW, RMS, SM>))
         .route("/api/queue/{id}", delete(cancel_request::<CW, RMS, SM>))
         .route("/api/config/reload", post(reload_config::<CW, RMS, SM>))
+        .route("/api/config/{section}", get(get_config_section::<CW, RMS, SM>))
         .route("/api/models", get(list_models::<CW, RMS, SM>))
         .route("/api/requests", get(query_requests::<CW, RMS, SM>))
         // Cancel reuses the queue submitter's cancel (same as DELETE /api/queue/{id});
@@ -1089,6 +1136,62 @@ mod tests {
         let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn get_config_section_returns_section_with_etag() {
+        let state = build_test_state();
+        let res = get_config_section(
+            axum::extract::State(state),
+            axum::extract::Path("global".to_string()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        // ETag emitted for the frontend to capture (apiFetchWithMeta reads it).
+        assert!(res.headers().contains_key(axum::http::header::ETAG));
+
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        // The body is the section object (global config), not wrapped.
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(body.is_object());
+    }
+
+    #[tokio::test]
+    async fn get_config_section_unknown_is_404() {
+        let state = build_test_state();
+        let err = get_config_section(
+            axum::extract::State(state),
+            axum::extract::Path("nonsense".to_string()),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, ApiError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn get_config_section_etag_is_stable_for_same_content() {
+        let state = build_test_state();
+        let etag_of = |state: ManagementState<ConfigHandle, (), ()>| async move {
+            let res = get_config_section(
+                axum::extract::State(state),
+                axum::extract::Path("priority".to_string()),
+            )
+            .await
+            .unwrap();
+            res.headers().get(axum::http::header::ETAG).unwrap().to_str().unwrap().to_string()
+        };
+        let a = etag_of(state.clone()).await;
+        let b = etag_of(state).await;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn management_routes_build_without_route_conflict() {
+        // Building the router panics if `/api/config/{section}` overlaps
+        // `/api/config/reload` (or any other registered path), so this is the
+        // guard for the new param route.
+        let _router = management_routes(build_test_state_with_store());
     }
 
     #[tokio::test]
