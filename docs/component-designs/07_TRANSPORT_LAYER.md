@@ -96,6 +96,7 @@ POST /api/servers/{id}/stop  → stop_server
 POST /api/servers/{id}/restart → restart_server  // graceful stop→start (user-initiated)
 GET  /api/queue              → queue_status
 DELETE /api/queue/{id}       → cancel_request
+GET  /api/models             → list_models         // ModelInfo[] from the routing registry
 GET  /api/requests           → query_requests      // explorer: RequestRecord[] projection
 POST /api/requests/{id}/cancel → cancel_request    // same QueueSubmitter::cancel as DELETE /api/queue/{id}
 POST /api/config/reload      → reload_config
@@ -137,6 +138,16 @@ projection of `RequestMetrics` over the same filter/pagination query params as
 `/api/metrics/requests`, which by contrast returns the full raw record for
 analysis). `POST /api/requests/{id}/cancel` is the explorer's cancel action; it
 delegates to the same `QueueSubmitter::cancel` as `DELETE /api/queue/{id}`.
+
+`GET /api/models` returns the frontend `ModelInfo` shape
+`{id, name, loaded, assignedServers, capabilities}`, projected from the routing
+`ServerStateView` (threaded into the management layer via `TransportDeps`/
+`HttpAppState`) and grouped by model alias: a model is `loaded` if any server
+serving it is `Running`; `assignedServers` lists those server ids;
+`capabilities` is the lowercase union of each server's routing `Capability` set
+plus its modality flags (`multimodal`/`embedding`/`reranking`). This is the
+management registry view; the OpenAI-discovery `GET /v1/models` (config aliases,
+OpenAI list envelope) is a separate, narrower surface.
 
 ### 2.4 Protocol Translation Types
 

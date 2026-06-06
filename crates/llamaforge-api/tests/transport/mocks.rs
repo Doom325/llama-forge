@@ -10,6 +10,15 @@ use llamaforge_core::types::{
     ChatCompletionChunk, RequestId, ServerId, StreamError,
 };
 
+/// Empty routing view: no servers. `GET /api/models` returns `[]` against it;
+/// transport integration tests that don't exercise the model registry use this.
+pub struct MockServerStateView;
+impl llamaforge_core::routing::types::ServerStateView for MockServerStateView {
+    fn all_servers(&self) -> Vec<llamaforge_core::routing::types::ServerSnapshot> {
+        vec![]
+    }
+}
+
 pub struct MockEngine {
     pub chunks: std::sync::Mutex<Vec<Result<ChatCompletionChunk, StreamError>>>,
     pub sleep_ms: u64,

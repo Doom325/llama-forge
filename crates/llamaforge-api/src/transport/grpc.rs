@@ -685,6 +685,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
@@ -751,6 +752,7 @@ mod tests {
             queue_submitter: Arc::new(MockQueueSubmitter),
             request_metrics_store: Arc::new(llamaforge_metrics::InMemoryStore::default()),
             store_maintenance: Arc::new(llamaforge_metrics::InMemoryStore::default()),
+            server_state_view: crate::transport::test_empty_server_state_view(),
             large_body_limit: crate::transport::middleware::LargeBodyConcurrencyLimit::new(10, 1),
         };
 
