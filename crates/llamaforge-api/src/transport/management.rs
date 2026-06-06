@@ -158,7 +158,7 @@ where
 /// routing `ServerStateView`, grouped by model alias.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ModelInfoResponse {
+pub(crate) struct ModelInfoResponse {
     id: String,
     name: String,
     loaded: bool,
@@ -201,9 +201,12 @@ fn snapshot_capabilities(
 /// `loaded` if any server serving it is `Running`, `assignedServers` lists those
 /// servers, and `capabilities` is the union of their capability tags. Ordering
 /// is deterministic (models and servers/caps are accumulated in sorted sets).
-pub(crate) async fn list_models<CW, RMS, SM>(
-    State(state): State<ManagementState<CW, RMS, SM>>,
-) -> Result<Response, ApiError> {
+/// Project the routing `ServerStateView` snapshots into the `ModelInfo` list,
+/// grouped by alias. Shared by `GET /api/models` and the SSE `model-update`
+/// producer so the live feed can't drift from the polled endpoint.
+pub(crate) fn model_infos_from_snapshots(
+    snapshots: Vec<llamaforge_core::routing::types::ServerSnapshot>,
+) -> Vec<ModelInfoResponse> {
     use std::collections::{BTreeMap, BTreeSet};
 
     struct ModelAcc {
@@ -213,7 +216,7 @@ pub(crate) async fn list_models<CW, RMS, SM>(
     }
 
     let mut by_model: BTreeMap<String, ModelAcc> = BTreeMap::new();
-    for snap in state.server_state_view.all_servers() {
+    for snap in snapshots {
         let running = snap.lifecycle == ServerLifecycle::Running;
         let server_id = snap.id.to_string();
         let caps = snapshot_capabilities(&snap);
@@ -231,7 +234,7 @@ pub(crate) async fn list_models<CW, RMS, SM>(
         }
     }
 
-    let models: Vec<ModelInfoResponse> = by_model
+    by_model
         .into_iter()
         .map(|(name, acc)| ModelInfoResponse {
             id: name.clone(),
@@ -240,8 +243,13 @@ pub(crate) async fn list_models<CW, RMS, SM>(
             assigned_servers: acc.servers,
             capabilities: acc.capabilities.into_iter().collect(),
         })
-        .collect();
+        .collect()
+}
 
+pub(crate) async fn list_models<CW, RMS, SM>(
+    State(state): State<ManagementState<CW, RMS, SM>>,
+) -> Result<Response, ApiError> {
+    let models = model_infos_from_snapshots(state.server_state_view.all_servers());
     Ok(Json(models).into_response())
 }
 
