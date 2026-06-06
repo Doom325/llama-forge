@@ -4,9 +4,9 @@
 //! setup→running transition happens in-place (no restart) — the first-run serve
 //! E2E deferred from PR7.
 //!
-//! First-run binds the default HTTP port (8000, since there is no config to
-//! override it), so these tests share that port and must not run concurrently
-//! with each other; they are written as a single lifecycle test.
+//! First-run defaults to HTTP port 8000, but honours `LLAMAFORGE_HTTP_PORT`
+//! (issue #281); this test binds an ephemeral free port so it neither collides on
+//! the fixed default nor needs serialization.
 
 #![cfg(unix)]
 
@@ -19,7 +19,12 @@ use tempfile::TempDir;
 use tokio::process::Command;
 
 const CSRF: (&str, &str) = ("x-llamaforge-request", "1");
-const BASE: &str = "http://127.0.0.1:8000";
+
+/// An ephemeral port that is free at call time (released immediately, then handed
+/// to the spawned server via `LLAMAFORGE_HTTP_PORT`).
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
 
 fn get_bin(name: &str) -> PathBuf {
     let target = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| {
@@ -42,9 +47,9 @@ fn fake_llama_server(dir: &Path) -> PathBuf {
     bin
 }
 
-async fn poll_status(client: &reqwest::Client, want_setup_required: bool) -> bool {
+async fn poll_status(client: &reqwest::Client, base: &str, want_setup_required: bool) -> bool {
     for _ in 0..60 {
-        if let Ok(resp) = client.get(format!("{BASE}/api/status")).send().await {
+        if let Ok(resp) = client.get(format!("{base}/api/status")).send().await {
             if let Ok(body) = resp.json::<Value>().await {
                 if body["setup_required"] == json!(want_setup_required) {
                     return true;
@@ -77,21 +82,26 @@ async fn test_first_run_setup_to_running_lifecycle() {
     let model = model_dir.join("llama-3-8b-Q4_K_M.gguf");
     std::fs::write(&model, b"GGUF\x00").unwrap();
 
-    // Boot in first-run setup mode (no config present).
+    // Boot in first-run setup mode (no config present), on an ephemeral port.
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
     let mut cmd = Command::new(get_bin("llamaforge"));
     cmd.arg("serve").arg("--config").arg(&config_path).arg("--state-dir").arg(&state_dir);
+    cmd.env("LLAMAFORGE_HTTP_PORT", port.to_string());
     cmd.process_group(0);
-    // Kill the server even if an assertion panics, so a failed run can't leave it
-    // squatting on the fixed first-run port.
+    // Kill the server even if an assertion panics, so a failed run can't orphan it.
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().unwrap();
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(35)).build().unwrap();
-    assert!(poll_status(&client, true).await, "server should report setup_required=true on boot");
+    assert!(
+        poll_status(&client, &base, true).await,
+        "server should report setup_required=true on boot"
+    );
 
     // --- Drive the wizard's /api/setup/* surface --------------------------
     let scan_bin: Value = client
-        .post(format!("{BASE}/api/setup/scan-binary"))
+        .post(format!("{base}/api/setup/scan-binary"))
         .header(CSRF.0, CSRF.1)
         .json(&json!({ "extra_paths": [bin_dir] }))
         .send()
@@ -103,7 +113,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
     assert_eq!(scan_bin["found"], true, "fake llama-server should be found");
 
     let _models: Value = client
-        .post(format!("{BASE}/api/setup/scan-models"))
+        .post(format!("{base}/api/setup/scan-models"))
         .header(CSRF.0, CSRF.1)
         .json(&json!({ "source": "local", "directories": [model_dir] }))
         .send()
@@ -114,7 +124,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
         .unwrap();
 
     let _rec: Value = client
-        .post(format!("{BASE}/api/setup/recommend"))
+        .post(format!("{base}/api/setup/recommend"))
         .header(CSRF.0, CSRF.1)
         .json(&json!({ "models": [{ "path": model, "size_bytes": 4_400_000_000u64 }] }))
         .send()
@@ -143,7 +153,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
     });
 
     let save = client
-        .post(format!("{BASE}/api/setup/save-config"))
+        .post(format!("{base}/api/setup/save-config"))
         .header(CSRF.0, CSRF.1)
         .json(&save_req)
         .send()
@@ -153,7 +163,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
 
     // 14.5 — a second save without force conflicts (the config now exists).
     let conflict = client
-        .post(format!("{BASE}/api/setup/save-config"))
+        .post(format!("{base}/api/setup/save-config"))
         .header(CSRF.0, CSRF.1)
         .json(&save_req)
         .send()
@@ -168,7 +178,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
     // validate-launch spawns the server and health-checks it; on success it
     // signals setup completion, which drives the transition (§13.5 Step 3).
     let validate: Value = client
-        .post(format!("{BASE}/api/setup/validate-launch"))
+        .post(format!("{base}/api/setup/validate-launch"))
         .header(CSRF.0, CSRF.1)
         .json(&json!({ "servers": save_req["servers"] }))
         .send()
@@ -181,7 +191,7 @@ async fn test_first_run_setup_to_running_lifecycle() {
 
     // --- The completion signal triggers the in-place setup→running transition.
     assert!(
-        poll_status(&client, false).await,
+        poll_status(&client, &base, false).await,
         "server should transition to setup_required=false after launch (no restart)"
     );
 
