@@ -5,13 +5,13 @@
 //! Dispatch emits a small post-completion summary; metrics expects a
 //! fully populated `RequestMetrics`. The translator fills the
 //! caller-known fields (`model_name`, `requestor`, `task_type`,
-//! `received_at`) from the surrounding request context, derives
-//! durations from `duration`/`ttft`, and leaves request-pipeline-only
-//! fields (`effective_priority`, `dispatched_at`/`first_token_at`) as
-//! their sensible neutral defaults — those are populated upstream
-//! once the dispatch path grows the corresponding observations.
-//! `prompt_tokens` is now carried through from the dispatch audit
-//! record (#134).
+//! `received_at`, `dispatched_at`, `slot_id`) from the surrounding
+//! request context, derives durations from `duration`/`ttft`, and
+//! computes a real `queue_wait_ms` (dispatch − receipt). `prompt_tokens`
+//! is carried through from the dispatch audit record (#134);
+//! `dispatched_at`/`slot_id`/`queue_wait_ms` were wired in #230.
+//! `effective_priority` is still a neutral default pending a
+//! priority-carrying audit record.
 
 use crate::dispatch::proxy::AuditRecord as DispatchAuditRecord;
 use chrono::{DateTime, Utc};
@@ -28,7 +28,13 @@ pub struct AuditContext {
     pub model_name: String,
     pub requestor: ConfigRequestorId,
     pub task_type: TaskTypeId,
+    /// Wall-clock moment the request was received (before queueing).
     pub received_at: DateTime<Utc>,
+    /// Wall-clock moment the request transitioned queue → slot. With
+    /// `received_at` this yields a real `queue_wait_ms` (#230).
+    pub dispatched_at: DateTime<Utc>,
+    /// The llama-server slot the request was dispatched to (#230).
+    pub slot_id: u32,
 }
 
 /// Convert a dispatch-layer `AuditRecord` into a metrics-layer
@@ -66,16 +72,23 @@ pub fn translate_audit(record: DispatchAuditRecord, ctx: &AuditContext) -> Metri
         request_id: MetricsRequestId::from(request_id.as_uuid().to_string()),
         model_name: ctx.model_name.clone(),
         server_id: Some(server_id),
-        slot_id: None,
+        slot_id: Some(ctx.slot_id),
         task_type: ctx.task_type.clone(),
         requestor: ctx.requestor.clone(),
         effective_priority: 0,
         received_at: ctx.received_at,
-        dispatched_at: None,
+        dispatched_at: Some(ctx.dispatched_at),
+        // TTFT is measured by the proxy from dispatch start (proxy.rs), so the
+        // first token lands at `dispatched_at + ttft`, not `received_at + ttft`.
         first_token_at: ttft
-            .map(|t| ctx.received_at + chrono::Duration::from_std(t).unwrap_or_default()),
+            .map(|t| ctx.dispatched_at + chrono::Duration::from_std(t).unwrap_or_default()),
         completed_at: Some(now),
-        queue_wait_ms: 0.0,
+        // Real queue wait: receipt → dispatch. Clamped at 0 to absorb any
+        // clock skew between the two captures.
+        queue_wait_ms: ((ctx.dispatched_at - ctx.received_at).num_microseconds().unwrap_or(0)
+            as f64
+            / 1000.0)
+            .max(0.0),
         ttft_ms,
         generation_duration_ms,
         total_latency_ms,
@@ -99,11 +112,15 @@ mod tests {
     use std::time::Duration;
 
     fn ctx() -> AuditContext {
+        let received_at = Utc::now();
         AuditContext {
             model_name: "test-model".to_string(),
             requestor: ConfigRequestorId("anonymous".to_string()),
             task_type: TaskTypeId("default".to_string()),
-            received_at: Utc::now(),
+            received_at,
+            // 250ms in the queue before dispatch to slot 3.
+            dispatched_at: received_at + chrono::Duration::milliseconds(250),
+            slot_id: 3,
         }
     }
 
@@ -133,6 +150,15 @@ mod tests {
         // generation = 120 - 30 = 90ms; tps = 42/0.09 ≈ 466.67
         let gen_tps = out.request_metrics.generation_tps.unwrap();
         assert!((gen_tps - 466.666_666_666_666_7).abs() < 0.1);
+
+        // #230: dispatch metadata is populated, not null.
+        assert_eq!(out.request_metrics.slot_id, Some(3));
+        let dispatched_at = out.request_metrics.dispatched_at.expect("dispatched_at set");
+        // queue_wait_ms reflects the 250ms receipt→dispatch gap (not 0).
+        assert!((out.request_metrics.queue_wait_ms - 250.0).abs() < 1.0);
+        // first_token_at is dispatched_at + ttft (30ms), not received_at + ttft.
+        let first_token_at = out.request_metrics.first_token_at.expect("first_token_at set");
+        assert_eq!(first_token_at, dispatched_at + chrono::Duration::milliseconds(30));
     }
 
     #[test]
