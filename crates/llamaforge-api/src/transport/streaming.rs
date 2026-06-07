@@ -115,6 +115,10 @@ impl InferenceEngine for StreamingInferenceService {
             seed: None,
         };
 
+        // True receipt time — reused for the metrics row's `received_at` so
+        // `queue_wait_ms` (dispatched_at - received_at) is real, not a
+        // post-dispatch re-capture that always read ~0 (#230).
+        let received_at = chrono::Utc::now();
         let incoming = IncomingRequest {
             request_id,
             requestor_id,
@@ -125,7 +129,7 @@ impl InferenceEngine for StreamingInferenceService {
             params,
             stream: req.stream,
             session_id: None,
-            submitted_at: chrono::Utc::now(),
+            submitted_at: received_at,
         };
 
         let mut ticket = self.queue.submit(incoming).map_err(|e| match e {
@@ -171,7 +175,7 @@ impl InferenceEngine for StreamingInferenceService {
 
             // Phase 1: wait for the scheduler to dispatch, fail, or be cancelled.
             // While waiting, forward `Queued` events as `QueueUpdate` chunks.
-            let (server_id, slot_id) = loop {
+            let (server_id, slot_id, dispatched_at) = loop {
                 tokio::select! {
                     biased;
                     _ = cancel_token.cancelled() => {
@@ -186,7 +190,9 @@ impl InferenceEngine for StreamingInferenceService {
                             Some(DispatchEvent::Dispatched { server_id, slot_id }) => {
                                 let wait = start_time.elapsed().as_secs_f64();
                                 metrics::histogram!("llamaforge_queue_wait_seconds").record(wait);
-                                break (server_id, slot_id);
+                                // Queue→slot transition: capture the wall-clock
+                                // moment and chosen slot for the metrics row (#230).
+                                break (server_id, slot_id, chrono::Utc::now());
                             }
                             Some(DispatchEvent::Failed { error }) => {
                                 yield Err(StreamError::Upstream(Box::new(
@@ -224,7 +230,9 @@ impl InferenceEngine for StreamingInferenceService {
                 model_name: audit_model.clone(),
                 requestor: llamaforge_core::config::RequestorId("anonymous".to_string()),
                 task_type: llamaforge_core::config::TaskTypeId("default".to_string()),
-                received_at: chrono::Utc::now(),
+                received_at,
+                dispatched_at,
+                slot_id: slot_id.into_inner(),
             };
             tokio::spawn(async move {
                 while let Some(record) = audit_rx.recv().await {
