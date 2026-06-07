@@ -66,32 +66,44 @@ async fn test_e2e_metrics_endpoint() {
         .trim()
         .parse()
         .expect("counter value parses as u64");
-    // Counter must reflect at least one successful chat completion. The
-    // exact count is unstable here because the Prometheus exporter
-    // aggregates same-label counter samples across worker shards on
-    // exposition; the metric is still cumulative and monotonic, so we
-    // assert ≥ 1. The cumulative-count assertion is exercised by the
-    // transport unit tests on `metrics_middleware`.
-    assert!(
-        value >= 1,
-        "expected at least 1 chat-completion 200 counter sample, got {} (line: {})",
-        value,
-        chat_200
+    // Regression guard for #232: `*_total` counters must *accumulate*.
+    // Three successful chat completions must read exactly 3 — not 1 (the
+    // set/absolute-style behaviour the broken `metrics-exporter-prometheus`
+    // 0.16 + `metrics` 0.24 combo produced, where every counter reported
+    // only the most recent request's contribution). A `>= 1` assertion
+    // here previously masked that regression.
+    assert_eq!(
+        value, 3,
+        "expected exactly 3 cumulative chat-completion 200 counter samples, got {} (line: {})",
+        value, chat_200
     );
 
     assert!(
         metrics.contains("llamaforge_active_connections"),
         "expected llamaforge_active_connections gauge in /metrics"
     );
-    // `llamaforge_tokens_total` is incremented by `StreamingInferenceService`
-    // on the streaming Stop chunk; the non-streaming path in this test
-    // doesn't exercise it directly. The aggregate counter family is
-    // present (the inference adapter declares it at build time even at
-    // zero), but we assert on the family name, not a sample value.
     assert!(
         metrics.contains("llamaforge_tokens_completion_total")
             || metrics.contains("llamaforge_tokens_total"),
         "expected a llamaforge_tokens_* counter family in /metrics"
+    );
+
+    // Second accumulation guard for #232, on a different emit path
+    // (`dispatch/proxy.rs`): one dispatch per request, so the per-server
+    // `llamaforge_dispatches_total` must sum to 3 across the batch. This
+    // catches the regression even if the HTTP-layer counter were exempt.
+    let dispatches: u64 = metrics
+        .lines()
+        .filter(|l| l.starts_with("llamaforge_dispatches_total{"))
+        .filter_map(|l| l.rsplit(' ').next())
+        .filter_map(|v| v.trim().parse::<u64>().ok())
+        .sum();
+    assert_eq!(
+        dispatches,
+        3,
+        "expected dispatches_total to accumulate to 3 across the batch, got {} (metrics:\n{})",
+        dispatches,
+        metrics.lines().filter(|l| l.contains("dispatches_total")).collect::<Vec<_>>().join("\n")
     );
 
     // Label cardinality on `path` is bounded to the known routes.
