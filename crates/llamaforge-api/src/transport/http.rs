@@ -658,7 +658,13 @@ where
         if !saw_stop {
             return Err(ApiError::ServiceUnavailable { retry_after_secs: 1 });
         }
-        let stop_reason = stop_reason.unwrap_or_else(|| "end_turn".to_string());
+        // Map the internal/OpenAI-style finish_reason to the Anthropic
+        // `stop_reason` enum (#136). The non-streaming path previously emitted
+        // the raw value (e.g. "stop"/"length"), breaking SDK clients. Default
+        // (no observed reason) is the raw "stop", which maps to "end_turn".
+        let stop_reason = super::anthropic::map_finish_reason_to_anthropic(
+            stop_reason.as_deref().unwrap_or("stop"),
+        );
 
         Ok(inject_version(
             axum::Json(serde_json::json!({
@@ -1328,6 +1334,48 @@ mod tests {
         assert!(!id.starts_with("chatcmpl-"), "id must not be chat-shaped, got {id}");
         assert_eq!(json["usage"]["completion_tokens"].as_u64(), Some(2));
         assert_eq!(json["usage"]["prompt_tokens"].as_u64(), Some(3));
+    }
+
+    #[tokio::test]
+    async fn test_anthropic_messages_maps_stop_reason() {
+        // #136: non-streaming /v1/messages must map the internal finish_reason
+        // ("length") to the Anthropic stop_reason enum ("max_tokens"), not pass
+        // it through verbatim.
+        let chunks = vec![
+            Ok(ChatCompletionChunk::Token("hi there".to_string())),
+            Ok(ChatCompletionChunk::Stop {
+                finish_reason: "length".to_string(),
+                output_tokens: 64,
+                prompt_tokens: 3,
+            }),
+        ];
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "llama-3.2-3b",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "hi"}]
+        });
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("content-type", "application/json")
+            .header("anthropic-version", "2023-06-01")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+        // The /v1/messages handler extracts ConnectInfo; oneshot() doesn't set
+        // it (no `into_make_service_with_connect_info`), so inject it directly.
+        req.extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from(([127, 0, 0, 1], 0))));
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["stop_reason"].as_str(), Some("max_tokens"));
+        assert!(json["stop_sequence"].is_null());
+        assert_eq!(json["type"].as_str(), Some("message"));
     }
 
     #[tokio::test]
