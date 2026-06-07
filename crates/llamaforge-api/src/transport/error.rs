@@ -26,6 +26,15 @@ pub enum ApiError {
     /// entity by id (e.g. `GET /api/servers/{id}` for an unknown server).
     #[error("Not found: {0}")]
     NotFound(String),
+    /// Surface as `404 Not Found` with the `request_not_cancellable` code.
+    /// The operator cancel endpoint (`DELETE /api/queue/{id}`,
+    /// `POST /api/requests/{id}/cancel`) is queue-only in v1 — in-flight
+    /// requests run to completion (design.md G3, "no mid-generation
+    /// eviction"). A request id that is not in the queue (never existed,
+    /// already completed, or already past the dispatch boundary) is not
+    /// cancellable; this is a client-addressable 4xx, not a server fault.
+    #[error("Request not cancellable: {0}")]
+    NotCancellable(String),
     #[error("Queue full")]
     QueueFull { retry_after_secs: u32 },
     #[error("Backend error")]
@@ -115,6 +124,9 @@ impl IntoResponse for ApiError {
                 (StatusCode::NOT_FOUND, "model_not_found", "Model not found".to_string())
             }
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg.clone()),
+            ApiError::NotCancellable(msg) => {
+                (StatusCode::NOT_FOUND, "request_not_cancellable", msg.clone())
+            }
             ApiError::QueueFull { .. } => {
                 (StatusCode::TOO_MANY_REQUESTS, "queue_full", "Queue is full".to_string())
             }
@@ -172,6 +184,7 @@ impl From<ApiError> for tonic::Status {
             ApiError::AuthFailure => tonic::Status::unauthenticated("Authentication failed"),
             ApiError::ModelNotFound => tonic::Status::not_found("Model not found"),
             ApiError::NotFound(msg) => tonic::Status::not_found(msg),
+            ApiError::NotCancellable(msg) => tonic::Status::not_found(msg),
             ApiError::QueueFull { .. } => tonic::Status::resource_exhausted("Queue is full"),
             ApiError::BackendError => tonic::Status::internal("Backend error"),
             ApiError::Timeout => tonic::Status::deadline_exceeded("Request timed out"),
