@@ -34,7 +34,7 @@ tokio-util.workspace = true
 async-trait.workspace = true
 async-stream.workspace = true
 tracing.workspace = true
-metrics = "0.24"
+metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 reqwest = { workspace = true }
 dashmap = { workspace = true }
