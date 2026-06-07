@@ -6,7 +6,7 @@ use axum::{
 };
 use llamaforge_core::config::{ConfigReader, ConfigWriter};
 use llamaforge_core::types::{
-    traits::{QueueSubmitter, ServerControl, ServerSummary},
+    traits::{QueueError, QueueSubmitter, ServerControl, ServerSummary},
     RequestId, ServerId, ServerLifecycle,
 };
 use llamaforge_metrics::{RequestMetricsStore, StoreMaintenance};
@@ -313,7 +313,22 @@ pub(crate) async fn cancel_request<CW, RMS, SM>(
         uuid::Uuid::parse_str(&id)
             .map_err(|_| ApiError::InvalidBody("Invalid RequestId".into()))?,
     );
-    state.queue_submitter.cancel(&request_id).map_err(|e| ApiError::Internal(e.to_string()))?;
+    // Cancellation is queue-only in v1 (design.md G3 — in-flight requests run
+    // to completion). A request id that is not in the queue is a
+    // client-addressable 404, not a 500 — emitting `internal_error` here misled
+    // operators and tripped 5xx alerts (#229). Only a genuine internal queue
+    // fault stays 5xx.
+    state.queue_submitter.cancel(&request_id).map_err(|e| match e {
+        QueueError::NotFound { id } => ApiError::NotCancellable(format!(
+            "request {id} is not in the cancellable set (never existed, already \
+             completed, or past the dispatch boundary; in-flight requests are not \
+             cancellable in v1)"
+        )),
+        QueueError::AlreadyCancelled => {
+            ApiError::NotCancellable("request was already cancelled".to_string())
+        }
+        QueueError::Internal { detail } => ApiError::Internal(detail),
+    })?;
     Ok(axum::http::StatusCode::OK.into_response())
 }
 
@@ -730,6 +745,21 @@ mod tests {
         }
         fn status(&self) -> Result<QueueSnapshot, QueueError> {
             Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 1.0 })
+        }
+    }
+
+    /// Queue submitter whose `cancel` always reports the id is absent from
+    /// the queue — the in-flight / unknown-id case from #229.
+    struct MockQueueSubmitterNotFound;
+    impl QueueSubmitter for MockQueueSubmitterNotFound {
+        fn submit(&self, _req: IncomingRequest) -> Result<QueueTicket, AdmissionError> {
+            unreachable!("submit not exercised")
+        }
+        fn cancel(&self, id: &RequestId) -> Result<(), QueueError> {
+            Err(QueueError::NotFound { id: *id })
+        }
+        fn status(&self) -> Result<QueueSnapshot, QueueError> {
+            Ok(QueueSnapshot { depth: 0, estimated_throughput_req_sec: 0.0 })
         }
     }
 
@@ -1219,5 +1249,25 @@ mod tests {
         )
         .await;
         assert!(matches!(bad.unwrap_err(), ApiError::InvalidBody(_)));
+    }
+
+    #[tokio::test]
+    async fn cancel_request_unknown_or_inflight_id_returns_404_not_500() {
+        // Regression for #229: cancelling an id not in the queue (unknown,
+        // already completed, or past the dispatch boundary — in-flight is not
+        // cancellable in v1) must surface as 404 `request_not_cancellable`,
+        // NOT 500 `internal_error`.
+        let mut state = build_test_state();
+        state.queue_submitter = Arc::new(MockQueueSubmitterNotFound);
+        let id = uuid::Uuid::now_v7().to_string();
+
+        let err = cancel_request(axum::extract::State(state), axum::extract::Path(id))
+            .await
+            .expect_err("absent id must be an error, not 200");
+        assert!(
+            matches!(err, ApiError::NotCancellable(_)),
+            "expected NotCancellable (404), got {err:?}"
+        );
+        assert_eq!(err.into_response().status(), StatusCode::NOT_FOUND);
     }
 }

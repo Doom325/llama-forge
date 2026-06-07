@@ -291,7 +291,7 @@ Goal: operate the fleet and inspect queue/metrics over HTTP. (All under `:8000`.
 | MGT-03 | P0 | Start a server | `curl -i -s -X POST $HTTP/api/servers/<id>/start` | HTTP 200. The child `llama-server` respawns; `state` returns to `Starting`→`Running`. |
 | MGT-04 | P1 | Bad server id slug → 400 | `curl -i -s -X POST "$HTTP/api/servers/Bad%20Id!/start"` | HTTP 400 `invalid_body` (slug validation rejects it before touching the fleet). |
 | MGT-05 | P1 | Queue status | `curl -s $HTTP/api/queue \| jq` | `{"depth":<n>,"estimated_throughput_req_sec":<f>}`. Idle: `depth` 0. |
-| MGT-06 | P1 | Cancel by request id | While a long request runs, `curl -i -s -X DELETE $HTTP/api/queue/<request-uuid>` | HTTP 200 if cancellable. The `request-uuid` is the one from the `x-request-id` header of the in-flight request. |
+| MGT-06 | P1 | Cancel by request id (queue-only) | Submit a request that sits **queued** (e.g. fill all slots so the next one waits), then `curl -i -s -X DELETE $HTTP/api/queue/<request-uuid>` with its `x-request-id` | HTTP 200 if the request is still **queued**. Cancellation is queue-only in v1 — in-flight (dispatched/generating) requests run to completion (design.md G3); cancelling an in-flight or unknown id returns **HTTP 404 `request_not_cancellable`** (not 500). In-flight requests are cancelled only by client disconnect (OAI-11/CHA-05). |
 | MGT-07 | P2 | Cancel with non-UUID → 400 | `curl -i -s -X DELETE $HTTP/api/queue/not-a-uuid` | HTTP 400 `invalid_body` ("Invalid RequestId"). |
 | MGT-08 | P0 | Reload (hot-reloadable) | Edit only `alias` of a server in `$CFG`, then `curl -i -s -X POST $HTTP/api/config/reload` | HTTP 200. New alias appears in `/v1/models` and `/v1/servers`. Logs `lifecycle.config.reload.applying` / `applied`. |
 | MGT-09 | P0 | Reload (restart-required) → 412 | Edit a restart-required field (e.g. `ctx_size`, `port`, `parallel_slots`, `model_path`), then POST `/api/config/reload` | **HTTP 412** `{"error":"precondition_failed","message":"config diff touches restart-required server fields ([...]); restart the orchestrator to apply", ...}`. The running fleet is unchanged. |
@@ -439,7 +439,7 @@ Issues found **in this plan itself** (not product defects) — fix before the ne
 | D | OpenAI HTTP API | 11 | 10 | 1 | 0 | OAI-09 413 returns plain text, not canonical JSON |
 | E | Anthropic HTTP API | 5 | 5 | 0 | 0 | |
 | F | gRPC core | 8 | 6 | 2 | 0 | GRP-03 health svc not registered (#227); GRP-08 saturation → Internal not RESOURCE_EXHAUSTED (#231) |
-| G | Management API | 13 | 12 | 1 | 0 | MGT-06 cancel-during-prompt (#229) |
+| G | Management API | 13 | 13 | 0 | 0 | MGT-06 resolved in #229: cancel is queue-only (v1), in-flight/unknown id → 404 `request_not_cancellable` not 500 |
 | H | Routing & scheduling | 7 | 3 | 1 | 3 | RT-04 Fail (#231); RT-03/05/06 N/A (Tier-2 / no v1 priority API) |
 | I | Observability | 7 | 6 | 1 | 0 | OBS-02 counters don't accumulate (#232) |
 | J | Security & auth | 7 | 7 | 0 | 0 | |
