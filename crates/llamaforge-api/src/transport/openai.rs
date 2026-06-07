@@ -192,10 +192,111 @@ pub(crate) fn format_openai_chunk(
     }
 }
 
+/// Like [`format_openai_chunk`] but emits the **legacy** OpenAI
+/// `/v1/completions` streaming shape (#135): `object: "text_completion"`
+/// and `choices[].text` deltas instead of `choices[].delta.content`.
+/// Same SSE-data contract (no `data: ` prefix; `Stop` expands to the
+/// terminal chunk plus the `[DONE]` sentinel).
+pub(crate) fn format_openai_text_chunk(
+    id: &str,
+    model: &str,
+    created: i64,
+    chunk: &ChatCompletionChunk,
+) -> Vec<String> {
+    match chunk {
+        ChatCompletionChunk::QueueUpdate { position } => {
+            let update = serde_json::json!({
+                "id": id,
+                "object": "text_completion",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "text": "",
+                    "index": 0,
+                    "finish_reason": serde_json::Value::Null,
+                }],
+                "llamaforge": {
+                    "status": "queued",
+                    "position": position
+                }
+            });
+            vec![update.to_string()]
+        }
+        ChatCompletionChunk::Token(token) => {
+            let token_json = serde_json::json!({
+                "id": id,
+                "object": "text_completion",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "text": token,
+                    "index": 0,
+                    "finish_reason": serde_json::Value::Null,
+                }]
+            });
+            vec![token_json.to_string()]
+        }
+        ChatCompletionChunk::Stop { finish_reason, output_tokens, prompt_tokens } => {
+            let stop_json = serde_json::json!({
+                "id": id,
+                "object": "text_completion",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "text": "",
+                    "index": 0,
+                    "finish_reason": finish_reason
+                }],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": prompt_tokens.saturating_add(*output_tokens),
+                }
+            });
+            vec![stop_json.to_string(), "[DONE]".to_string()]
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_format_openai_text_chunk_shape() {
+        // #135: token chunk → object text_completion with choices[].text.
+        let token = format_openai_text_chunk(
+            "cmpl-1",
+            "gemma",
+            42,
+            &ChatCompletionChunk::Token("hi".to_string()),
+        );
+        assert_eq!(token.len(), 1);
+        let v: serde_json::Value = serde_json::from_str(&token[0]).unwrap();
+        assert_eq!(v["object"].as_str(), Some("text_completion"));
+        assert_eq!(v["choices"][0]["text"].as_str(), Some("hi"));
+        // Must NOT use the chat `delta.content` shape.
+        assert!(v["choices"][0]["delta"].is_null());
+
+        // Stop chunk → terminal text_completion chunk + [DONE] sentinel.
+        let stop = format_openai_text_chunk(
+            "cmpl-1",
+            "gemma",
+            42,
+            &ChatCompletionChunk::Stop {
+                finish_reason: "stop".to_string(),
+                output_tokens: 5,
+                prompt_tokens: 2,
+            },
+        );
+        assert_eq!(stop.len(), 2);
+        assert_eq!(stop[1], "[DONE]");
+        let sv: serde_json::Value = serde_json::from_str(&stop[0]).unwrap();
+        assert_eq!(sv["object"].as_str(), Some("text_completion"));
+        assert_eq!(sv["choices"][0]["finish_reason"].as_str(), Some("stop"));
+        assert_eq!(sv["usage"]["total_tokens"].as_u64(), Some(7));
+    }
 
     #[test]
     fn test_openai_null_max_tokens() {
