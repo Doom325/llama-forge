@@ -125,6 +125,29 @@ impl From<SseEvent> for axum::response::sse::Event {
     }
 }
 
+/// Map an internal/OpenAI-style `finish_reason` to the Anthropic
+/// `stop_reason` enum (#136). The internal reasons originate from the
+/// upstream `Stop` chunk; Anthropic SDK clients pattern-match on this
+/// enum, so passing `"stop"` through verbatim breaks them. Unknown
+/// reasons default to `end_turn` (with a warning) rather than leaking a
+/// non-spec value. Shared by the streaming and non-streaming `/v1/messages`
+/// paths so they can't drift.
+pub(crate) fn map_finish_reason_to_anthropic(finish_reason: &str) -> &'static str {
+    match finish_reason {
+        "stop" => "end_turn",
+        "length" => "max_tokens",
+        "stop_sequence" => "stop_sequence",
+        "tool_calls" | "tool_use" => "tool_use",
+        other => {
+            tracing::warn!(
+                reason = %other,
+                "anthropic.unknown_finish_reason — defaulting to end_turn"
+            );
+            "end_turn"
+        }
+    }
+}
+
 /// Formats an internal chunk into Anthropic SSE events.
 ///
 /// Ensures strict state machine transitions per design doc G-11.
@@ -260,19 +283,7 @@ pub(crate) fn format_anthropic_event(
                 data: serde_json::json!({
                     "type": "message_delta",
                     "delta": {
-                        "stop_reason": match finish_reason.as_str() {
-                            "stop" => "end_turn",
-                            "length" => "max_tokens",
-                            "stop_sequence" => "stop_sequence",
-                            "tool_calls" | "tool_use" => "tool_use",
-                            other => {
-                                tracing::warn!(
-                                    reason = %other,
-                                    "anthropic.unknown_finish_reason — defaulting to end_turn"
-                                );
-                                "end_turn"
-                            }
-                        },
+                        "stop_reason": map_finish_reason_to_anthropic(finish_reason.as_str()),
                         "stop_sequence": null
                     },
                     "usage": {
@@ -494,5 +505,17 @@ mod tests {
         assert!(
             matches!(res, Err(ApiError::InvalidBody(ref msg)) if msg.contains("temperature must be between 0.0 and 2.0"))
         );
+    }
+
+    #[test]
+    fn test_map_finish_reason_to_anthropic() {
+        // #136: internal/OpenAI finish_reason → Anthropic stop_reason enum.
+        assert_eq!(map_finish_reason_to_anthropic("stop"), "end_turn");
+        assert_eq!(map_finish_reason_to_anthropic("length"), "max_tokens");
+        assert_eq!(map_finish_reason_to_anthropic("stop_sequence"), "stop_sequence");
+        assert_eq!(map_finish_reason_to_anthropic("tool_calls"), "tool_use");
+        assert_eq!(map_finish_reason_to_anthropic("tool_use"), "tool_use");
+        // Unknown reasons default to end_turn (never leak a non-spec value).
+        assert_eq!(map_finish_reason_to_anthropic("weird"), "end_turn");
     }
 }
