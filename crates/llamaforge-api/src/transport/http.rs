@@ -23,7 +23,9 @@ use super::{
         auth_middleware, large_body_limit_middleware, metrics_middleware, request_id_middleware,
         LargeBodyConcurrencyLimit,
     },
-    openai::{format_openai_chunk, parse_openai_request, OpenAiChatRequest},
+    openai::{
+        format_openai_chunk, format_openai_text_chunk, parse_openai_request, OpenAiChatRequest,
+    },
     InferenceEngine, TransportError,
 };
 
@@ -142,7 +144,18 @@ where
         parse_openai_request(request)?
     };
 
-    handle_openai_request(state, request_id, req, stream).await
+    handle_openai_request(state, request_id, req, stream, ResponseShape::Chat).await
+}
+
+/// Which OpenAI wire shape the response should take. The chat path
+/// (`/v1/chat/completions`) and the legacy text path (`/v1/completions`)
+/// share routing/dispatch but serialize differently (#135): `object`,
+/// the `choices[]` body (`message.content` vs `text`), and the id
+/// prefix (`chatcmpl-` vs `cmpl-`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResponseShape {
+    Chat,
+    Text,
 }
 
 async fn handle_openai_request<CW, RMS, SM>(
@@ -150,6 +163,7 @@ async fn handle_openai_request<CW, RMS, SM>(
     request_id: llamaforge_core::types::RequestId,
     req: llamaforge_core::types::ChatCompletionRequest,
     stream: bool,
+    shape: ResponseShape,
 ) -> Result<axum::response::Response, ApiError>
 where
     CW: ConfigWriter + Send + Sync + 'static,
@@ -178,7 +192,11 @@ where
     let mut response_stream =
         state.inference_engine.chat_completion(req).await.map_err(ApiError::from)?;
 
-    let req_id_str = format!("chatcmpl-{}", request_id.as_uuid());
+    // Legacy completions use the `cmpl-` id prefix; chat uses `chatcmpl-`.
+    let req_id_str = match shape {
+        ResponseShape::Chat => format!("chatcmpl-{}", request_id.as_uuid()),
+        ResponseShape::Text => format!("cmpl-{}", request_id.as_uuid()),
+    };
     let created_at = chrono::Utc::now().timestamp();
 
     if stream {
@@ -214,7 +232,11 @@ where
                     }
                     Ok(None) => break,
                     Ok(Some(Ok(chunk))) => {
-                        for data in format_openai_chunk(&req_id_str_for_stream, &model_echo, created_at, &chunk) {
+                        let events = match shape {
+                            ResponseShape::Chat => format_openai_chunk(&req_id_str_for_stream, &model_echo, created_at, &chunk),
+                            ResponseShape::Text => format_openai_text_chunk(&req_id_str_for_stream, &model_echo, created_at, &chunk),
+                        };
+                        for data in events {
                             yield Ok(Event::default().data(data));
                         }
                     }
@@ -320,29 +342,46 @@ where
         }
         let finish_reason = finish_reason.unwrap_or_else(|| "stop".to_string());
 
-        Ok(axum::Json(serde_json::json!({
-            "id": req_id_str,
-            "object": "chat.completion",
-            "created": created_at,
-            "model": model_echo,
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                },
-                "finish_reason": finish_reason,
-            }],
-            // `prompt_tokens` is the upstream `tokens_evaluated`
-            // captured on the terminal stop chunk (#134). 0 only when
-            // the upstream didn't surface a value.
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens.saturating_add(completion_tokens),
-            }
-        }))
-        .into_response())
+        // `prompt_tokens` is the upstream `tokens_evaluated` captured on the
+        // terminal stop chunk (#134); 0 only when the upstream didn't surface
+        // a value. The usage block is identical across both shapes.
+        let usage = serde_json::json!({
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens.saturating_add(completion_tokens),
+        });
+
+        let body = match shape {
+            ResponseShape::Chat => serde_json::json!({
+                "id": req_id_str,
+                "object": "chat.completion",
+                "created": created_at,
+                "model": model_echo,
+                "choices": [{
+                    "index": 0,
+                    "message": { "role": "assistant", "content": content },
+                    "finish_reason": finish_reason,
+                }],
+                "usage": usage,
+            }),
+            // Legacy OpenAI text-completion shape (#135): `object`
+            // `text_completion` and `choices[].text`, no `message`.
+            ResponseShape::Text => serde_json::json!({
+                "id": req_id_str,
+                "object": "text_completion",
+                "created": created_at,
+                "model": model_echo,
+                "choices": [{
+                    "index": 0,
+                    "text": content,
+                    "finish_reason": finish_reason,
+                    "logprobs": serde_json::Value::Null,
+                }],
+                "usage": usage,
+            }),
+        };
+
+        Ok(axum::Json(body).into_response())
     }
 }
 
@@ -393,7 +432,7 @@ where
         tool_choice: None,
     };
 
-    handle_openai_request(state, request_id, chat_req, req_json.stream).await
+    handle_openai_request(state, request_id, chat_req, req_json.stream, ResponseShape::Text).await
 }
 
 pub(crate) async fn anthropic_messages_handler<CW, RMS, SM>(
@@ -1242,6 +1281,53 @@ mod tests {
         assert_eq!(json["choices"][0]["message"]["content"].as_str(), Some(""));
         assert_eq!(json["choices"][0]["finish_reason"].as_str(), Some("stop"));
         assert_eq!(json["usage"]["completion_tokens"].as_u64(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_completions_returns_legacy_text_completion_shape() {
+        // #135: /v1/completions must emit the legacy `text_completion`
+        // shape — `object: "text_completion"`, `choices[].text` (no
+        // `message`), and a `cmpl-` id prefix — not the chat shape.
+        let chunks = vec![
+            Ok(ChatCompletionChunk::Token("hello world".to_string())),
+            Ok(ChatCompletionChunk::Stop {
+                finish_reason: "stop".to_string(),
+                output_tokens: 2,
+                prompt_tokens: 3,
+            }),
+        ];
+        let engine = MockEngine { chunks: std::sync::Mutex::new(chunks), sleep_ms: 0 };
+        let app = build_test_router(engine);
+
+        let body = serde_json::json!({
+            "model": "gemma",
+            "prompt": "once upon a time",
+            "max_tokens": 16,
+            "stream": false
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/completions")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(json["object"].as_str(), Some("text_completion"));
+        assert_eq!(json["choices"][0]["text"].as_str(), Some("hello world"));
+        assert_eq!(json["choices"][0]["finish_reason"].as_str(), Some("stop"));
+        // No chat-shaped `message` object on the legacy endpoint.
+        assert!(json["choices"][0]["message"].is_null(), "legacy shape must not carry `message`");
+        // Legacy id prefix is `cmpl-`, not `chatcmpl-`.
+        let id = json["id"].as_str().unwrap_or_default();
+        assert!(id.starts_with("cmpl-"), "id should be cmpl-*, got {id}");
+        assert!(!id.starts_with("chatcmpl-"), "id must not be chat-shaped, got {id}");
+        assert_eq!(json["usage"]["completion_tokens"].as_u64(), Some(2));
+        assert_eq!(json["usage"]["prompt_tokens"].as_u64(), Some(3));
     }
 
     #[tokio::test]
